@@ -1,0 +1,16 @@
+{
+  "name": "codexpulse-workspace",
+  "private": true,
+  "packageManager": "pnpm@11.19.0",
+  "scripts": {
+    "dev": "pnpm --filter @codexpulse/desktop tauri dev",
+    "build": "pnpm --filter @codexpulse/desktop tauri build",
+    "check": "pnpm --filter @codexpulse/desktop check",
+    "test:core": "cargo test -p pulse-core",
+    "build:ui": "pnpm --filter @codexpulse/desktop build"
+  },
+  "devDependencies": {
+    "prettier": "3.9.9",
+    "prettier-plugin-svelte": "4.1.1"
+  }
+}

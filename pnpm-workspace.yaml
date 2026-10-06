@@ -1,0 +1,4 @@
+packages:
+  - apps/*
+minimumReleaseAgeExclude:
+  - vite@8.3.3

@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "pulse-window",
+  "description": "Local window controls only; data is accessed through narrow Rust commands.",
+  "windows": ["pulse"],
+  "permissions": ["core:default", "core:window:allow-start-dragging"]
+}
