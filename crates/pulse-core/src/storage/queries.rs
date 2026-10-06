@@ -58,6 +58,14 @@ impl Store {
         self.connection.execute("INSERT INTO settings(key,json) VALUES(?1,?2) ON CONFLICT(key) DO UPDATE SET json=excluded.json",params![key,serde_json::to_string(value)?])?;
         Ok(())
     }
+    pub fn set_settings(&mut self, values: &[(&str, serde_json::Value)]) -> Result<(), StoreError> {
+        let tx = self.connection.transaction()?;
+        for (key, value) in values {
+            tx.execute("INSERT INTO settings(key,json) VALUES(?1,?2) ON CONFLICT(key) DO UPDATE SET json=excluded.json",params![key,serde_json::to_string(value)?])?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
     pub fn summary(&self, today: NaiveDate, timezone: Tz) -> Result<UsageSummary, StoreError> {
         let from = today
             .checked_sub_days(Days::new(29))

@@ -7,6 +7,11 @@ export interface Settings {
   windows_enabled: boolean;
   wsl_enabled: boolean;
   windows_home: string | null;
+  windows_sources: { id: string; label: string; home: string; enabled: boolean }[];
+  wsl_sources: { id: string; distro: string; user: string; home: string; enabled: boolean }[];
+  wsl_auto_detect: boolean;
+  hide_titles: boolean;
+  hide_projects: boolean;
   timezone: string;
   compact_position: [number, number] | null;
   compact_anchor: {

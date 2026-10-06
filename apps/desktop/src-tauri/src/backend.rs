@@ -9,7 +9,7 @@ use pulse_core::{
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, HashSet, VecDeque},
-    path::{Path, PathBuf},
+    path::PathBuf,
     sync::{
         Arc, Mutex, RwLock,
         atomic::{AtomicBool, Ordering},
@@ -31,6 +31,11 @@ pub struct Settings {
     pub windows_enabled: bool,
     pub wsl_enabled: bool,
     pub windows_home: Option<String>,
+    pub windows_sources: Vec<crate::source_config::WindowsSource>,
+    pub wsl_sources: Vec<crate::source_config::WslSource>,
+    pub wsl_auto_detect: bool,
+    pub hide_titles: bool,
+    pub hide_projects: bool,
     pub timezone: String,
     pub compact_position: Option<(i32, i32)>,
     pub compact_anchor: Option<crate::geometry::Anchor>,
@@ -46,6 +51,11 @@ impl Default for Settings {
             windows_enabled: true,
             wsl_enabled: true,
             windows_home: None,
+            windows_sources: Vec::new(),
+            wsl_sources: Vec::new(),
+            wsl_auto_detect: true,
+            hide_titles: false,
+            hide_projects: false,
             timezone: iana_time_zone::get_timezone().unwrap_or_else(|_| "UTC".into()),
             compact_position: None,
             compact_anchor: None,
@@ -69,11 +79,19 @@ impl Settings {
         if self
             .windows_home
             .as_ref()
-            .is_some_and(|p| !Path::new(p).is_absolute())
+            .is_some_and(|p| !crate::source_config::valid_windows_home(p))
         {
             return Err("Codex home 必须是绝对路径".into());
         }
-        Ok(())
+        crate::source_config::validate(&self.windows_sources, &self.wsl_sources)
+    }
+    fn redact(&self, meta: &mut pulse_core::domain::SessionMeta) {
+        if self.hide_titles {
+            meta.title = None;
+        }
+        if self.hide_projects {
+            meta.project = None;
+        }
     }
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -102,6 +120,15 @@ pub struct Snapshot {
 pub struct QuotaState {
     pub buckets: Vec<pulse_core::quota::QuotaBucket>,
     pub sources: BTreeMap<String, QuotaSource>,
+}
+impl Snapshot {
+    pub fn for_display(&self) -> Self {
+        let mut snapshot = self.clone();
+        for session in &mut snapshot.recent {
+            snapshot.settings.redact(&mut session.meta);
+        }
+        snapshot
+    }
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QuotaSource {
@@ -148,6 +175,29 @@ pub struct Backend {
 struct Source {
     health: SourceHealth,
     home: PathBuf,
+    wsl: Option<crate::source_config::WslTarget>,
+}
+impl Source {
+    fn available(&self) -> bool {
+        !matches!(
+            self.health.status.as_str(),
+            "wsl_stopped" | "wsl_unavailable"
+        )
+    }
+    fn owns_path(&self, path: &std::path::Path) -> bool {
+        path.extension().is_some_and(|e| e == "jsonl")
+            && (path == self.home.join("session_index.jsonl")
+                || path.starts_with(self.home.join("sessions"))
+                || path.starts_with(self.home.join("archived_sessions")))
+    }
+    fn scope_matches(
+        &self,
+        id: &str,
+        home: &std::path::Path,
+        wsl: Option<&crate::source_config::WslTarget>,
+    ) -> bool {
+        self.health.id == id && self.home == home && self.wsl.as_ref() == wsl
+    }
 }
 impl Backend {
     pub fn start(app: tauri::AppHandle, db: PathBuf) -> Result<Self, Box<dyn std::error::Error>> {
@@ -213,6 +263,8 @@ impl Backend {
                                 }
                                 results.push(crate::rpc::ResultSet {
                                     source_id: scope.source_id.clone(),
+                                    home: scope.home.clone(),
+                                    wsl: scope.wsl.clone(),
                                     result: crate::rpc::read(&scope, &worker_stop, &worker_child),
                                 });
                             }
@@ -251,6 +303,7 @@ impl Backend {
                 let mut queued = HashSet::<(String, PathBuf)>::new();
                 let mut last_repair = Instant::now() - Duration::from_secs(60);
                 let mut last_wsl = Instant::now() - Duration::from_secs(60);
+                let mut wsl_home_cache = BTreeMap::<String, PathBuf>::new();
                 let mut last_publish = Instant::now() - Duration::from_secs(1);
                 let mut dirty = true;
                 let mut quota = quota;
@@ -307,6 +360,12 @@ impl Backend {
                                 .and_then(|tz| {
                                     store
                                         .session_page(&request, tz)
+                                        .map(|mut page| {
+                                            for session in &mut page.items {
+                                                settings.redact(&mut session.meta);
+                                            }
+                                            page
+                                        })
                                         .map_err(|_| "无法读取 session 历史".into())
                                 });
                             let _ = reply.send(result);
@@ -315,6 +374,12 @@ impl Backend {
                             let _ = reply.send(
                                 store
                                     .session_detail(&request)
+                                    .map(|mut detail| {
+                                        if let Some(detail) = &mut detail {
+                                            settings.redact(&mut detail.session.meta);
+                                        }
+                                        detail
+                                    })
                                     .map_err(|_| "无法读取 session 详情".into()),
                             );
                         }
@@ -329,9 +394,13 @@ impl Backend {
                         Ok(Message::Quotas(results)) => {
                             quota_in_flight = false;
                             for response in results {
-                                let Some(source) =
-                                    sources.iter().find(|s| s.health.id == response.source_id)
-                                else {
+                                let Some(source) = sources.iter().find(|s| {
+                                    s.scope_matches(
+                                        &response.source_id,
+                                        &response.home,
+                                        response.wsl.as_ref(),
+                                    )
+                                }) else {
                                     continue;
                                 };
                                 let home = source.home.to_string_lossy().into_owned();
@@ -382,19 +451,26 @@ impl Backend {
                                 let _ = reply.send(Err("当前版本暂不支持切换统计时区".into()));
                                 continue;
                             }
-                            let result = store
-                                .set_setting("app", &next)
+                            let sources_changed = settings.windows_enabled != next.windows_enabled
+                                || settings.wsl_enabled != next.wsl_enabled
+                                || settings.windows_home != next.windows_home
+                                || settings.windows_sources != next.windows_sources
+                                || settings.wsl_sources != next.wsl_sources
+                                || settings.wsl_auto_detect != next.wsl_auto_detect;
+                            // Save the source switch and invalidation in the same transaction.
+                            let result = persist_settings(&mut store, &next, sources_changed)
                                 .map_err(|_| "无法保存设置".to_string());
                             if result.is_ok() {
-                                let sources_changed = settings.windows_enabled
-                                    != next.windows_enabled
-                                    || settings.wsl_enabled != next.wsl_enabled
-                                    || settings.windows_home != next.windows_home;
                                 settings = next;
                                 if let Ok(mut state) = shared.write() {
                                     state.settings = settings.clone();
                                 }
                                 if sources_changed {
+                                    wsl_home_cache.clear();
+                                    quota = QuotaState::default();
+                                    // Cancel queued reads for old roots before a changed source ID is reused.
+                                    queue.clear();
+                                    queued.clear();
                                     last_repair = Instant::now() - Duration::from_secs(60);
                                     last_wsl = Instant::now() - Duration::from_secs(60);
                                     last_quota = Instant::now() - Duration::from_secs(3600);
@@ -407,7 +483,7 @@ impl Backend {
                         Err(mpsc::RecvTimeoutError::Timeout) => {}
                     }
                     if last_repair.elapsed() >= Duration::from_secs(60) {
-                        sources.retain(|s| s.health.id != "windows" || settings.windows_enabled);
+                        let mut windows = Vec::new();
                         if settings.windows_enabled {
                             let home = settings
                                 .windows_home
@@ -420,24 +496,61 @@ impl Backend {
                                     )
                                     .join(".codex")
                                 });
-                            if let Some(old) = sources
-                                .iter()
-                                .position(|s| s.health.id == "windows" && s.home != home)
-                            {
-                                sources.remove(old);
-                            }
-                            if !sources.iter().any(|s| s.health.id == "windows") {
-                                if let Some(w) = watcher.as_mut() {
-                                    let _ = w.watch(&home, RecursiveMode::Recursive);
+                            windows.push((
+                                "windows".to_owned(),
+                                "Windows App / CLI".to_owned(),
+                                home,
+                            ));
+                            windows.extend(
+                                settings
+                                    .windows_sources
+                                    .iter()
+                                    .filter(|s| s.enabled)
+                                    .map(|s| {
+                                        (
+                                            format!("windows:{}", s.id),
+                                            s.label.clone(),
+                                            PathBuf::from(&s.home),
+                                        )
+                                    }),
+                            );
+                        }
+                        let removed = sources
+                            .iter()
+                            .filter(|s| {
+                                s.wsl.is_none()
+                                    && !windows
+                                        .iter()
+                                        .any(|(id, _, home)| id == &s.health.id && home == &s.home)
+                            })
+                            .map(|s| s.home.clone())
+                            .collect::<Vec<_>>();
+                        sources.retain(|s| {
+                            s.wsl.is_some()
+                                || windows
+                                    .iter()
+                                    .any(|(id, _, home)| id == &s.health.id && home == &s.home)
+                        });
+                        if let Some(w) = watcher.as_mut() {
+                            for home in removed {
+                                if !sources.iter().any(|s| s.wsl.is_none() && s.home == home) {
+                                    let _ = w.unwatch(&home);
                                 }
-                                sources.push(source(
-                                    "windows".into(),
-                                    "Windows App / CLI".into(),
-                                    home,
-                                ));
                             }
                         }
-                        for source in &mut sources {
+                        for (id, label, home) in windows {
+                            if let Some(existing) = sources.iter_mut().find(|s| s.health.id == id) {
+                                existing.health.label = label;
+                            } else {
+                                if let Some(w) = watcher.as_mut()
+                                    && !sources.iter().any(|s| s.wsl.is_none() && s.home == home)
+                                {
+                                    let _ = w.watch(&home, RecursiveMode::Recursive);
+                                }
+                                sources.push(source(id, label, home));
+                            }
+                        }
+                        for source in sources.iter_mut().filter(|s| s.wsl.is_none()) {
                             enqueue_source(source, &mut queue, &mut queued);
                         }
                         last_repair = Instant::now();
@@ -445,21 +558,41 @@ impl Backend {
                     }
                     if last_wsl.elapsed() >= Duration::from_secs(30) {
                         let discovered = if settings.wsl_enabled {
-                            crate::platform::running_wsl_sources()
+                            crate::platform::running_wsl_sources(
+                                settings.wsl_auto_detect,
+                                &settings.wsl_sources,
+                                &mut wsl_home_cache,
+                            )
                         } else {
                             Vec::new()
                         };
                         sources.retain(|s| {
-                            s.health.id == "windows"
-                                || discovered.iter().any(|(id, _, _)| id == &s.health.id)
+                            s.wsl.is_none()
+                                || discovered.iter().any(|item| {
+                                    s.scope_matches(&item.id, &item.home, Some(&item.target))
+                                })
                         });
-                        for (id, label, home) in discovered {
-                            if !sources.iter().any(|s| s.health.id == id) {
-                                sources.push(source(id, label, home));
+                        for item in discovered {
+                            if let Some(old) = sources.iter_mut().find(|s| s.health.id == item.id) {
+                                if !item.running {
+                                    old.health.status = item.status.into();
+                                } else if !old.available() {
+                                    old.health.status = "discovering".into();
+                                }
+                            } else {
+                                let mut next = source(item.id, item.label, item.home);
+                                next.wsl = Some(item.target);
+                                if !item.running {
+                                    next.health.status = item.status.into();
+                                }
+                                sources.push(next);
                             }
                         }
                         // WSL paths are polled only while the distro was reported running.
-                        for source in sources.iter_mut().filter(|s| s.health.id != "windows") {
+                        for source in sources
+                            .iter_mut()
+                            .filter(|s| s.wsl.is_some() && s.available())
+                        {
                             enqueue_source(source, &mut queue, &mut queued);
                         }
                         last_wsl = Instant::now();
@@ -467,11 +600,15 @@ impl Backend {
                     }
                     if let Ok(mut paths) = changed.lock() {
                         for path in paths.drain(..) {
-                            if path.extension().is_some_and(|e| e == "jsonl")
-                                && let Some(source) =
-                                    sources.iter().find(|s| path.starts_with(&s.home))
+                            for source in sources
+                                .iter()
+                                .filter(|s| s.wsl.is_none() && s.owns_path(&path))
                             {
-                                enqueue(&mut queue, &mut queued, (source.health.id.clone(), path));
+                                enqueue(
+                                    &mut queue,
+                                    &mut queued,
+                                    (source.health.id.clone(), path.clone()),
+                                );
                             }
                         }
                     }
@@ -490,6 +627,9 @@ impl Backend {
                         let scopes = sources
                             .iter()
                             .filter(|source| {
+                                if !source.available() {
+                                    return false;
+                                }
                                 let old = quota.sources.get(&source.health.id);
                                 old.is_none_or(|old| {
                                     old.home != source.health.path
@@ -509,6 +649,7 @@ impl Backend {
                             .map(|s| crate::rpc::Scope {
                                 source_id: s.health.id.clone(),
                                 home: s.home.clone(),
+                                wsl: s.wsl.clone(),
                             })
                             .collect::<Vec<_>>();
                         if !scopes.is_empty()
@@ -537,6 +678,9 @@ impl Backend {
                         let Some(source) = sources.iter_mut().find(|s| s.health.id == id) else {
                             continue;
                         };
+                        if !source.owns_path(&path) || !source.available() {
+                            continue;
+                        }
                         let result = if path
                             .file_name()
                             .is_some_and(|name| name == "session_index.jsonl")
@@ -583,9 +727,11 @@ impl Backend {
                                 .sources
                                 .iter()
                                 .filter(|(id, q)| {
-                                    sources
-                                        .iter()
-                                        .any(|s| &s.health.id == *id && s.health.path == q.home)
+                                    sources.iter().any(|s| {
+                                        &s.health.id == *id
+                                            && s.health.path == q.home
+                                            && s.available()
+                                    })
                                 })
                                 .map(|(id, q)| (id.clone(), q.clone()))
                                 .collect::<BTreeMap<_, _>>();
@@ -697,6 +843,21 @@ fn source(id: String, label: String, home: PathBuf) -> Source {
             issues: 0,
         },
         home,
+        wsl: None,
+    }
+}
+fn persist_settings(
+    store: &mut Store,
+    next: &Settings,
+    sources_changed: bool,
+) -> Result<(), pulse_core::storage::StoreError> {
+    if sources_changed {
+        store.set_settings(&[
+            ("quota", serde_json::to_value(QuotaState::default())?),
+            ("app", serde_json::to_value(next)?),
+        ])
+    } else {
+        store.set_setting("app", next)
     }
 }
 fn enqueue(
@@ -733,5 +894,126 @@ fn enqueue_source(
     }
     if source.health.files == 0 {
         source.health.status = "no_logs".into();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn legacy_settings_keep_defaults_and_source_drafts_roundtrip() {
+        let mut settings: Settings =
+            serde_json::from_str(r#"{"theme":"light","windows_home":null}"#).unwrap();
+        assert!(settings.wsl_auto_detect);
+        assert!(!settings.hide_titles);
+        settings.wsl_sources.push(crate::source_config::WslSource {
+            id: "manual".into(),
+            distro: "Ubuntu".into(),
+            user: "dev".into(),
+            home: "/home/dev/.codex".into(),
+            enabled: false,
+        });
+        assert!(settings.validate().is_ok());
+        let decoded: Settings =
+            serde_json::from_value(serde_json::to_value(&settings).unwrap()).unwrap();
+        assert_eq!(decoded.wsl_sources, settings.wsl_sources);
+    }
+    #[test]
+    fn hiding_names_removes_ipc_values_without_changing_statistics_or_internal_titles() {
+        for (titles, projects) in [(true, false), (false, true), (true, true), (false, false)] {
+            let mut snapshot = Snapshot::default();
+            snapshot.settings.hide_titles = titles;
+            snapshot.settings.hide_projects = projects;
+            snapshot.recent.push(RecentSession {
+                meta: pulse_core::domain::SessionMeta {
+                    id: "s".into(),
+                    title: Some("Secret title".into()),
+                    project: Some("Secret project".into()),
+                    ..Default::default()
+                },
+                sources: vec!["windows".into()],
+                models: vec!["model".into()],
+                total: 123,
+                events: 1,
+                unknown_totals: 0,
+                cost_nanousd: 789,
+                unpriced_tokens: 0,
+            });
+            let display = snapshot.for_display();
+            let json = serde_json::to_string(&display).unwrap();
+            assert_eq!(json.contains("Secret title"), !titles);
+            assert_eq!(json.contains("Secret project"), !projects);
+            assert_eq!(display.recent[0].total, 123);
+            assert_eq!(display.recent[0].cost_nanousd, 789);
+            assert_eq!(
+                snapshot.recent[0].meta.title.as_deref(),
+                Some("Secret title")
+            );
+            assert_eq!(
+                snapshot.recent[0].meta.project.as_deref(),
+                Some("Secret project")
+            );
+        }
+    }
+    #[test]
+    fn source_changes_reject_stale_roots_users_and_non_rollout_notifications() {
+        let home = PathBuf::from(r"C:\test\.codex");
+        let mut source = source("test".into(), "Test".into(), home.clone());
+        assert!(source.owns_path(&home.join("session_index.jsonl")));
+        assert!(source.owns_path(&home.join("sessions/2026/test.jsonl")));
+        assert!(!source.owns_path(&home.join("other.jsonl")));
+        assert!(!source.owns_path(&home.join("auth.json")));
+        assert!(!source.owns_path(&PathBuf::from(r"C:\old\sessions\test.jsonl")));
+        let target = crate::source_config::WslTarget {
+            distro: "Ubuntu".into(),
+            user: "dev".into(),
+        };
+        source.wsl = Some(target.clone());
+        assert!(source.scope_matches("test", &home, Some(&target)));
+        let mut changed = target;
+        changed.user = "other".into();
+        assert!(!source.scope_matches("test", &home, Some(&changed)));
+        for status in ["wsl_stopped", "wsl_unavailable"] {
+            source.health.status = status.into();
+            assert!(!source.available());
+        }
+        source.health.status = "connected".into();
+        assert!(source.available());
+    }
+    #[test]
+    fn appearance_changes_keep_quota_while_source_switches_invalidate_the_persisted_cache() {
+        let mut store = Store::in_memory().unwrap();
+        store
+            .set_setting("quota", &serde_json::json!({"test":"old account"}))
+            .unwrap();
+        let mut settings = Settings {
+            accent: "violet".into(),
+            ..Default::default()
+        };
+        persist_settings(&mut store, &settings, false).unwrap();
+        assert_eq!(
+            store
+                .setting::<serde_json::Value>("quota")
+                .unwrap()
+                .unwrap()["test"],
+            "old account"
+        );
+        settings.wsl_auto_detect = false;
+        persist_settings(&mut store, &settings, true).unwrap();
+        assert!(
+            store
+                .setting::<QuotaState>("quota")
+                .unwrap()
+                .unwrap()
+                .sources
+                .is_empty()
+        );
+        assert!(
+            !store
+                .setting::<Settings>("app")
+                .unwrap()
+                .unwrap()
+                .wsl_auto_detect
+        );
     }
 }

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { sessionTokens, sessionLabel } from '../lib/format';
+  import { sessionTokens, sessionLabel, sourceNames } from '../lib/format';
   import { sessionPage, sessionDetail, defaultSessionQuery, openSource } from '../lib/ipc';
   import type {
     SessionPage,
@@ -7,13 +7,24 @@
     SessionPageRequest,
     TokenMeasure,
     UsageBreakdown,
+    SourceHealth,
   } from '../lib/types';
   import Icon from './Icon.svelte';
   let {
     query = $bindable(),
     selected = $bindable(),
     revision,
-  }: { query: SessionPageRequest; selected: string | null; revision: string | null } = $props();
+    hideTitles,
+    hideProjects,
+    sources,
+  }: {
+    query: SessionPageRequest;
+    selected: string | null;
+    revision: string | null;
+    hideTitles: boolean;
+    hideProjects: boolean;
+    sources: SourceHealth[];
+  } = $props();
   let list = $state<SessionPage | null>(null),
     detail = $state<SessionDetail | null>(null);
   let loading = $state(false),
@@ -139,14 +150,16 @@
       onclick={() => (selected = s.meta.id)}
     >
       <span
-        ><span class="cp-truncate" title={sessionLabel(s.meta)}>{sessionLabel(s.meta)}</span><span
-          >{sessionTokens(s, number)} tokens</span
-        ></span
+        ><span class="cp-truncate" title={sessionLabel(s.meta, hideTitles)}
+          >{sessionLabel(s.meta, hideTitles)}</span
+        ><span>{sessionTokens(s, number)} tokens</span></span
       >
       <span
-        ><span class="cp-truncate" title={s.meta.project ?? undefined}
-          >{s.meta.project ? `项目：${s.meta.project} · ` : ''}{s.models.join(' · ') || '模型未知'} ·
-          {s.sources.join(' / ')}</span
+        ><span class="cp-truncate" title={hideProjects ? undefined : (s.meta.project ?? undefined)}
+          >{s.meta.project && !hideProjects ? `项目：${s.meta.project} · ` : ''}{s.models.join(
+            ' · ',
+          ) || '模型未知'} ·
+          {sourceNames(s.sources, sources)}</span
         ><span>{time(s.meta.last_activity)}</span></span
       >
     </button>{:else}{#if !loading && !listError}<p class="cp-note">
@@ -167,8 +180,8 @@
     {#if detail}
       {@const usage = detail.usage}
       <div class="cp-sectionhead">
-        <span class="cp-truncate" title={sessionLabel(detail.session.meta)}
-          >{sessionLabel(detail.session.meta)}</span
+        <span class="cp-truncate" title={sessionLabel(detail.session.meta, hideTitles)}
+          >{sessionLabel(detail.session.meta, hideTitles)}</span
         ><small
           >{detail.session.meta.status === 'active'
             ? '运行中'
@@ -177,7 +190,7 @@
               : '状态未知'}</small
         >
       </div>
-      {#if detail.session.meta.project}<p class="cp-note">
+      {#if detail.session.meta.project && !hideProjects}<p class="cp-note">
           项目：{detail.session.meta.project}
         </p>{/if}
       <div class="cp-metrics">

@@ -20,9 +20,25 @@ export function untilReset(window: QuotaWindow, now: number) {
       ? `${hours} 小时 ${minutes % 60} 分钟后刷新`
       : `${minutes} 分钟后刷新`;
 }
-import type { RecentSession, Snapshot } from './types';
-export function sessionLabel(meta: RecentSession['meta'] | undefined): string {
+import type { RecentSession, Snapshot, SourceHealth } from './types';
+export function sourceNames(ids: string[], sources: SourceHealth[]): string {
+  return ids
+    .map(
+      (id) =>
+        sources.find((s) => s.id === id)?.label ??
+        (id === 'windows'
+          ? 'Windows App / CLI'
+          : id.startsWith('windows:')
+            ? `Windows · ${id.slice(8, 16)}`
+            : id.startsWith('wsl:')
+              ? `WSL · ${id.split(':')[1]}`
+              : id),
+    )
+    .join(' / ');
+}
+export function sessionLabel(meta: RecentSession['meta'] | undefined, hideTitle = false): string {
   if (!meta) return '暂无 session';
+  if (hideTitle) return `会话 · ${meta.id.slice(0, 8)}`;
   return meta.title?.trim() || `未命名会话 · ${meta.id.slice(0, 8)}`;
 }
 export function sessionActivity(data: Pick<Snapshot, 'recent' | 'sources'>, now: number) {

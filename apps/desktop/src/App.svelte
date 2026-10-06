@@ -20,7 +20,14 @@
   import ResetStatus from './components/ResetStatus.svelte';
   import ChallengePanel from './components/ChallengePanel.svelte';
   import SessionsPane from './components/SessionsPane.svelte';
-  import { windowLabel, sessionTokens, sessionActivity, sessionLabel } from './lib/format';
+  import SourceSettings from './components/SourceSettings.svelte';
+  import {
+    windowLabel,
+    sessionTokens,
+    sessionActivity,
+    sessionLabel,
+    sourceNames,
+  } from './lib/format';
   import { openSource } from './lib/ipc';
   let data = $state(empty);
   let mode = $state<'compact' | 'details'>(native ? 'compact' : 'details');
@@ -32,7 +39,12 @@
   let saving = $state(false);
   let settingsDirty = $state(false);
   let now = $state(Date.now());
-  let settings = $state<Settings>({ ...empty.settings });
+  const copySettings = (value: Settings): Settings => ({
+    ...value,
+    windows_sources: value.windows_sources.map((s) => ({ ...s })),
+    wsl_sources: value.wsl_sources.map((s) => ({ ...s })),
+  });
+  let settings = $state<Settings>(copySettings(empty.settings));
   let path = $state('');
   let viewReady = $state(false);
   let glassSupported = $state(!native);
@@ -163,7 +175,7 @@
       data = await snapshot();
       now = Date.now();
       if (!saving && !settingsDirty) {
-        settings = { ...data.settings };
+        settings = copySettings(data.settings);
         path = settings.windows_home ?? '';
       }
     } catch {
@@ -392,7 +404,8 @@
             ><span class="cp-dot"></span>
             {working ? '当前工作 session' : '最近工作 session'}</span
           ><span class="cp-label cp-truncate"
-            >{current?.sources.join(' / ')} · {current?.models.join(' / ') || '模型未知'}</span
+            >{sourceNames(current?.sources ?? [], data.sources)} · {current?.models.join(' / ') ||
+              '模型未知'}</span
           >
         </div>
         <button
@@ -402,11 +415,14 @@
             sessionQuery = defaultSessionQuery();
             void goPage('sessions');
           }}
-          ><span class="cp-truncate" title={sessionLabel(current?.meta)}
-            >{sessionLabel(current?.meta)}</span
+          ><span class="cp-truncate" title={sessionLabel(current?.meta, data.settings.hide_titles)}
+            >{sessionLabel(current?.meta, data.settings.hide_titles)}</span
           ><Icon name="arrow" /></button
         >
-        {#if current?.meta.project}<p class="cp-note cp-truncate" title={current.meta.project}>
+        {#if current?.meta.project && !data.settings.hide_projects}<p
+            class="cp-note cp-truncate"
+            title={current.meta.project}
+          >
             项目：{current.meta.project}
           </p>{/if}
         <div class="cp-metrics">
@@ -535,6 +551,9 @@
           bind:query={sessionQuery}
           bind:selected={selectedSession}
           revision={data.updated_at}
+          hideTitles={data.settings.hide_titles}
+          hideProjects={data.settings.hide_projects}
+          sources={data.sources}
         />
       {:else if page === 'news'}
         <div class="cp-sectionhead">
@@ -584,6 +603,19 @@
             ><span>毛玻璃效果<small class="cp-setting-hint">关闭后使用不透明背景</small></span
             ><input type="checkbox" role="switch" bind:checked={settings.glass} /></label
           >
+          <label class="cp-setting"
+            ><span
+              >隐藏会话标题<small class="cp-setting-hint">详情使用短 ID，悬停提示也隐藏名称</small
+              ></span
+            ><input type="checkbox" role="switch" bind:checked={settings.hide_titles} /></label
+          >
+          <label class="cp-setting"
+            ><span>隐藏项目名称</span><input
+              type="checkbox"
+              role="switch"
+              bind:checked={settings.hide_projects}
+            /></label
+          >
           {#if floatingSupported}<label class="cp-setting"
               ><span
                 >显示桌面浮窗<small class="cp-setting-hint">关闭后通过系统托盘查看详情</small></span
@@ -612,6 +644,7 @@
               placeholder="自动探测 CODEX_HOME 或 .codex"
             /></label
           >
+          <SourceSettings bind:settings changed={() => (settingsDirty = true)} />
           <p class="cp-note">统计时区：{settings.timezone} · 不保存对话正文，不上传本地用量。</p>
           <div class="cp-divider"></div>
           <fieldset class="accent-picker">
@@ -637,7 +670,7 @@
         >{#if settingsDirty}<button
             class="cp-textbutton"
             onclick={() => {
-              settings = { ...data.settings };
+              settings = copySettings(data.settings);
               path = data.settings.windows_home ?? '';
               settingsDirty = false;
             }}>撤销未保存的修改</button
@@ -653,7 +686,11 @@
                     ? '暂无日志'
                     : source.status === 'read_error'
                       ? '读取失败'
-                      : '探测中'}</small
+                      : source.status === 'wsl_stopped'
+                        ? '发行版已停止'
+                        : source.status === 'wsl_unavailable'
+                          ? '无法确认运行状态'
+                          : '探测中'}</small
               >
             </div>
             <p class="cp-note">

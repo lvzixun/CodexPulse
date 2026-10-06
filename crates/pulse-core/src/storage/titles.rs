@@ -44,7 +44,7 @@ impl Store {
         let mut changed = 0;
         for title in titles {
             let name = (!title.thread_name.is_empty()).then_some(title.thread_name.as_str());
-            // Newer titles win across mirrors; Windows owns conflicting equal timestamps.
+            // Newer titles win across mirrors; stable source ordering breaks equal timestamps.
             changed += tx.execute(
                 "INSERT INTO session_titles VALUES(?1,?2,?3,?4)
                  ON CONFLICT(session_id) DO UPDATE SET title=excluded.title,
@@ -52,7 +52,7 @@ impl Store {
                  WHERE excluded.updated_at>session_titles.updated_at OR
                    (excluded.updated_at=session_titles.updated_at AND
                      ((excluded.source_id=session_titles.source_id AND excluded.title IS NOT session_titles.title)
-                       OR (excluded.source_id='windows' AND session_titles.source_id!='windows')))",
+                       OR excluded.source_id<session_titles.source_id))",
                 params![title.id,name,title.updated_at,cursor.source_id],
             )?;
         }

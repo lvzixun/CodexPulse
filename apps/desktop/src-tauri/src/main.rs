@@ -6,6 +6,7 @@ mod material;
 mod news;
 mod platform;
 mod rpc;
+mod source_config;
 
 use backend::{Backend, Settings, Snapshot};
 use tauri::{Manager, State};
@@ -36,7 +37,7 @@ fn get_snapshot(state: State<'_, Backend>) -> Result<Snapshot, String> {
     state
         .snapshot
         .read()
-        .map(|s| s.clone())
+        .map(|s| s.for_display())
         .map_err(|_| "snapshot unavailable".into())
 }
 #[tauri::command]

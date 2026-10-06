@@ -504,46 +504,106 @@ fn command_output(mut cmd: Command) -> Option<String> {
         Some(String::from_utf8_lossy(&output.stdout).into_owned())
     }
 }
-pub fn running_wsl_sources() -> Vec<(String, String, PathBuf)> {
+pub struct WslDiscovery {
+    pub id: String,
+    pub label: String,
+    pub home: PathBuf,
+    pub target: crate::source_config::WslTarget,
+    pub running: bool,
+    pub status: &'static str,
+}
+pub fn running_wsl_sources(
+    auto: bool,
+    configured: &[crate::source_config::WslSource],
+    cache: &mut std::collections::BTreeMap<String, PathBuf>,
+) -> Vec<WslDiscovery> {
     #[cfg(not(windows))]
     {
+        let _ = (auto, configured, cache);
         return Vec::new();
     }
     #[cfg(windows)]
     {
         let mut list = Command::new("wsl.exe");
         list.args(["--list", "--running", "--quiet"]);
-        let Some(list) = command_output(list) else {
-            return Vec::new();
-        };
-        list.lines()
+        let list = command_output(list);
+        let names = list
+            .as_deref()
+            .unwrap_or_default()
+            .lines()
             .map(str::trim)
             .filter(|name| !name.is_empty() && !name.contains(['\\', '/']))
-            .filter_map(|name| {
-                let mut home = Command::new("wsl.exe");
-                home.args([
-                    "-d",
-                    name,
-                    "--exec",
-                    "sh",
-                    "-c",
-                    "printf '%s' \"${CODEX_HOME:-$HOME/.codex}\"",
-                ]);
-                let home = command_output(home)?;
-                let home = home.trim();
-                if !home.starts_with('/') || home.contains(['\r', '\n']) {
-                    return None;
-                }
-                Some((
-                    format!("wsl:{name}"),
-                    format!("WSL · {name}"),
-                    PathBuf::from(format!(
-                        "\\\\wsl.localhost\\{name}{}",
-                        home.replace('/', "\\")
-                    )),
-                ))
+            .collect::<Vec<_>>();
+        let mut sources = configured
+            .iter()
+            .filter(|s| s.enabled)
+            .map(|s| WslDiscovery {
+                id: format!("wsl:{}:{}", s.distro, s.id),
+                label: format!(
+                    "WSL · {}{}",
+                    s.distro,
+                    if s.user.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" · {}", s.user)
+                    }
+                ),
+                home: s.path(),
+                target: s.target(),
+                running: names.contains(&s.distro.as_str()),
+                status: if list.is_none() {
+                    "wsl_unavailable"
+                } else {
+                    "wsl_stopped"
+                },
             })
-            .collect()
+            .collect::<Vec<_>>();
+        if !auto {
+            return sources;
+        }
+        sources.extend(names.into_iter().take(8).filter_map(|name| {
+            if let Some(home) = cache.get(name) {
+                return Some(WslDiscovery {
+                    id: format!("wsl:{name}"),
+                    label: format!("WSL · {name}"),
+                    home: home.clone(),
+                    target: crate::source_config::WslTarget {
+                        distro: name.into(),
+                        user: String::new(),
+                    },
+                    running: true,
+                    status: "discovering",
+                });
+            }
+            let mut home = Command::new("wsl.exe");
+            home.args([
+                "-d",
+                name,
+                "--exec",
+                "sh",
+                "-c",
+                "printf '%s' \"${CODEX_HOME:-$HOME/.codex}\"",
+            ]);
+            let home = command_output(home)?;
+            let home = home.trim();
+            if !crate::source_config::valid_linux_home(home) {
+                return None;
+            }
+            let home = crate::source_config::unc_home(name, home);
+            cache.insert(name.into(), home.clone());
+            Some(WslDiscovery {
+                id: format!("wsl:{name}"),
+                label: format!("WSL · {name}"),
+                home,
+                target: crate::source_config::WslTarget {
+                    distro: name.into(),
+                    user: String::new(),
+                },
+                running: true,
+                status: "discovering",
+            })
+        }));
+        sources
     }
 }
 

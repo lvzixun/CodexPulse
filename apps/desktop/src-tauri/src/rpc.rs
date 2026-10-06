@@ -15,10 +15,71 @@ use std::{
 };
 
 pub type ActiveChild = Arc<Mutex<Option<Child>>>;
+#[cfg(test)]
+mod command_tests {
+    use super::*;
+    #[test]
+    fn configured_wsl_user_and_home_are_separate_arguments_in_the_expected_distro() {
+        let target = crate::source_config::WslTarget {
+            distro: "Ubuntu".into(),
+            user: "dev".into(),
+        };
+        let cmd = wsl_command(
+            &target,
+            Path::new(r"\\wsl.localhost\Ubuntu\home\dev\codex data"),
+        )
+        .unwrap();
+        let args = cmd
+            .get_args()
+            .map(|s| s.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            args,
+            [
+                "-d",
+                "Ubuntu",
+                "--user",
+                "dev",
+                "--exec",
+                "env",
+                "CODEX_HOME=/home/dev/codex data",
+                "codex",
+                "app-server"
+            ]
+        );
+        assert!(wsl_command(&target, Path::new(r"\\wsl.localhost\UbuntuOther\home\dev")).is_err());
+        assert!(wsl_command(&target, Path::new(r"\\wsl.localhost\Ubuntu\..\Other\home")).is_err());
+    }
+}
+fn wsl_command(target: &crate::source_config::WslTarget, path: &Path) -> Result<Command, String> {
+    let prefix = format!("\\\\wsl.localhost\\{}", target.distro);
+    let home = path
+        .to_string_lossy()
+        .strip_prefix(&prefix)
+        .ok_or("invalid_wsl_home")?
+        .replace('\\', "/");
+    if !crate::source_config::valid_linux_home(&home) {
+        return Err("invalid_wsl_home".into());
+    }
+    let mut cmd = Command::new("wsl.exe");
+    cmd.args(["-d", &target.distro]);
+    if !target.user.is_empty() {
+        cmd.args(["--user", &target.user]);
+    }
+    cmd.args([
+        "--exec",
+        "env",
+        &format!("CODEX_HOME={home}"),
+        "codex",
+        "app-server",
+    ]);
+    Ok(cmd)
+}
 #[derive(Clone)]
 pub struct Scope {
     pub source_id: String,
     pub home: PathBuf,
+    pub wsl: Option<crate::source_config::WslTarget>,
 }
 pub struct Request {
     pub scopes: Vec<Scope>,
@@ -26,33 +87,20 @@ pub struct Request {
 pub struct ResultSet {
     pub source_id: String,
     pub result: Result<Vec<QuotaBucket>, String>,
+    pub home: PathBuf,
+    pub wsl: Option<crate::source_config::WslTarget>,
 }
 pub fn read(
     scope: &Scope,
     stopping: &AtomicBool,
     active: &ActiveChild,
 ) -> Result<Vec<QuotaBucket>, String> {
-    let mut cmd = if let Some(distro) = scope.source_id.strip_prefix("wsl:") {
+    let mut cmd = if let Some(target) = &scope.wsl {
+        let distro = &target.distro;
         if !crate::platform::wsl_is_running(distro) {
             return Err("wsl_stopped".into());
         }
-        let prefix = format!("\\\\wsl.localhost\\{distro}");
-        let path = scope.home.to_string_lossy();
-        let home = path
-            .strip_prefix(&prefix)
-            .ok_or("invalid_wsl_home")?
-            .replace('\\', "/");
-        let mut cmd = Command::new("wsl.exe");
-        cmd.args([
-            "-d",
-            distro,
-            "--exec",
-            "env",
-            &format!("CODEX_HOME={home}"),
-            "codex",
-            "app-server",
-        ]);
-        cmd
+        wsl_command(target, &scope.home)?
     } else {
         let mut cmd = Command::new(codex_executable().ok_or("codex_not_found")?);
         cmd.arg("app-server").env("CODEX_HOME", &scope.home);
