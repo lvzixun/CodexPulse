@@ -9,7 +9,7 @@ fn row(kind: &str, payload: Value, ts: &str) -> Vec<u8> {
     serde_json::to_vec(&json!({"type":kind,"payload":payload,"timestamp":ts})).unwrap()
 }
 fn counts(input: u64, cached: u64, output: u64) -> Value {
-    json!({"input_tokens":input,"cached_input_tokens":cached,"output_tokens":output,"total_tokens":input+output})
+    json!({"input_tokens":input,"cached_input_tokens":cached,"cache_write_input_tokens":0,"output_tokens":output,"total_tokens":input+output})
 }
 fn state(id: &str) -> ParserState {
     let mut p = ParserState::default();
@@ -88,6 +88,38 @@ fn cumulative_counts_and_model_switches_are_incremental() {
     .unwrap();
     assert_eq!(third.tokens.input, Some(100));
     assert_eq!(third.model, "a");
+}
+#[test]
+fn request_size_is_only_known_for_matching_last_usage() {
+    let mut p = state("aggregate");
+    let aggregate = usage(
+        &mut p,
+        counts(300, 120, 30),
+        counts(100, 40, 10),
+        "2026-10-06T00:01:00Z",
+    )
+    .unwrap();
+    assert_eq!(aggregate.request_input, None);
+    let request = usage(
+        &mut p,
+        counts(400, 160, 40),
+        counts(100, 40, 10),
+        "2026-10-06T00:02:00Z",
+    )
+    .unwrap();
+    assert_eq!(request.request_input, Some(100));
+}
+#[test]
+fn owned_thread_settings_survive_turn_context_and_inherited_settings_are_ignored() {
+    let mut p = state("owned");
+    p.parse(&row("event_msg", json!({"type":"thread_settings_applied","thread_id":"owned","thread_settings":{"model":"a","model_provider_id":"openai","service_tier":"priority"}}), "2026-10-06T00:00:00Z"));
+    model(&mut p, "a");
+    assert_eq!(p.service_tier.as_deref(), Some("priority"));
+    p.parse(&row("event_msg", json!({"type":"thread_settings_applied","thread_id":"parent","thread_settings":{"model":"other","model_provider_id":"gateway","service_tier":"default"}}), "2026-10-06T00:00:00Z"));
+    assert_eq!(p.model.as_deref(), Some("a"));
+    assert_eq!(p.service_tier.as_deref(), Some("priority"));
+    model(&mut p, "b");
+    assert_eq!(p.service_tier, None);
 }
 #[test]
 fn mirror_and_archive_replays_deduplicate_and_sessions_are_distinct() {
@@ -262,8 +294,10 @@ fn pricing_uses_fixed_point_cached_subset_and_tier() {
             effective_from: "2026-01-01T00:00:00Z".into(),
             effective_to: None,
             max_input: None,
+            min_input: None,
             input_microusd: 2_000_000,
             cached_microusd: 200_000,
+            cache_write_microusd: Some(2_500_000),
             output_microusd: 10_000_000,
             source_url: "https://example.invalid/test-only".into(),
             checked_at: "2026-10-06".into(),
@@ -277,6 +311,7 @@ fn pricing_uses_fixed_point_cached_subset_and_tier() {
         "2026-10-01T00:01:00Z",
     )
     .unwrap();
+    fact.service_tier = Some("standard".into());
     book.apply(&mut fact);
     assert_eq!(fact.cost_nanousd, Some(192_000_000));
     fact.service_tier = Some("priority".into());

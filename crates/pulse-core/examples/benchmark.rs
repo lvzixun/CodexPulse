@@ -67,6 +67,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     ..Default::default()
                 },
                 service_tier: None,
+                request_input: None,
                 quality: "synthetic".into(),
                 price_version: None,
                 cost_nanousd: None,

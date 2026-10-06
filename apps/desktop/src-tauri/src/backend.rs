@@ -229,7 +229,7 @@ impl Backend {
                 let mut news_in_flight = false;
                 let mut quota_in_flight = false;
                 let mut last_quota = Instant::now() - Duration::from_secs(3600);
-                let prices = PriceBook::default();
+                let prices = PriceBook::bundled().unwrap_or_default();
                 loop {
                     let anchor = collector_anchor.lock().ok().and_then(|mut pending| {
                         if pending

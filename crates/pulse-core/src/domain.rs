@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, thiserror::Error)]
 pub enum DataError {
-    #[error("cached input exceeds input tokens")]
+    #[error("cached or cache-write input exceeds input tokens")]
     InvalidCache,
     #[error("token count exceeds supported integer range")]
     Overflow,
@@ -42,6 +42,16 @@ impl TokenCounts {
             && cached > input
         {
             return Err(DataError::InvalidCache);
+        }
+        if let Some(input) = self.input {
+            if self.cache_write.is_some_and(|writes| writes > input) {
+                return Err(DataError::InvalidCache);
+            }
+            if let (Some(cached), Some(writes)) = (self.cached, self.cache_write)
+                && cached.checked_add(writes).is_none_or(|sum| sum > input)
+            {
+                return Err(DataError::InvalidCache);
+            }
         }
         if let (Some(input), Some(output)) = (self.input, self.output) {
             let total = input.checked_add(output).ok_or(DataError::Overflow)?;
@@ -108,6 +118,9 @@ pub struct UsageFact {
     pub timestamp: String,
     pub tokens: TokenCounts,
     pub service_tier: Option<String>,
+    /// Known only when this fact describes one complete request, never a cumulative snapshot.
+    #[serde(default)]
+    pub request_input: Option<u64>,
     pub quality: String,
     pub price_version: Option<String>,
     pub cost_nanousd: Option<i64>,

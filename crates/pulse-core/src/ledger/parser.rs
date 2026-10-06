@@ -105,18 +105,40 @@ impl ParserState {
             };
         }
         if kind == "turn_context" {
+            if self.model != text(payload, "model") {
+                self.service_tier = None;
+            }
             self.model = text(payload, "model");
             if let Some(provider) = text(payload, "model_provider") {
                 self.provider = Some(provider);
             }
             self.turn_id = text(payload, "turn_id");
-            self.service_tier = text(payload, "service_tier");
+            if payload.get("service_tier").is_some() {
+                self.service_tier = text(payload, "service_tier");
+            }
             return ParseOutput::default();
         }
         if kind != "event_msg" {
             return ParseOutput::default();
         }
         match payload["type"].as_str().unwrap_or_default() {
+            "thread_settings_applied" => {
+                // Copied history retains its logical owner; it must not change this thread's settings.
+                if text(payload, "thread_id").is_some_and(|owner| {
+                    self.session
+                        .as_ref()
+                        .is_none_or(|session| session.id != owner)
+                }) {
+                    return ParseOutput::default();
+                }
+                let settings = &payload["thread_settings"];
+                self.model = text(settings, "model");
+                if let Some(provider) = text(settings, "model_provider_id") {
+                    self.provider = Some(provider);
+                }
+                self.service_tier = text(settings, "service_tier");
+                ParseOutput::default()
+            }
             "task_started" | "turn_started" => {
                 self.turn_id = text(payload, "turn_id");
                 self.set_activity("active", timestamp.as_deref());
@@ -276,6 +298,10 @@ impl ParserState {
         let id = format!("{:x}", Sha256::digest(fingerprint));
         let model = self.model.clone().unwrap_or_else(|| "unknown".into());
         let provider = self.provider.clone().unwrap_or_else(|| "unknown".into());
+        let request_input = last
+            .as_ref()
+            .filter(|request| request.validate().is_ok() && *request == &tokens)
+            .and_then(|request| request.input);
         if let Some(session) = self.session.as_mut() {
             session.last_activity = ts.clone();
         }
@@ -289,6 +315,7 @@ impl ParserState {
                 timestamp: ts,
                 tokens,
                 service_tier: self.service_tier.clone(),
+                request_input,
                 quality: quality.into(),
                 price_version: None,
                 cost_nanousd: None,

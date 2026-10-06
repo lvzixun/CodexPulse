@@ -7,4 +7,4 @@ pub mod pricing;
 pub mod quota;
 pub mod storage;
 
-pub const PARSER_VERSION: u32 = 2;
+pub const PARSER_VERSION: u32 = 3;
