@@ -135,11 +135,11 @@ impl Store {
         // across pages while ingestion proceeds. One grouped query counts sessions;
         // session counts use this single query; reference reads are bounded by page size.
         // No JSON decoding or unbounded IPC arrays are involved.
-        let sql = format!("WITH grouped AS (
+        let sql = format!("WITH subagent_sessions AS MATERIALIZED (SELECT id FROM sessions WHERE json_extract(metadata,'$.source_kind')='subagent'), grouped AS (
             SELECT model,COALESCE(SUM(total),0) AS total,COALESCE(SUM(input),0) AS input,
                 COALESCE(SUM(cached),0) AS cached,COALESCE(SUM(output),0) AS output,
                 COALESCE(SUM(cost_nanousd),0) AS cost,COALESCE(SUM(CASE WHEN cost_nanousd IS NULL THEN total ELSE 0 END),0) AS unpriced,
-                SUM(CASE WHEN input IS NULL OR output IS NULL THEN 1 ELSE 0 END) AS incomplete,COUNT(DISTINCT session_id) AS sessions,
+                SUM(CASE WHEN input IS NULL OR output IS NULL THEN 1 ELSE 0 END) AS incomplete,COUNT(DISTINCT CASE WHEN session_id NOT IN (SELECT id FROM subagent_sessions) THEN session_id END) AS sessions,
                 COUNT(*) AS events,COUNT(*)-COUNT(total) AS unknown_totals,COUNT(*)-COUNT(input) AS unknown_input,
                 COUNT(*)-COUNT(cached) AS unknown_cached,COUNT(*)-COUNT(output) AS unknown_output,COUNT(*)-COUNT(cost_nanousd) AS unpriced_events
             FROM usage_facts WHERE occurred_at>=?1 AND occurred_at<?2 AND rowid<=?3 GROUP BY model

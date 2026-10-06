@@ -1076,7 +1076,17 @@ impl Backend {
                         .map(|s| quota.sources.get(&s.health.id).map_or(0, |q| q.retry_at))
                         .min()
                         .unwrap_or(0);
-                    if quota_schedule.due(&settings.quota_refresh, now, 0) {
+                    // Re-query the current native window so tray-only startup,
+                    // hiding and WebView destruction/rebuilding use the same policy.
+                    let panel_visible = app
+                        .get_webview_window("pulse")
+                        .is_some_and(|w| w.is_visible().unwrap_or(false));
+                    if quota_schedule.due_for_account(
+                        &settings.quota_refresh,
+                        now,
+                        0,
+                        panel_visible,
+                    ) {
                         let scopes = sources
                             .iter()
                             .filter(|s| {

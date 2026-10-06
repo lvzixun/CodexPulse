@@ -148,7 +148,7 @@ impl Store {
         limit: u32,
     ) -> Result<Vec<RecentSession>, StoreError> {
         let (time, id) = before.unwrap_or(("9999", "~"));
-        let mut query=self.connection.prepare("SELECT id FROM sessions WHERE (last_activity,id)<(?1,?2) ORDER BY last_activity DESC,id DESC LIMIT ?3")?;
+        let mut query=self.connection.prepare("SELECT id FROM sessions WHERE (last_activity,id)<(?1,?2) AND COALESCE(json_extract(metadata,'$.source_kind'),'')<>'subagent' ORDER BY last_activity DESC,id DESC LIMIT ?3")?;
         let ids = query
             .query_map(params![time, id, limit.clamp(1, 100)], |r| {
                 r.get::<_, String>(0)

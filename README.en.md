@@ -43,6 +43,8 @@ This is an **ad-hoc signed preview without Developer ID signing or notarization*
 
 Local usage covers readable Codex logs; account lifetime totals come from the server and carry a separate scope label. The usage ledger stays on-device, and profile data stays in memory. File-based Codex credentials are used for authenticated requests, excluded from the database and diagnostics, and never overwritten by CodexPulse. Conversation bodies are not stored.
 
+Automatic account refresh runs once at startup, then on schedule while the panel is visible. Reopening refreshes only when the cache is due. Public reset updates and local log collection continue in the background. Subagents are excluded from session lists and counts; their tokens and costs remain in total usage.
+
 API-equivalent costs are reference-price estimates with explicit coverage, **not subscription charges**. `tok/s` is a sampled turn average including reasoning, tools, and waiting. Unavailable values display `—`.
 
 ## Development

@@ -33,6 +33,7 @@ pub struct Schedule {
     pub flight: Option<u64>,
     pub requested: bool,
     pub next: i64,
+    started: bool,
 }
 impl Schedule {
     pub fn new() -> Self {
@@ -41,6 +42,7 @@ impl Schedule {
             flight: None,
             requested: false,
             next: 0,
+            started: false,
         }
     }
     pub fn request(&mut self) {
@@ -58,8 +60,21 @@ impl Schedule {
             && now >= blocked_until
             && (self.requested || (config.mode == "auto" && now >= self.next))
     }
+    /// Only account automation is visibility-aware. The first dispatched flight
+    /// may run before a window exists; invalidation/rebuilding never renews that
+    /// allowance. Explicit requests retain the existing manual-mode semantics.
+    pub fn due_for_account(
+        &self,
+        config: &Config,
+        now: i64,
+        blocked_until: i64,
+        visible: bool,
+    ) -> bool {
+        (visible || !self.started || self.requested) && self.due(config, now, blocked_until)
+    }
     pub fn begin(&mut self) -> u64 {
         self.requested = false;
+        self.started = true;
         self.flight = Some(self.generation);
         self.generation
     }
@@ -143,5 +158,93 @@ mod tests {
             retry_after(Some("Wed, 21 Oct 2015 07:28:00 GMT"), 1445412470),
             10
         );
+    }
+    #[test]
+    fn account_startup_hidden_pause_and_cache_expiry_keep_news_independent() {
+        let config = Config {
+            interval_seconds: 30,
+            ..Config::default()
+        };
+        let mut account = Schedule::new();
+        let mut news = Schedule::new();
+        // Startup has no window, but both automatic groups dispatch once.
+        assert!(account.due_for_account(&config, 100, 0, false));
+        assert!(news.due(&config, 100, 0));
+        let account_flight = account.begin();
+        let news_flight = news.begin();
+        assert!(account.finish(account_flight, 130));
+        assert!(news.finish(news_flight, 130));
+        let mut news_refreshes = 1;
+        // More than two account intervals hidden: news retains its timer.
+        for now in 101..=200 {
+            assert!(!account.due_for_account(&config, now, 0, false));
+            if news.due(&config, now, 0) {
+                let flight = news.begin();
+                assert!(news.finish(flight, now + 30));
+                news_refreshes += 1;
+            }
+        }
+        assert_eq!(news_refreshes, 4);
+        assert!(account.due_for_account(&config, 200, 0, true));
+        let flight = account.begin();
+        // Repeated shows and manual clicks while in flight do not add requests.
+        account.request();
+        for visible in [false, true, false, true] {
+            assert!(!account.due_for_account(&config, 201, 0, visible));
+        }
+        // Hiding lets the accepted flight finish and retain its cache deadline.
+        assert!(account.finish(flight, 231));
+        for now in 202..231 {
+            assert!(!account.due_for_account(&config, now, 0, true));
+        }
+        assert!(account.due_for_account(&config, 231, 0, true));
+        assert!(!account.due_for_account(&config, 231, 0, false));
+    }
+
+    #[test]
+    fn account_manual_mode_does_not_gain_a_startup_or_visibility_timer() {
+        let config = Config {
+            mode: "manual".into(),
+            ..Config::default()
+        };
+        let mut account = Schedule::new();
+        for visible in [false, true] {
+            assert!(!account.due_for_account(&config, 100, 0, visible));
+        }
+        account.request();
+        account.request();
+        assert!(account.due_for_account(&config, 100, 0, false));
+        let flight = account.begin();
+        assert!(account.finish(flight, 400));
+        for visible in [true, false, true] {
+            assert!(!account.due_for_account(&config, 1000, 0, visible));
+        }
+    }
+
+    #[test]
+    fn account_show_hide_and_invalidation_preserve_backoff_and_startup_consumption() {
+        let config = Config::default();
+        let mut account = Schedule::new();
+        let flight = account.begin();
+        // A failed first flight still consumes the startup allowance.
+        assert!(account.finish(flight, 400));
+        for now in [200, 400, 500, 599] {
+            for visible in [false, true] {
+                assert!(!account.due_for_account(&config, now, 600, visible));
+            }
+        }
+        // Credential/config invalidation does not grant another hidden flight.
+        account.invalidate(0);
+        assert!(!account.due_for_account(&config, 600, 600, false));
+        assert!(account.due_for_account(&config, 600, 600, true));
+        let old = account.begin();
+        account.invalidate(0);
+        assert!(!account.due_for_account(&config, 700, 600, true));
+        assert!(!account.finish(old, 900));
+        assert!(!account.due_for_account(&config, 700, 600, false));
+        assert!(account.due_for_account(&config, 700, 600, true));
+        account.request();
+        assert!(!account.due_for_account(&config, 700, 800, false));
+        assert!(account.due_for_account(&config, 800, 800, false));
     }
 }

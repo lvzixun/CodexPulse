@@ -267,7 +267,7 @@ impl Store {
         let mut models = rows.collect::<Result<Vec<_>, _>>()?;
         for model in &mut models {
             // DISTINCT session count is derived from facts within this calendar range.
-            model.sessions=self.connection.query_row("SELECT COUNT(DISTINCT session_id) FROM usage_facts WHERE model=?1 AND occurred_at>=?2 AND occurred_at<?3",params![model.model,day_boundary(from_day,timezone)?,day_boundary_next(through_day,timezone)?],|r|unsigned(r,0))?;
+            model.sessions=self.connection.query_row("SELECT COUNT(DISTINCT session_id) FROM usage_facts WHERE model=?1 AND occurred_at>=?2 AND occurred_at<?3 AND session_id NOT IN (SELECT id FROM sessions WHERE json_extract(metadata,'$.source_kind')='subagent')",params![model.model,day_boundary(from_day,timezone)?,day_boundary_next(through_day,timezone)?],|r|unsigned(r,0))?;
         }
         Ok(models)
     }
@@ -277,7 +277,7 @@ impl Store {
         through_day: &str,
         timezone: Tz,
     ) -> Result<u64, StoreError> {
-        Ok(self.connection.query_row("SELECT COUNT(DISTINCT session_id) FROM usage_facts WHERE occurred_at>=?1 AND occurred_at<?2",params![day_boundary(from_day,timezone)?,day_boundary_next(through_day,timezone)?],|r|unsigned(r,0))?)
+        Ok(self.connection.query_row("SELECT COUNT(DISTINCT session_id) FROM usage_facts WHERE occurred_at>=?1 AND occurred_at<?2 AND session_id NOT IN (SELECT id FROM sessions WHERE json_extract(metadata,'$.source_kind')='subagent')",params![day_boundary(from_day,timezone)?,day_boundary_next(through_day,timezone)?],|r|unsigned(r,0))?)
     }
     pub fn fact_count(&self) -> Result<u64, StoreError> {
         Ok(self

@@ -178,6 +178,9 @@ impl Store {
         } else {
             " AND (?3 IS NULL) AND ?4<=?5"
         };
+        let scope = format!(
+            "{scope} AND COALESCE(json_extract(s.metadata,'$.source_kind'),'')<>'subagent'"
+        );
         let (op, order) = match request.direction {
             PageDirection::Older => ("<", "DESC"),
             PageDirection::Newer => (">", "ASC"),
@@ -345,6 +348,9 @@ impl Store {
         let Some(session) = self.session_by_id(&request.id)? else {
             return Ok(None);
         };
+        if session.meta.source_kind.as_deref() == Some("subagent") {
+            return Ok(None);
+        }
         let usage = self.connection.query_row(
             &format!("SELECT {BREAKDOWN} FROM usage_facts WHERE session_id=?1"),
             [&request.id],

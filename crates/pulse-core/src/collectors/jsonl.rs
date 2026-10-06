@@ -9,7 +9,7 @@ use chrono_tz::Tz;
 use std::{
     collections::BTreeMap,
     fs::{File, Metadata},
-    io::{BufRead, BufReader, Seek, SeekFrom},
+    io::{BufRead, BufReader, Read, Seek, SeekFrom},
     path::Path,
     time::{Duration, Instant, UNIX_EPOCH},
 };
@@ -110,10 +110,40 @@ fn read_inner(
             parser_version: PARSER_VERSION,
             state: ParserState::default(),
         });
+    let recover_source =
+        !titles_only && cursor.state.session.is_some() && !cursor.state.session_source_known;
+    let mut header_bytes = 0;
+    let recovered_session = if recover_source {
+        let mut header = Vec::new();
+        let mut reader = BufReader::new(File::open(path)?.take((MAX_RECORD_BYTES + 1) as u64));
+        header_bytes = reader.read_until(b'\n', &mut header)?;
+        cursor
+            .state
+            .recover_session_source(if header.len() <= MAX_RECORD_BYTES {
+                &header
+            } else {
+                &[]
+            })
+    } else {
+        None
+    };
     if !modified_ns.is_empty()
         && cursor.modified_ns == modified_ns
         && cursor.state.observed_file_len == Some(meta.len())
     {
+        if recover_source {
+            store.commit_batch(
+                &cursor,
+                &recovered_session.into_iter().collect::<Vec<_>>(),
+                &[],
+                &[],
+                timezone,
+            )?;
+            return Ok(ReadReport {
+                bytes_read: header_bytes,
+                ..Default::default()
+            });
+        }
         return Ok(ReadReport {
             unchanged: true,
             ..Default::default()
@@ -122,11 +152,17 @@ fn read_inner(
     let mut file = File::open(path)?;
     file.seek(SeekFrom::Start(cursor.offset))?;
     let mut reader = BufReader::with_capacity(64 * 1024, file);
-    let mut report = ReadReport::default();
+    let mut report = ReadReport {
+        bytes_read: header_bytes,
+        ..Default::default()
+    };
     let mut line = Vec::with_capacity(4096);
     let mut position = cursor.offset;
     let mut line_start = position;
     let mut sessions = BTreeMap::new();
+    if let Some(session) = recovered_session {
+        sessions.insert(session.id.clone(), session);
+    }
     let mut facts = Vec::new();
     let mut titles = Vec::new();
     let mut issues = Vec::new();

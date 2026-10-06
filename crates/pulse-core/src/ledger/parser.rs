@@ -12,6 +12,8 @@ pub struct ParserState {
     #[serde(default)]
     pub observed_file_len: Option<u64>,
     pub session: Option<SessionMeta>,
+    #[serde(default)]
+    pub session_source_known: bool,
     pub model: Option<String>,
     pub provider: Option<String>,
     pub turn_id: Option<String>,
@@ -42,6 +44,16 @@ fn text(v: &Value, key: &str) -> Option<String> {
         .filter(|s| !s.is_empty())
         .map(str::to_owned)
 }
+fn source_kind(payload: &Value) -> Option<String> {
+    if payload["source"]
+        .get("subagent")
+        .is_some_and(|v| !v.is_null())
+    {
+        Some("subagent".into())
+    } else {
+        text(payload, "source").or_else(|| text(payload, "originator"))
+    }
+}
 fn counters(value: &Value) -> Option<TokenCounts> {
     if !value.is_object() {
         return None;
@@ -61,6 +73,23 @@ fn counters(value: &Value) -> Option<TokenCounts> {
 }
 
 impl ParserState {
+    /// Upgrade old checkpoints from the bounded metadata header, without replaying
+    /// counters or resetting the current activity/output-rate state.
+    pub fn recover_session_source(&mut self, raw: &[u8]) -> Option<SessionMeta> {
+        self.session_source_known = true;
+        let record: Value = serde_json::from_slice(raw).ok()?;
+        if record["type"] != "session_meta" {
+            return None;
+        }
+        let payload = &record["payload"];
+        let id = text(payload, "id").or_else(|| text(payload, "session_id"))?;
+        let session = self.session.as_mut()?;
+        if session.id != id {
+            return None;
+        }
+        session.source_kind = source_kind(payload);
+        Some(session.clone())
+    }
     pub fn parse(&mut self, raw: &[u8]) -> ParseOutput {
         self.ordinal += 1;
         let record: Value = match serde_json::from_slice(raw) {
@@ -97,13 +126,14 @@ impl ParserState {
                 id,
                 title: text(payload, "name").or_else(|| text(payload, "title")),
                 project,
-                source_kind: text(payload, "source").or_else(|| text(payload, "originator")),
+                source_kind: source_kind(payload),
                 source_version: text(payload, "cli_version"),
                 parent_id: parent,
                 status: "unknown".into(),
                 last_activity: timestamp.clone().unwrap_or_default(),
                 output_rate: None,
             });
+            self.session_source_known = true;
             return ParseOutput {
                 session: self.session.clone(),
                 ..Default::default()
