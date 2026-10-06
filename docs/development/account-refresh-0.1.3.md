@@ -40,4 +40,5 @@ Resets 沿用 `Schedule::due` 和原独立退避 / 缓存期限；本地采集�
 
 - `CodexPulse_0.1.3_universal.dmg`：12,190,967 B。
 - SHA-256：`840db151185915574bf7a05db7912594dc3b7f16ad1c271200b041836b2e5256`。
-- 发布入口：[v0.1.3](https://github.com/lvzixun/CodexPulse/releases/tag/v0.1.3)。发布及最终清理结果在完成后补记。
+- 发布入口：[v0.1.3](https://github.com/lvzixun/CodexPulse/releases/tag/v0.1.3)。已发布，GitHub 资产大小与 SHA-256 摘要和本地包一致；发布说明仅中文。
+- 清理约 5.73 GiB 的 Rust target 编译数据，观察系统可用空间增加约 5.67 GB。源码、真实用户数据、本机 App 和所有发布产物保留；临时观察脚本已删除，脱敏验收记录保留在忽略的发布目录。
