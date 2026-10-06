@@ -749,6 +749,134 @@ body {
 .cp-compact-foot svg {
   vertical-align: middle;
 }
+.cp-compact-line {
+  display: flex;
+  align-items: center;
+  height: 100%;
+  padding: 0 6px;
+  gap: 5px;
+  white-space: nowrap;
+}
+.cp-compact-drag {
+  padding: 0;
+  color: var(--cp-accent) !important;
+  cursor: grab;
+  flex-shrink: 0;
+  width: 18px;
+  height: 26px;
+  opacity: 0.65;
+}
+.cp-compact-drag.cp-working {
+  opacity: 1;
+}
+.cp-compact-drag.cp-indexing {
+  color: var(--cp-amber) !important;
+  opacity: 1;
+}
+.cp-compact-drag svg {
+  width: 14px;
+  height: 14px;
+}
+.cp-compact-info {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: space-between;
+  gap: 5px;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+}
+.cp-compact-info > span {
+  display: flex;
+  align-items: baseline;
+  gap: 2px;
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+}
+.cp-compact-info small {
+  font-size: 10px;
+}
+.cp-compact-info > span > small:first-child {
+  max-width: 20px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cp-compact-info .cp-stale {
+  opacity: 0.65;
+}
+.cp-compact-tokens {
+  margin-left: auto;
+}
+.cp-compact-info > svg {
+  width: 8px;
+  color: var(--cp-muted);
+}
+.cp-compact-wait {
+  flex: 1;
+  text-align: left;
+}
+.cp-reset-status {
+  padding: 13px 0;
+  border-top: 1px solid var(--cp-line);
+  border-bottom: 1px solid var(--cp-line);
+  margin: 14px 0;
+}
+.cp-reset-status > div {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-bottom: 9px;
+}
+.cp-reset-status > div > span {
+  font-size: 11px;
+  color: var(--cp-muted);
+}
+.cp-reset-status strong {
+  font-size: 13px;
+}
+.cp-challenge {
+  margin: 20px 0;
+}
+.cp-challenge-days {
+  display: grid;
+  grid-template-columns: repeat(14, minmax(0, 1fr));
+  gap: 5px 2px;
+  margin: 14px 0 10px;
+}
+.cp-challenge-days span {
+  text-align: center;
+  padding: 2px 0;
+  font-size: 11px;
+  color: var(--cp-muted);
+  opacity: 0.5;
+}
+.cp-challenge-days .cp-day-kept {
+  color: var(--cp-accent);
+  opacity: 1;
+  font-weight: 600;
+}
+.cp-challenge-days .cp-day-current {
+  border-bottom: 2px solid var(--cp-accent);
+  opacity: 1;
+}
+.cp-challenge-record {
+  border-top: 1px solid var(--cp-line);
+  padding: 13px 0;
+  margin-top: 12px;
+}
+.cp-challenge-record > div {
+  margin-top: 7px;
+}
+.cp-challenge-record h3 {
+  font-size: 14px;
+  line-height: 1.5;
+  margin: 4px 0;
+}
+.cp-challenge-record p {
+  font-size: 12px;
+  color: var(--cp-muted);
+}
 .cp-truncate {
   min-width: 0;
   overflow: hidden;

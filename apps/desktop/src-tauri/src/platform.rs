@@ -129,7 +129,15 @@ fn ensure_window(app: &tauri::AppHandle) -> tauri::Result<tauri::WebviewWindow> 
         .iter()
         .find(|w| w.label == "pulse")
         .expect("pulse window configuration");
-    let window = tauri::WebviewWindowBuilder::from_config(app, config)?.build()?;
+    let window = tauri::WebviewWindowBuilder::from_config(app, config)?
+        .on_page_load(|window, payload| {
+            if payload.event() == tauri::webview::PageLoadEvent::Finished {
+                // The initial Windows frame settles after WebView creation. Reapply the
+                // requested content size once, avoiding a title-bar-sized startup gap.
+                scale_changed(window.app_handle());
+            }
+        })
+        .build()?;
     apply_settings(app, &settings(app));
     Ok(window)
 }
@@ -146,7 +154,7 @@ fn position(app: &tauri::AppHandle, w: &tauri::WebviewWindow, compact: bool) {
         let p = area.place(
             anchor.as_ref(),
             if compact {
-                (344.0, 278.0)
+                (184.0, 36.0)
             } else {
                 (460.0, 756.0)
             },
@@ -154,7 +162,8 @@ fn position(app: &tauri::AppHandle, w: &tauri::WebviewWindow, compact: bool) {
         // Restrict the configured minimum on small remote-desktop work areas.
         let _ = w.set_min_size(Some(tauri::PhysicalSize::new(
             p.width.min((320.0 * area.scale) as u32),
-            p.height.min((240.0 * area.scale) as u32),
+            p.height
+                .min(((if compact { 36.0 } else { 240.0 }) * area.scale) as u32),
         )));
         let _ = w.set_size(tauri::PhysicalSize::new(p.width, p.height));
         let _ = w.set_position(tauri::PhysicalPosition::new(p.x, p.y));

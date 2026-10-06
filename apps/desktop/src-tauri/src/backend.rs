@@ -114,7 +114,7 @@ pub struct QuotaSource {
 pub enum Message {
     Settings(Settings, tokio::sync::oneshot::Sender<Result<(), String>>),
     Quotas(Vec<crate::rpc::ResultSet>),
-    News(crate::news::Feed),
+    News(Box<crate::news::Feed>),
 }
 enum NetworkRequest {
     Quotas(crate::rpc::Request),
@@ -138,9 +138,13 @@ impl Backend {
         let settings = store.setting::<Settings>("app")?.unwrap_or_default();
         settings.validate().map_err(std::io::Error::other)?;
         let quota = store.setting::<QuotaState>("quota")?.unwrap_or_default();
-        let news = store
+        let mut news = store
             .setting::<crate::news::Feed>("news")?
             .unwrap_or_default();
+        if news.challenge_status.is_empty() {
+            // Refresh legacy caches once so the newly added challenge is available.
+            news.next_attempt = 0;
+        }
         let snapshot = Arc::new(RwLock::new(Snapshot {
             settings: settings.clone(),
             quota: quota.clone(),
@@ -173,7 +177,7 @@ impl Backend {
                         Ok(NetworkRequest::News(feed)) => {
                             let feed = crate::news::fetch(*feed);
                             if !worker_stop.load(Ordering::Relaxed) {
-                                let _ = replies.send(Message::News(feed));
+                                let _ = replies.send(Message::News(Box::new(feed)));
                             }
                         }
                         Ok(NetworkRequest::Quotas(request)) => {
@@ -259,7 +263,7 @@ impl Backend {
                     match receiver.recv_timeout(Duration::from_millis(300)) {
                         Ok(Message::News(next)) => {
                             news_in_flight = false;
-                            news = next;
+                            news = *next;
                             let _ = store.set_setting("news", &news.for_storage());
                             dirty = true;
                         }

@@ -76,6 +76,11 @@ export interface Snapshot {
     status: string;
     last_success: string | null;
     last_attempt: string | null;
+    latest_reset: NewsItem | null;
+    scheduled_reset: NewsItem | null;
+    challenge: Challenge | null;
+    challenge_status: string;
+    challenge_fetched_at: string | null;
   };
   quota: {
     buckets: QuotaBucket[];
@@ -141,4 +146,14 @@ export interface NewsItem {
   source_type: string;
   author: string | null;
   source_url: string | null;
+}
+export interface Challenge {
+  start_date: string;
+  days: number;
+  timezone: string;
+  records: {
+    day: number;
+    date: string;
+    entries: { kind: string; title: string; text: string; source_url: string | null }[];
+  }[];
 }

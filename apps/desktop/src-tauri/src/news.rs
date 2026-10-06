@@ -1,4 +1,4 @@
-use pulse_core::news::{NewsItem, history_items, merge, status_items};
+use pulse_core::news::{Challenge, NewsItem, challenge_page, history_items, merge, status_items};
 use serde::{Deserialize, Serialize};
 use std::{io::Read, time::Duration};
 
@@ -12,6 +12,18 @@ pub struct Feed {
     pub failures: u32,
     pub status_cache: Cache,
     pub history_cache: Cache,
+    #[serde(default)]
+    pub latest_reset: Option<NewsItem>,
+    #[serde(default)]
+    pub scheduled_reset: Option<NewsItem>,
+    #[serde(default)]
+    pub challenge_cache: Cache,
+    #[serde(default)]
+    pub challenge_status: String,
+    #[serde(default)]
+    pub challenge_next_attempt: i64,
+    #[serde(default)]
+    pub challenge_failures: u32,
 }
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct Cache {
@@ -34,6 +46,11 @@ pub struct NewsSnapshot {
     pub status: String,
     pub last_success: Option<String>,
     pub last_attempt: Option<String>,
+    pub latest_reset: Option<NewsItem>,
+    pub scheduled_reset: Option<NewsItem>,
+    pub challenge: Option<Challenge>,
+    pub challenge_status: String,
+    pub challenge_fetched_at: Option<String>,
 }
 impl Feed {
     pub fn for_storage(&self) -> Self {
@@ -43,7 +60,13 @@ impl Feed {
             feed.status_cache = Cache::default();
             feed.history_cache = Cache::default();
             feed.last_success = None;
+            feed.latest_reset = None;
+            feed.scheduled_reset = None;
             feed.status = "awaiting_refresh".into();
+        }
+        if feed.challenge_cache.no_store {
+            feed.challenge_cache = Cache::default();
+            feed.challenge_status = "awaiting_refresh".into();
         }
         feed
     }
@@ -53,6 +76,15 @@ impl Feed {
             status: self.status.clone(),
             last_success: self.last_success.clone(),
             last_attempt: self.last_attempt.clone(),
+            latest_reset: self.latest_reset.clone(),
+            scheduled_reset: self.scheduled_reset.clone(),
+            challenge: self
+                .challenge_cache
+                .body
+                .clone()
+                .and_then(|v| serde_json::from_value(v).ok()),
+            challenge_status: self.challenge_status.clone(),
+            challenge_fetched_at: self.challenge_cache.fetched_at.clone(),
         }
     }
 }
@@ -102,6 +134,19 @@ pub fn fetch(mut old: Feed) -> Feed {
             old.status_cache = update.status;
             old.history_cache = update.history;
             old.items = update.items;
+            let status = old
+                .status_cache
+                .body
+                .as_ref()
+                .expect("validated status cache");
+            let status_rows = status_items(status).expect("validated status items");
+            old.latest_reset = status_rows
+                .iter()
+                .find(|i| Some(i.id.as_str()) == status["data"]["latest_reset"]["id"].as_str())
+                .cloned();
+            old.scheduled_reset = status_rows
+                .into_iter()
+                .find(|i| i.kind == pulse_core::news::NewsKind::Scheduled);
             old.status = "connected".into();
             old.last_success = Some(chrono::Utc::now().to_rfc3339());
             old.failures = 0;
@@ -114,13 +159,51 @@ pub fn fetch(mut old: Feed) -> Feed {
             old.next_attempt = now.timestamp().saturating_add(wait.max(backoff));
         }
     }
+    // A changed/failed challenge page must not discard working quota-reset data.
+    if now.timestamp() >= old.challenge_next_attempt {
+        match fetch_resource(
+            &agent,
+            "https://codex-resets.com/zh-CN/tibo-28",
+            &old.challenge_cache,
+            true,
+        ) {
+            Ok((cache, wait)) => {
+                old.challenge_cache = cache;
+                old.challenge_status = "connected".into();
+                old.challenge_failures = 0;
+                old.challenge_next_attempt = now.timestamp().saturating_add(wait.max(300));
+            }
+            Err((code, wait)) => {
+                old.challenge_status = code;
+                old.challenge_failures = old.challenge_failures.saturating_add(1);
+                let backoff =
+                    (300u64.saturating_mul(1u64 << old.challenge_failures.min(5))).min(3600) as i64;
+                old.challenge_next_attempt = now.timestamp().saturating_add(wait.max(backoff));
+            }
+        }
+    }
     old
 }
 fn fetch_endpoint(agent: &ureq::Agent, url: &str, old: &Cache) -> Result<(Cache, i64), FetchError> {
+    fetch_resource(agent, url, old, false)
+}
+fn fetch_resource(
+    agent: &ureq::Agent,
+    url: &str,
+    old: &Cache,
+    challenge: bool,
+) -> Result<(Cache, i64), FetchError> {
     let mut request = agent
         .get(url)
         .header("User-Agent", "CodexPulse/0.1.0 (+https://codex-resets.com)")
-        .header("Accept", "application/json");
+        .header(
+            "Accept",
+            if challenge {
+                "text/html"
+            } else {
+                "application/json"
+            },
+        );
     if let Some(etag) = &old.etag
         && !old.no_store
         && old.body.is_some()
@@ -175,7 +258,14 @@ fn fetch_endpoint(agent: &ureq::Agent, url: &str, old: &Cache) -> Result<(Cache,
             if bytes.len() > 512 * 1024 {
                 return Err(("body_too_large".into(), 300));
             }
-            let body = serde_json::from_slice(&bytes).map_err(|_| ("invalid_json".into(), 300))?;
+            let body = if challenge {
+                let html = std::str::from_utf8(&bytes)
+                    .map_err(|_| ("invalid_challenge_encoding".into(), 300))?;
+                let parsed = challenge_page(html).map_err(|code| (code.into(), 300))?;
+                serde_json::to_value(parsed).map_err(|_| ("invalid_challenge_data".into(), 300))?
+            } else {
+                serde_json::from_slice(&bytes).map_err(|_| ("invalid_json".into(), 300))?
+            };
             Ok((
                 Cache {
                     etag,
@@ -229,6 +319,55 @@ mod tests {
             .timeout_global(Some(Duration::from_secs(3)))
             .build()
             .into()
+    }
+
+    #[test]
+    fn challenge_cache_contains_parsed_records_and_honors_no_store() {
+        let page = r#"<aside data-challenge-clock data-start="2026-10-05" data-days="28"></aside><script>not_stored</script>"#;
+        let (url, server) = serve(format!(
+            "HTTP/1.1 200 OK\r\nCache-Control: no-store\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            page.len(),
+            page
+        ));
+        let (cache, _) = fetch_resource(&agent(), &url, &Cache::default(), true).unwrap();
+        server.join().unwrap();
+        assert!(cache.no_store);
+        assert_eq!(cache.body.as_ref().unwrap()["days"], 28);
+        assert!(
+            !cache
+                .body
+                .as_ref()
+                .unwrap()
+                .to_string()
+                .contains("not_stored")
+        );
+        let feed = Feed {
+            challenge_cache: cache,
+            challenge_status: "connected".into(),
+            ..Feed::default()
+        };
+        assert!(feed.view().challenge.is_some());
+        assert!(feed.for_storage().view().challenge.is_none());
+    }
+
+    #[test]
+    fn unknown_challenge_markup_does_not_replace_valid_cache() {
+        let body = "<html>Unknown page</html>";
+        let (url, server) = serve(format!(
+            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        ));
+        let old = Cache {
+            body: Some(serde_json::json!({"days":28})),
+            ..Cache::default()
+        };
+        assert_eq!(
+            fetch_resource(&agent(), &url, &old, true).unwrap_err().0,
+            "unsupported_challenge_page"
+        );
+        assert_eq!(old.body.as_ref().unwrap()["days"], 28);
+        server.join().unwrap();
     }
 
     #[test]

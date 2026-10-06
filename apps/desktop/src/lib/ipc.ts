@@ -3,7 +3,17 @@ import { listen } from '@tauri-apps/api/event';
 import type { Snapshot, Settings, ViewState } from './types';
 export const native = isTauri();
 export const empty: Snapshot = {
-  news: { items: [], status: '', last_success: null, last_attempt: null },
+  news: {
+    items: [],
+    status: '',
+    last_success: null,
+    last_attempt: null,
+    latest_reset: null,
+    scheduled_reset: null,
+    challenge: null,
+    challenge_status: '',
+    challenge_fetched_at: null,
+  },
   quota: { buckets: [], sources: {} },
   settings: {
     theme: 'system',

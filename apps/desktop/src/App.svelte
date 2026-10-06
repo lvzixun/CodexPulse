@@ -15,6 +15,9 @@
   import QuotaCard from './components/QuotaCard.svelte';
   import NewsCard from './components/NewsCard.svelte';
   import Icon from './components/Icon.svelte';
+  import ResetStatus from './components/ResetStatus.svelte';
+  import ChallengePanel from './components/ChallengePanel.svelte';
+  import { windowLabel } from './lib/format';
   import { openSource } from './lib/ipc';
   let data = $state(empty);
   let mode = $state<'compact' | 'details'>(native ? 'compact' : 'details');
@@ -49,6 +52,8 @@
   ];
   const number = (n: number) =>
     new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 }).format(n);
+  const compactNumber = (n: number) =>
+    new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 0 }).format(n);
   const magnitude = (n: number) => {
     const divisor = n >= 1e9 ? 1e9 : n >= 1e6 ? 1e6 : n >= 1e3 ? 1e3 : 1;
     return {
@@ -76,6 +81,15 @@
         }).format(new Date(ts))
       : '尚未同步';
   const current = $derived(data.recent.find((s) => s.meta.status === 'active') ?? data.recent[0]);
+  const compactQuota = $derived(data.quota.buckets[0]);
+  const compactWindows = $derived(
+    [compactQuota?.primary, compactQuota?.secondary].filter((w) => w != null),
+  );
+  const compactStale = $derived(
+    compactQuota != null &&
+      (now - new Date(compactQuota.captured_at).getTime() > 6 * 60 * 1000 ||
+        data.quota.sources[compactQuota.source_id]?.status !== 'connected'),
+  );
   const session = $derived(data.recent.find((s) => s.meta.id === selectedSession));
   const highest = $derived(Math.max(1, ...data.usage.days.map((d) => d.total)));
   async function togglePin() {
@@ -146,7 +160,7 @@
       clearInterval(clock);
       if (visible) {
         now = Date.now();
-        clock = setInterval(() => (now = Date.now()), 1000);
+        clock = setInterval(() => (now = Date.now()), 60000);
       }
     };
     clockVisible(!document.hidden);
@@ -221,51 +235,47 @@
   data-accent={settings.accent ?? 'blue'}
 >
   {#if mode === 'compact'}
-    <button
-      class="cp-compact"
-      onclick={() => void windowAction('expand')}
-      onpointerdown={(e) => {
-        if ((e.target as HTMLElement).closest('.cp-brandrow')) drag(e);
-      }}
-      aria-label="展开 CodexPulse 详情"
-    >
-      <span class="cp-brandrow"
-        ><span class="cp-logo"><Icon name="activity" /></span><strong>CodexPulse</strong><span
-          class="cp-live"
-          ><span class="cp-dot"></span>{data.collecting
-            ? '索引中'
-            : current?.meta.status === 'active'
-              ? '工作中'
-              : '已同步'}</span
-        ><Icon name="down" /></span
+    <div class="cp-compact-line">
+      <button
+        class="cp-compact-drag"
+        class:cp-working={current?.meta.status === 'active'}
+        class:cp-indexing={data.collecting}
+        onpointerdown={drag}
+        aria-label="拖动 CodexPulse 浮窗"
+        title={`CodexPulse · ${data.collecting ? '索引中' : current?.meta.status === 'active' ? '工作中' : '已同步'} · 拖动调整位置`}
+        ><Icon name="activity" /></button
       >
-      {#if data.quota?.buckets[0]}<QuotaCard
-          bucket={data.quota.buckets[0]}
-          {now}
-          status={data.quota.sources[data.quota.buckets[0].source_id]?.status ?? 'unknown'}
-        />{:else}<span class="cp-label">等待有效额度快照</span>{/if}
-      <span class="cp-compact-session"
-        ><span
-          ><span class="cp-dot"></span>
-          {current?.models.join(' / ') || '模型未知'}
-          <small>· {current?.sources.join(' / ') || '等待来源'}</small></span
-        ><b title="日志不提供连续输出 token 样本">— tok/s</b></span
+      <button
+        class="cp-compact-info"
+        onclick={() => void windowAction('expand')}
+        aria-label="展开 CodexPulse 详情"
       >
-      <span class="cp-compact-bottom"
-        ><span
-          >{current ? number(current.total) : '—'} tokens
-          <small>{current ? money(current.cost_nanousd, current.unpriced_tokens) : '—'}</small
-          ></span
-        ><span class="cp-news-dot">消息 {data.news?.items.length ?? 0}</span></span
-      >
-      <span class="cp-compact-foot"
-        ><span
-          >{current && current.cost_nanousd > 0 && current.unpriced_tokens > 0
-            ? '* 已计价部分'
-            : '本地用量'}</span
-        ><span>点击展开详情 <Icon name="arrow" /></span></span
-      >
-    </button>
+        {#each compactWindows as window}<span
+            class:cp-stale={compactStale}
+            title={`${windowLabel(window)}剩余额度${compactStale ? ' · 快照已过期' : ''}`}
+            ><small
+              >{window.duration_minutes && window.duration_minutes % 1440 === 0
+                ? `${window.duration_minutes / 1440}d`
+                : window.duration_minutes && window.duration_minutes % 60 === 0
+                  ? `${window.duration_minutes / 60}h`
+                  : window.duration_minutes === null
+                    ? '额'
+                    : `${window.duration_minutes}m`}</small
+            ><b
+              >{window.remaining_percent === null
+                ? '—'
+                : `${window.remaining_percent.toFixed(0)}%`}{compactStale ? '*' : ''}</b
+            ></span
+          >{:else}<small class="cp-compact-wait">{data.collecting ? '索引中' : '等待额度'}</small
+          >{/each}
+        <span
+          class="cp-compact-tokens"
+          title={`当前 session · ${current ? current.total.toLocaleString() + ' tokens' : '待采集'} · ${current?.models.join(' / ') || '模型未知'} · ${current ? money(current.cost_nanousd, current.unpriced_tokens) : '待计价'}`}
+          ><b>{current ? compactNumber(current.total) : '—'}</b><small>tok</small></span
+        >
+        <Icon name="right" />
+      </button>
+    </div>
   {:else}
     <header class="cp-header">
       <button class="cp-logo" onpointerdown={drag} aria-label="拖动 CodexPulse 窗口"
@@ -395,9 +405,12 @@
             <span>查看分类 <Icon name="right" /></span></button
           >
         </div>
-        {#if data.news?.items.length}<button class="cp-notice" onclick={() => void goPage('news')}
+        <ResetStatus news={data.news} {now} />
+        {#if data.news?.items.length || data.news?.challenge}<button
+            class="cp-notice"
+            onclick={() => void goPage('news')}
             ><Icon name="radio" /><span
-              >重置相关消息<small>公告、计划与观察 · 以账户实际额度为准</small></span
+              >Tibo 的 28 天挑战与消息<small>产品改进、额度重置与每日记录</small></span
             ><Icon name="right" /></button
           >{/if}
       {:else if page === 'models'}
@@ -499,6 +512,9 @@
             >{data.news?.status === 'connected' ? '已同步' : '等待同步'}</small
           >
         </div>
+        <ResetStatus news={data.news} {now} />
+        <ChallengePanel news={data.news} {now} />
+        <div class="cp-sectionhead"><span>重置公告与历史</span><small>公开消息</small></div>
         {#each data.news?.items ?? [] as item}<NewsCard {item} {now} />{:else}<p class="cp-note">
             暂时没有消息。公共接口每 5 分钟同步，遇到限流等待服务器指定时间。
           </p>{/each}

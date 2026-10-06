@@ -3,6 +3,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
+mod challenge;
+pub use challenge::{Challenge, ChallengeDay, ChallengeEntry, challenge_page};
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum NewsKind {
@@ -33,7 +36,12 @@ pub fn status_items(response: &Value) -> Result<Vec<NewsItem>, &'static str> {
     if data["latest_reset"].is_object() {
         items.push(reset(&data["latest_reset"], None)?);
     }
-    if data["scheduled_reset"].is_object() {
+    if data["scheduled_reset"].is_object()
+        && !matches!(
+            data["scheduled_reset"]["status"].as_str(),
+            Some("cancelled" | "canceled" | "completed")
+        )
+    {
         items.push(reset(&data["scheduled_reset"], Some(NewsKind::Scheduled))?);
     }
     let watch = &data["active_watch"];
