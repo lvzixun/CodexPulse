@@ -18,11 +18,12 @@
 - 新增临时失败手动重试、重复点击合并、服务端等待与旧版限流记录，以及本地 HTTP 403 / Retry-After 回归。
 - Rust workspace、Clippy `--all-targets -D warnings` 通过；消息回归 12 项通过，3 项在线探针按设计忽略。
 - 原生正式构建已验证点击重试进入“刷新中…”并发出请求，失败后展示下次尝试时间。现有中文 / 深色选择在升级后保留。
-- 当前应用访问两个消息资源仍收到 HTTP 403，终端探针为 HTTP 200；原因未定位，消息同步尚未恢复。未保留实验性 TLS 改动或临时 HTTP 诊断写入。
+- 早期检查出现应用 HTTP 403、终端 HTTP 200。10 月 7 日 00:41 原生请求恢复成功；恢复正式 0.1.2 发布包后，00:42:48 和 00:43:30 连续两次点击刷新，两个资源均为 connected、失败计数均为 0，缓存更新时间推进。早期 403 的具体原因未定位，不声称调整 TLS 消除了该问题；未保留实验性 TLS 改动或临时 HTTP 诊断写入。
 
 ## macOS 产物
 
 - 版本 0.1.2，Apple Silicon / Intel 通用包，严格 ad-hoc 签名校验通过。Apple Silicon 原生运行通过，Intel 实机与正式签名 / 公证仍待完成。
 - DMG：`CodexPulse_0.1.2_universal.dmg`，12,182,024 B；SHA-256：`b5ce9c8bb6035041701ed5ed05142a0ad2ec06d9c915b7c33eb29bd2cef127ad`。
 - 只读挂载 DMG 比对 4 个应用文件、签名与 Applications 链接通过；`~/Applications/CodexPulse.app` 已恢复正式构建，4 个文件与保留的发布清单完全一致。
-- 发布入口：[v0.1.2](https://github.com/lvzixun/CodexPulse/releases/tag/v0.1.2)。发布结果与缓存清理在完成后补记。
+- 已发布：[v0.1.2](https://github.com/lvzixun/CodexPulse/releases/tag/v0.1.2)。GitHub 资产摘要与本地 DMG SHA-256 及大小一致。发布说明按用户最新要求仅用中文；README 仍为独立中英文文件。
+- 清理已确认的 Rust target 编译数据并保留源码、用户数据、所有版本的发布包和本机安装 App；排查结束再次清理约 2.32 GiB 编译缓存，target 目录已删除；记录在忽略的 `releases/v0.1.2/cleanup-report.json`。
