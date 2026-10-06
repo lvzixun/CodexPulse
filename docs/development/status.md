@@ -19,6 +19,7 @@
 - 仅托盘启动可不创建 WebView；隐藏 5 分钟释放并按需重建，路由、模型 / session 选择和滚动位置保留在宿主内存中。系统透明度关闭或高对比度时禁用原生玻璃并使用不透明背景。
 - 在原生开发构建中验证：隐藏 5 分钟后 WebView2 子进程全部退出，后台主进程保留；再次启动同一路径通过单实例入口重建详情，恢复设置页、滚动位置和蓝色主题。
 - 10k sessions / 100k facts 的可复现 release 查询基准；覆盖索引后本机 30 天查询 P95 为 60.43 ms，最近 10 个 sessions 为 0.13 ms。详见[查询基准](query-benchmark-2026-10-06.md)。
+- Windows x64 NSIS 安装包与内嵌静态资源的 release 应用已构建，原生启动显示真实数据和保存的默认蓝色。安装包 SHA256：`45D3F77DAFBA916293FDDA769FDB892909B8D7920995288894FF9B72F0895F10`。
 
 以上“已落地”表示代码具备路径，不等同于完成原生功能或性能验收。当前 WSL 轮询及路径访问还需要负载、发行版停止及权限场景验证。
 
@@ -36,9 +37,11 @@
 - [ ] 真实速度能力检测：目前仅提供不可用说明，没有连续样本时不显示数值。
 - [ ] 停止的 WSL 不唤醒、失联 UNC 路径有界访问、子进程及退出期限验证。
 - [ ] 10k sessions / 100k facts 的采集基准、参考硬件查询、原生 release 进程组 CPU / RSS、8 小时漂移测试；本机存储查询基准已完成。
-- [ ] Windows NSIS 安装包构建、安装 / 升级 / 卸载、数据保留验证。
+- [ ] Windows NSIS 安装 / 升级 / 卸载及数据保留验证；首个 x64 安装包已构建（3,843,982 B），尚未作为完整首版发布。
 - [ ] macOS 平台接口保留与 Windows 专属设置隔离；macOS 实现属于后续阶段。
 
 ## 当前检查
 
 2026-10-06：`cargo test --workspace` 通过 34 项测试（核心 26、HTTP 4、几何 4）；`cargo clippy --workspace --all-targets -- -D warnings` 和 `cargo build -p codexpulse` 通过；`pnpm check` 无错误或警告；`pnpm build:ui` 通过。原生验证包含本机数据、额度、真实重置消息、蓝色 / 紫色、浅色、保存后重启恢复及关闭毛玻璃的不透明背景。尚无完整原生进程组性能验收结果，也没有完整首版通过结论。
+
+`pnpm build` 已成功生成 `target/release/bundle/nsis/CodexPulse_0.1.0_x64-setup.exe`（3.67 MiB）。release 浮窗的首次进程组 RSS 抽样高于 180 MiB 预算，不能标为性能通过；下一步需降低 WebView2 的资源占用并采集稳态 P95。这次抽样包含全部自有 WebView2 子进程，未仅用 Rust 主进程冒充进程组内存。
