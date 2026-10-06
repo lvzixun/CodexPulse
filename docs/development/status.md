@@ -12,17 +12,18 @@
 - Windows 单个共用窗口的浮窗 / 详情切换，托盘左键详情、右键设置 / 退出，单实例、原生 Acrylic 调用。
 - Windows 日志目录监听及 60 秒修复扫描；已运行 WSL 的路径探测与 30 秒轮询。
 - 基础设置持久化、源状态与不可用信息。
+- Codex app-server 的 `initialize` / `account/read` / `account/rateLimits/read` 只读调用，哈希账户与 workspace 身份、真实窗口长度、快照缓存、单飞和失败退避。额度子进程启动时有 15 秒全程超时，正常退出清理自建进程。
 
 以上“已落地”表示代码具备路径，不等同于完成原生功能或性能验收。当前 WSL 轮询及路径访问还需要负载、发行版停止及权限场景验证。
 
 ## 尚需完成及验证
 
-- [ ] 原生启动、托盘 / 浮窗交互、明暗主题、无障碍和毛玻璃回退验证。
+- [ ] 原生交互完整验证。已实际运行浮窗、点击展开同一个详情窗口、真实 Windows 日志总量和每周额度显示；托盘菜单、主题、无障碍和材质回退仍待验收。
 - [ ] 位置恢复、多显示器边界、隐藏 WebView 延迟释放与详情选择保持。
 - [ ] 全量历史、subagent / fork 继承边界、未知版本、计数纠正和整数溢出测试。
 - [ ] 统计时区切换及物化桶重建；模型 / session 分页与 session 详情。
 - [ ] 官方版本化价格资源，价格日期 / tier / 长上下文口径及未知价格覆盖率。
-- [ ] Codex app-server 只读额度 RPC、稳定账户 / workspace 身份、缓存、单飞与退避。
+- [ ] 额度 RPC 完整异常与多账户场景验证、WSL RPC 接入实测；本机 Codex 0.160.0 的只读 quota 已在原生界面验证。
 - [ ] Codex Resets 公共接口、ETag / Retry-After、原始来源链接与消息分类。
 - [ ] 额度恢复确认、低额度及消息通知、持久化去重、免打扰。
 - [ ] 来源开关、手动 WSL 路径、诊断脱敏、开机启动和设置完整性。
@@ -34,4 +35,4 @@
 
 ## 当前检查
 
-2026-10-06：`cargo test -p pulse-core` 通过 19 项测试；`cargo check -p codexpulse` 通过；`pnpm check` 无错误或警告；`pnpm build:ui` 通过。尚无原生性能测量结果，也没有完整首版通过结论。
+2026-10-06：`cargo test -p pulse-core` 通过 23 项测试；`cargo check -p codexpulse` 和 `cargo build -p codexpulse` 通过；`pnpm check` 无错误或警告；`pnpm build:ui` 通过。已实际运行本机数据与额度界面。尚无原生进程组性能验收结果，也没有完整首版通过结论。

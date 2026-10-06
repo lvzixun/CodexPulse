@@ -446,3 +446,24 @@ fn timestamp_offsets_do_not_change_duplicate_identity() {
     .unwrap();
     assert_eq!(fa.id, fb.id);
 }
+
+#[test]
+fn optional_field_appearing_does_not_erase_known_total_delta() {
+    let mut p = state("evolving-schema");
+    usage(
+        &mut p,
+        json!({"input_tokens":100,"output_tokens":10,"total_tokens":110}),
+        Value::Null,
+        "2026-10-01T00:01:00Z",
+    )
+    .unwrap();
+    let next = usage(
+        &mut p,
+        counts(120, 5, 15),
+        Value::Null,
+        "2026-10-01T00:02:00Z",
+    )
+    .unwrap();
+    assert_eq!(next.tokens.effective_total(), Some(25));
+    assert_eq!(next.tokens.cached, None);
+}

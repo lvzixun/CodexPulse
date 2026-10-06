@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod backend;
 mod platform;
+mod rpc;
 
 use backend::{Backend, Settings, Snapshot};
 use tauri::{Emitter, Manager, State};
@@ -35,6 +36,7 @@ fn window_action(action: String, app: tauri::AppHandle) -> Result<(), String> {
         "expand" => platform::show_details(&app, None),
         "compact" => platform::compact_or_hide(&app),
         "settings" => platform::show_details(&app, Some("settings")),
+        "exit" => app.exit(0),
         "hide" => {
             if let Some(w) = app.get_webview_window("pulse") {
                 w.hide().map_err(|e| e.to_string())?;
@@ -78,6 +80,16 @@ fn main() {
             }
             _ => {}
         })
-        .run(tauri::generate_context!())
-        .expect("CodexPulse failed to start");
+        .build(tauri::generate_context!())
+        .expect("CodexPulse failed to start")
+        .run(|app, event| {
+            if matches!(
+                event,
+                tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit
+            ) {
+                if let Some(state) = app.try_state::<Backend>() {
+                    state.shutdown();
+                }
+            }
+        });
 }

@@ -68,7 +68,9 @@ impl TokenCounts {
             match (now, prev) {
                 (Some(a), Some(b)) => a.checked_sub(b).map(Some),
                 (None, None) => Some(None),
-                _ => None,
+                // A field appearing/disappearing is unknown for this delta, rather than
+                // evidence that every independently known counter has reset.
+                _ => Some(None),
             }
         }
         let result = Self {

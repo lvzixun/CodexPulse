@@ -3,6 +3,8 @@
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import { empty, native, onEvent, saveSettings, snapshot, windowAction } from './lib/ipc';
   import type { Settings } from './lib/types';
+  import QuotaCard from './components/QuotaCard.svelte';
+  import { windowLabel } from './lib/format';
   let data = $state(empty);
   let mode = $state<'compact' | 'details'>(native ? 'compact' : 'details');
   let page = $state('overview');
@@ -10,6 +12,7 @@
   let selectedSession = $state<string | null>(null);
   let error = $state('');
   let saving = $state(false);
+  let now = $state(Date.now());
   let settings = $state<Settings>({ ...empty.settings });
   let path = $state('');
   const tabs = [
@@ -43,6 +46,7 @@
   );
   const model = $derived(data.usage.models.find((m) => m.model === selectedModel));
   const highest = $derived(Math.max(1, ...data.usage.days.map((d) => d.total)));
+  const primaryQuota = $derived(data.quota?.buckets[0]?.primary);
   async function refresh() {
     try {
       data = await snapshot();
@@ -71,6 +75,15 @@
   }
   onMount(() => {
     let disposed = false;
+    let clock: ReturnType<typeof setInterval> | undefined;
+    const clockVisible = (visible: boolean) => {
+      clearInterval(clock);
+      if (visible) {
+        now = Date.now();
+        clock = setInterval(() => (now = Date.now()), 1000);
+      }
+    };
+    clockVisible(!document.hidden);
     const cleanups: (() => void)[] = [];
     void refresh();
     const events = [
@@ -86,20 +99,24 @@
         settings = { ...next };
         void refresh();
       }),
+      onEvent<boolean>('window-visible', clockVisible),
     ];
     void Promise.all(events).then((list) => {
       if (disposed) list.forEach((fn) => fn());
       else cleanups.push(...list);
     });
     const visible = () => {
+      clockVisible(!document.hidden);
       if (!document.hidden) void refresh();
     };
     document.addEventListener('visibilitychange', visible);
     const escape = (e: KeyboardEvent) => {
       if (e.key === 'Escape') void windowAction('compact');
+      if (e.ctrlKey && e.key.toLowerCase() === 'q') void windowAction('exit');
     };
     window.addEventListener('keydown', escape);
     return () => {
+      clearInterval(clock);
       disposed = true;
       cleanups.forEach((fn) => fn());
       document.removeEventListener('visibilitychange', visible);
@@ -144,7 +161,14 @@
         </div>
         <div><strong>—</strong><small>输出 tokens/s</small></div>
       </div>
-      <div class="quota-placeholder"><span>额度</span><span>等待接口接入</span></div>
+      <div class="quota-placeholder">
+        <span>{primaryQuota ? windowLabel(primaryQuota) : '额度'}</span><span
+          >{primaryQuota?.remaining_percent !== null &&
+          primaryQuota?.remaining_percent !== undefined
+            ? `${primaryQuota.remaining_percent.toFixed(0)}% 剩余`
+            : '等待有效额度快照'}</span
+        >
+      </div>
       <div class="compact-footer">
         <span>30 天 {number(data.usage.total)} tokens</span><span>展开详情 ↗</span>
       </div>
@@ -168,9 +192,15 @@
         <section class="card quotas">
           <div class="card-heading">
             <h2>使用额度</h2>
-            <span class="muted">待接入</span>
+            <span class="muted">{data.quota?.buckets.length ? '只读同步' : '等待同步'}</span>
           </div>
-          <p class="muted">额度接口正在开发，恢复时间与剩余额度暂不可用。</p>
+          {#each data.quota?.buckets ?? [] as bucket}<QuotaCard
+              {bucket}
+              {now}
+              status={data.quota?.sources[bucket.source_id]?.status ?? 'unknown'}
+            />{:else}<p class="muted">
+              尚未获得有效额度快照。请确认来源环境的 Codex 已登录，且 CLI 可运行。
+            </p>{/each}
         </section>
         <section class="card session-card">
           <div class="card-heading">

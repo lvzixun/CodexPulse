@@ -8,10 +8,11 @@ use pulse_core::{
 };
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{HashSet, VecDeque},
+    collections::{BTreeMap, HashSet, VecDeque},
     path::{Path, PathBuf},
     sync::{
         Arc, Mutex, RwLock,
+        atomic::{AtomicBool, Ordering},
         mpsc::{self, SyncSender},
     },
     thread,
@@ -84,13 +85,30 @@ pub struct Snapshot {
     pub updated_at: Option<String>,
     pub collecting: bool,
     pub error: Option<String>,
+    pub quota: QuotaState,
+}
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+pub struct QuotaState {
+    pub buckets: Vec<pulse_core::quota::QuotaBucket>,
+    pub sources: BTreeMap<String, QuotaSource>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QuotaSource {
+    pub home: String,
+    pub status: String,
+    pub last_attempt: String,
+    pub failures: u32,
+    pub buckets: Vec<pulse_core::quota::QuotaBucket>,
 }
 pub enum Message {
     Settings(Settings, tokio::sync::oneshot::Sender<Result<(), String>>),
+    Quotas(Vec<crate::rpc::ResultSet>),
 }
 pub struct Backend {
     pub snapshot: Arc<RwLock<Snapshot>>,
     pub sender: SyncSender<Message>,
+    stopping: Arc<AtomicBool>,
+    active_child: crate::rpc::ActiveChild,
 }
 struct Source {
     health: SourceHealth,
@@ -101,12 +119,53 @@ impl Backend {
         let store = Store::open(db)?;
         let settings = store.setting::<Settings>("app")?.unwrap_or_default();
         settings.validate().map_err(std::io::Error::other)?;
+        let quota = store.setting::<QuotaState>("quota")?.unwrap_or_default();
         let snapshot = Arc::new(RwLock::new(Snapshot {
             settings: settings.clone(),
+            quota: quota.clone(),
+            usage: store.summary(
+                Utc::now()
+                    .with_timezone(&settings.timezone.parse::<Tz>().unwrap_or(chrono_tz::UTC))
+                    .date_naive(),
+                settings.timezone.parse().unwrap_or(chrono_tz::UTC),
+            )?,
+            recent: store.recent_sessions(None, 10)?,
             collecting: true,
             ..Default::default()
         }));
         let (sender, receiver) = mpsc::sync_channel(8);
+        let stopping = Arc::new(AtomicBool::new(false));
+        let worker_stop = stopping.clone();
+        let collector_stop = stopping.clone();
+        let active_child = Arc::new(Mutex::new(None));
+        let worker_child = active_child.clone();
+        let (rpc_sender, rpc_receiver) = mpsc::sync_channel::<crate::rpc::Request>(1);
+        let replies = sender.clone();
+        thread::Builder::new()
+            .name("pulse-network".into())
+            .spawn(move || {
+                while !worker_stop.load(Ordering::Relaxed) {
+                    match rpc_receiver.recv_timeout(Duration::from_millis(300)) {
+                        Ok(request) => {
+                            let mut results = Vec::new();
+                            for scope in request.scopes {
+                                if worker_stop.load(Ordering::Relaxed) {
+                                    break;
+                                }
+                                results.push(crate::rpc::ResultSet {
+                                    source_id: scope.source_id.clone(),
+                                    result: crate::rpc::read(&scope, &worker_stop, &worker_child),
+                                });
+                            }
+                            if !worker_stop.load(Ordering::Relaxed) {
+                                let _ = replies.send(Message::Quotas(results));
+                            }
+                        }
+                        Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                        Err(mpsc::RecvTimeoutError::Timeout) => {}
+                    }
+                }
+            })?;
         let shared = snapshot.clone();
         thread::Builder::new()
             .name("pulse-collector".into())
@@ -135,9 +194,61 @@ impl Backend {
                 let mut last_wsl = Instant::now() - Duration::from_secs(60);
                 let mut last_publish = Instant::now() - Duration::from_secs(1);
                 let mut dirty = true;
+                let mut quota = quota;
+                let mut quota_in_flight = false;
+                let mut last_quota = Instant::now() - Duration::from_secs(3600);
                 let prices = PriceBook::default();
                 loop {
+                    if collector_stop.load(Ordering::Relaxed) {
+                        break;
+                    }
                     match receiver.recv_timeout(Duration::from_millis(300)) {
+                        Ok(Message::Quotas(results)) => {
+                            quota_in_flight = false;
+                            for response in results {
+                                let Some(source) =
+                                    sources.iter().find(|s| s.health.id == response.source_id)
+                                else {
+                                    continue;
+                                };
+                                let home = source.home.to_string_lossy().into_owned();
+                                let state =
+                                    quota.sources.entry(response.source_id).or_insert_with(|| {
+                                        QuotaSource {
+                                            home: home.clone(),
+                                            status: "unknown".into(),
+                                            last_attempt: String::new(),
+                                            failures: 0,
+                                            buckets: Vec::new(),
+                                        }
+                                    });
+                                if state.home != home {
+                                    state.home = home;
+                                    state.buckets.clear();
+                                }
+                                state.last_attempt = Utc::now().to_rfc3339();
+                                match response.result {
+                                    Ok(buckets) => {
+                                        state.status = "connected".into();
+                                        state.failures = 0;
+                                        state.buckets = buckets;
+                                    }
+                                    Err(code) => {
+                                        state.status = code;
+                                        state.failures = state.failures.saturating_add(1);
+                                    }
+                                }
+                            }
+                            quota.buckets = pulse_core::quota::merged(
+                                quota
+                                    .sources
+                                    .values()
+                                    .flat_map(|q| q.buckets.clone())
+                                    .collect(),
+                            );
+                            let _ = store.set_setting("quota", &quota);
+                            dirty = true;
+                        }
                         Ok(Message::Settings(next, reply)) => {
                             // Changing timezone needs a bucket rebuild before enabling this setting.
                             // This restriction is removed by the migration implementation.
@@ -151,6 +262,8 @@ impl Backend {
                             if result.is_ok() {
                                 settings = next;
                                 last_repair = Instant::now() - Duration::from_secs(60);
+                                last_wsl = Instant::now() - Duration::from_secs(60);
+                                last_quota = Instant::now() - Duration::from_secs(3600);
                                 dirty = true;
                             }
                             let _ = reply.send(result);
@@ -232,6 +345,49 @@ impl Backend {
                             }
                         }
                     }
+                    let quota_interval = if app
+                        .get_webview_window("pulse")
+                        .is_some_and(|w| w.is_visible().unwrap_or(false))
+                    {
+                        60
+                    } else {
+                        300
+                    };
+                    if !quota_in_flight
+                        && !sources.is_empty()
+                        && last_quota.elapsed() >= Duration::from_secs(quota_interval)
+                    {
+                        let scopes = sources
+                            .iter()
+                            .filter(|source| {
+                                let old = quota.sources.get(&source.health.id);
+                                old.is_none_or(|old| {
+                                    old.home != source.health.path
+                                        || old.failures == 0
+                                        || chrono::DateTime::parse_from_rfc3339(&old.last_attempt)
+                                            .is_ok_and(|last| {
+                                                (Utc::now() - last.with_timezone(&Utc))
+                                                    .num_seconds()
+                                                    >= ((60u64.saturating_mul(
+                                                        1u64 << old.failures.min(5),
+                                                    ))
+                                                    .min(1800)
+                                                        as i64)
+                                            })
+                                })
+                            })
+                            .map(|s| crate::rpc::Scope {
+                                source_id: s.health.id.clone(),
+                                home: s.home.clone(),
+                            })
+                            .collect::<Vec<_>>();
+                        if !scopes.is_empty()
+                            && rpc_sender.try_send(crate::rpc::Request { scopes }).is_ok()
+                        {
+                            quota_in_flight = true;
+                        }
+                        last_quota = Instant::now();
+                    }
                     let batch_start = Instant::now();
                     while batch_start.elapsed() < Duration::from_millis(250) {
                         let Some((id, path)) = queue.pop_front() else {
@@ -274,6 +430,22 @@ impl Backend {
                             state.settings = settings.clone();
                             state.collecting = !queue.is_empty();
                             state.sources = sources.iter().map(|s| s.health.clone()).collect();
+                            let live = quota
+                                .sources
+                                .iter()
+                                .filter(|(id, q)| {
+                                    sources
+                                        .iter()
+                                        .any(|s| &s.health.id == *id && s.health.path == q.home)
+                                })
+                                .map(|(id, q)| (id.clone(), q.clone()))
+                                .collect::<BTreeMap<_, _>>();
+                            state.quota = QuotaState {
+                                buckets: pulse_core::quota::merged(
+                                    live.values().flat_map(|q| q.buckets.clone()).collect(),
+                                ),
+                                sources: live,
+                            };
                             match (usage, recent) {
                                 (Ok(usage), Ok(recent)) => {
                                     state.usage = usage;
@@ -296,7 +468,16 @@ impl Backend {
                     }
                 }
             })?;
-        Ok(Self { snapshot, sender })
+        Ok(Self {
+            snapshot,
+            sender,
+            stopping,
+            active_child,
+        })
+    }
+    pub fn shutdown(&self) {
+        self.stopping.store(true, Ordering::Relaxed);
+        crate::rpc::stop_child(&self.active_child);
     }
 }
 fn source(id: String, label: String, home: PathBuf) -> Source {

@@ -3,6 +3,7 @@ import { listen } from '@tauri-apps/api/event';
 import type { Snapshot, Settings } from './types';
 export const native = isTauri();
 export const empty: Snapshot = {
+  quota: { buckets: [], sources: {} },
   settings: {
     theme: 'system',
     glass: true,

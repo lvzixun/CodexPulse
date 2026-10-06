@@ -54,6 +54,19 @@ export interface SourceHealth {
   issues: number;
 }
 export interface Snapshot {
+  quota: {
+    buckets: QuotaBucket[];
+    sources: Record<
+      string,
+      {
+        home: string;
+        status: string;
+        last_attempt: string;
+        failures: number;
+        buckets: QuotaBucket[];
+      }
+    >;
+  };
   settings: Settings;
   usage: {
     from_day: string;
@@ -75,4 +88,20 @@ export interface Snapshot {
   updated_at: string | null;
   collecting: boolean;
   error: string | null;
+}
+export interface QuotaWindow {
+  remaining_percent: number | null;
+  duration_minutes: number | null;
+  resets_at: number | null;
+}
+export interface QuotaBucket {
+  source_id: string;
+  identity_key: string;
+  identity_confirmed: boolean;
+  limit_id: string;
+  name: string;
+  plan: string | null;
+  primary: QuotaWindow | null;
+  secondary: QuotaWindow | null;
+  captured_at: string;
 }

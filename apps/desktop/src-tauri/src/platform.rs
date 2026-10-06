@@ -83,6 +83,7 @@ pub fn show_details(app: &tauri::AppHandle, page: Option<&str>) {
         let _ = w.set_size(LogicalSize::new(496.0, 700.0));
         let _ = w.center();
         let _ = w.show();
+        let _ = app.emit("window-visible", true);
         let _ = w.set_focus();
         let _ = app.emit("window-mode", ("details", page));
         let _ = app.emit("snapshot-changed", ());
@@ -105,6 +106,7 @@ pub fn compact_or_hide(app: &tauri::AppHandle) {
             let _ = app.emit("window-mode", ("compact", None::<String>));
             let _ = w.show();
         } else {
+            let _ = app.emit("window-visible", false);
             let _ = w.hide();
         }
     }
@@ -193,4 +195,10 @@ pub fn running_wsl_sources() -> Vec<(String, String, PathBuf)> {
             })
             .collect()
     }
+}
+
+pub fn wsl_is_running(name: &str) -> bool {
+    let mut list = Command::new("wsl.exe");
+    list.args(["--list", "--running", "--quiet"]);
+    command_output(list).is_some_and(|output| output.lines().any(|line| line.trim() == name))
 }
