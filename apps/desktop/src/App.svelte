@@ -4,6 +4,8 @@
   import { empty, native, onEvent, saveSettings, snapshot, windowAction } from './lib/ipc';
   import type { Settings } from './lib/types';
   import QuotaCard from './components/QuotaCard.svelte';
+  import NewsCard from './components/NewsCard.svelte';
+  import { openSource } from './lib/ipc';
   import { windowLabel } from './lib/format';
   let data = $state(empty);
   let mode = $state<'compact' | 'details'>(native ? 'compact' : 'details');
@@ -12,6 +14,7 @@
   let selectedSession = $state<string | null>(null);
   let error = $state('');
   let saving = $state(false);
+  let settingsDirty = $state(false);
   let now = $state(Date.now());
   let settings = $state<Settings>({ ...empty.settings });
   let path = $state('');
@@ -50,7 +53,7 @@
   async function refresh() {
     try {
       data = await snapshot();
-      if (!saving) {
+      if (!saving && !settingsDirty) {
         settings = { ...data.settings };
         path = settings.windows_home ?? '';
       }
@@ -63,6 +66,8 @@
     error = '';
     try {
       await saveSettings({ ...settings, windows_home: path.trim() || null });
+      settingsDirty = false;
+      saving = false;
       await refresh();
     } catch (e) {
       error = String(e);
@@ -96,7 +101,10 @@
         void refresh();
       }),
       onEvent<Settings>('settings-applied', (next) => {
-        settings = { ...next };
+        if (!settingsDirty || saving) {
+          settings = { ...next };
+          path = next.windows_home ?? '';
+        }
         void refresh();
       }),
       onEvent<boolean>('window-visible', clockVisible),
@@ -359,17 +367,38 @@
             <p class="eyebrow">RESET SIGNALS</p>
             <h1>重置消息</h1>
           </div>
-          <span class="badge">待接入</span>
+          <span class="badge"
+            >{data.news?.status === 'connected'
+              ? '已同步'
+              : data.news?.status
+                ? '同步异常'
+                : '等待同步'}</span
+          >
         </div>
         <section class="card">
-          <h2>Tibo 的重置相关消息</h2>
-          <p class="muted">
-            Codex Resets
-            公共接口接入正在开发。这里将分别显示公告、计划、预测与社区观察，并保留原始来源链接。
-          </p>
+          <div class="card-heading">
+            <h2>重置相关消息</h2>
+            <button
+              class="text-button"
+              onclick={() =>
+                void openSource('https://codex-resets.com').catch((e) => (error = String(e)))}
+              >数据来自 Codex Resets ↗</button
+            >
+          </div>
+          <p class="muted">Tibo 的重置公告、计划和公共观察，按来源分类。</p>
           <p class="footnote">消息出现不代表当前账户已恢复；账户恢复需要额度快照确认。</p>
-          <span class="muted">数据来源：codex-resets.com</span>
+          <p class="footnote">
+            最近成功同步：{time(data.news?.last_success ?? null)}{data.news?.status &&
+            data.news.status !== 'connected'
+              ? ' · 暂时保留上次消息'
+              : ''}
+          </p>
         </section>
+        {#each data.news?.items ?? [] as item}<NewsCard {item} {now} />{:else}<div
+            class="empty-state"
+          >
+            暂时没有消息。公共接口将每 5 分钟同步，遇到限流会等待服务器指定的时间。
+          </div>{/each}
       {:else if page === 'settings'}
         <div class="section-heading">
           <div>
@@ -378,7 +407,11 @@
           </div>
           <span class="badge">Windows</span>
         </div>
-        <section class="card">
+        <section
+          class="card"
+          oninput={() => (settingsDirty = true)}
+          onchange={() => (settingsDirty = true)}
+        >
           <h2>外观与浮窗</h2>
           <label class="setting-row"
             ><span>主题</span><select bind:value={settings.theme}
@@ -406,7 +439,11 @@
             /></label
           >
         </section>
-        <section class="card">
+        <section
+          class="card"
+          oninput={() => (settingsDirty = true)}
+          onchange={() => (settingsDirty = true)}
+        >
           <h2>数据采集</h2>
           <label class="setting-row"
             ><span>Windows App / CLI</span><input
@@ -431,6 +468,15 @@
         <button class="primary save-button" disabled={saving} onclick={() => void save()}
           >{saving ? '正在保存…' : '保存设置'}</button
         >
+        {#if settingsDirty}<button
+            class="text-button"
+            disabled={saving}
+            onclick={() => {
+              settings = { ...data.settings };
+              path = data.settings.windows_home ?? '';
+              settingsDirty = false;
+            }}>撤销未保存的修改</button
+          >{/if}
         <section class="card source-card">
           <h2>来源状态</h2>
           {#each data.sources as source}<div class="source-row">

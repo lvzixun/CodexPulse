@@ -54,6 +54,12 @@ export interface SourceHealth {
   issues: number;
 }
 export interface Snapshot {
+  news: {
+    items: NewsItem[];
+    status: string;
+    last_success: string | null;
+    last_attempt: string | null;
+  };
   quota: {
     buckets: QuotaBucket[];
     sources: Record<
@@ -104,4 +110,18 @@ export interface QuotaBucket {
   primary: QuotaWindow | null;
   secondary: QuotaWindow | null;
   captured_at: string;
+}
+export interface NewsItem {
+  id: string;
+  kind: 'announcement' | 'scheduled' | 'forecast' | 'observation';
+  text: string;
+  occurred_at: string;
+  reset_type: string | null;
+  scheduled_for: string | null;
+  expires_at: string | null;
+  forecast_window: string | null;
+  probability: number | null;
+  source_type: string;
+  author: string | null;
+  source_url: string | null;
 }

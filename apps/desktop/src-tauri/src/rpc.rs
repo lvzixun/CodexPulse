@@ -91,10 +91,11 @@ pub fn read(
                     if bytes.len() > 1024 * 1024 {
                         break;
                     }
-                    if let Ok(value) = serde_json::from_slice::<Value>(&bytes) {
-                        if value.get("id").is_some() && sender.try_send(value).is_err() {
-                            break;
-                        }
+                    if let Ok(value) = serde_json::from_slice::<Value>(&bytes)
+                        && value.get("id").is_some()
+                        && sender.try_send(value).is_err()
+                    {
+                        break;
                     }
                 }
             }
@@ -171,11 +172,11 @@ impl Drop for ChildGuard {
     }
 }
 pub fn stop_child(active: &ActiveChild) {
-    if let Ok(mut slot) = active.lock() {
-        if let Some(mut child) = slot.take() {
-            let _ = child.kill();
-            let _ = child.wait();
-        }
+    if let Ok(mut slot) = active.lock()
+        && let Some(mut child) = slot.take()
+    {
+        let _ = child.kill();
+        let _ = child.wait();
     }
 }
 fn codex_executable() -> Option<PathBuf> {

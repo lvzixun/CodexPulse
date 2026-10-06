@@ -38,10 +38,10 @@ impl TokenCounts {
                 return Err(DataError::Overflow);
             }
         }
-        if let (Some(input), Some(cached)) = (self.input, self.cached) {
-            if cached > input {
-                return Err(DataError::InvalidCache);
-            }
+        if let (Some(input), Some(cached)) = (self.input, self.cached)
+            && cached > input
+        {
+            return Err(DataError::InvalidCache);
         }
         if let (Some(input), Some(output)) = (self.input, self.output) {
             let total = input.checked_add(output).ok_or(DataError::Overflow)?;

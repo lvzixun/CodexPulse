@@ -86,6 +86,7 @@ pub struct Snapshot {
     pub collecting: bool,
     pub error: Option<String>,
     pub quota: QuotaState,
+    pub news: crate::news::NewsSnapshot,
 }
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct QuotaState {
@@ -103,6 +104,11 @@ pub struct QuotaSource {
 pub enum Message {
     Settings(Settings, tokio::sync::oneshot::Sender<Result<(), String>>),
     Quotas(Vec<crate::rpc::ResultSet>),
+    News(crate::news::Feed),
+}
+enum NetworkRequest {
+    Quotas(crate::rpc::Request),
+    News(Box<crate::news::Feed>),
 }
 pub struct Backend {
     pub snapshot: Arc<RwLock<Snapshot>>,
@@ -120,9 +126,13 @@ impl Backend {
         let settings = store.setting::<Settings>("app")?.unwrap_or_default();
         settings.validate().map_err(std::io::Error::other)?;
         let quota = store.setting::<QuotaState>("quota")?.unwrap_or_default();
+        let news = store
+            .setting::<crate::news::Feed>("news")?
+            .unwrap_or_default();
         let snapshot = Arc::new(RwLock::new(Snapshot {
             settings: settings.clone(),
             quota: quota.clone(),
+            news: news.view(),
             usage: store.summary(
                 Utc::now()
                     .with_timezone(&settings.timezone.parse::<Tz>().unwrap_or(chrono_tz::UTC))
@@ -139,14 +149,20 @@ impl Backend {
         let collector_stop = stopping.clone();
         let active_child = Arc::new(Mutex::new(None));
         let worker_child = active_child.clone();
-        let (rpc_sender, rpc_receiver) = mpsc::sync_channel::<crate::rpc::Request>(1);
+        let (rpc_sender, rpc_receiver) = mpsc::sync_channel::<NetworkRequest>(1);
         let replies = sender.clone();
         thread::Builder::new()
             .name("pulse-network".into())
             .spawn(move || {
                 while !worker_stop.load(Ordering::Relaxed) {
                     match rpc_receiver.recv_timeout(Duration::from_millis(300)) {
-                        Ok(request) => {
+                        Ok(NetworkRequest::News(feed)) => {
+                            let feed = crate::news::fetch(*feed);
+                            if !worker_stop.load(Ordering::Relaxed) {
+                                let _ = replies.send(Message::News(feed));
+                            }
+                        }
+                        Ok(NetworkRequest::Quotas(request)) => {
                             let mut results = Vec::new();
                             for scope in request.scopes {
                                 if worker_stop.load(Ordering::Relaxed) {
@@ -177,12 +193,12 @@ impl Backend {
                 let watcher_paths = changed.clone();
                 let mut watcher =
                     notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
-                        if let Ok(event) = event {
-                            if let Ok(mut paths) = watcher_paths.lock() {
-                                for path in event.paths {
-                                    if paths.len() < 4096 {
-                                        paths.push(path);
-                                    }
+                        if let Ok(event) = event
+                            && let Ok(mut paths) = watcher_paths.lock()
+                        {
+                            for path in event.paths {
+                                if paths.len() < 4096 {
+                                    paths.push(path);
                                 }
                             }
                         }
@@ -195,6 +211,8 @@ impl Backend {
                 let mut last_publish = Instant::now() - Duration::from_secs(1);
                 let mut dirty = true;
                 let mut quota = quota;
+                let mut news = news;
+                let mut news_in_flight = false;
                 let mut quota_in_flight = false;
                 let mut last_quota = Instant::now() - Duration::from_secs(3600);
                 let prices = PriceBook::default();
@@ -203,6 +221,12 @@ impl Backend {
                         break;
                     }
                     match receiver.recv_timeout(Duration::from_millis(300)) {
+                        Ok(Message::News(next)) => {
+                            news_in_flight = false;
+                            news = next;
+                            let _ = store.set_setting("news", &news.for_storage());
+                            dirty = true;
+                        }
                         Ok(Message::Quotas(results)) => {
                             quota_in_flight = false;
                             for response in results {
@@ -332,16 +356,11 @@ impl Backend {
                     }
                     if let Ok(mut paths) = changed.lock() {
                         for path in paths.drain(..) {
-                            if path.extension().is_some_and(|e| e == "jsonl") {
-                                if let Some(source) =
+                            if path.extension().is_some_and(|e| e == "jsonl")
+                                && let Some(source) =
                                     sources.iter().find(|s| path.starts_with(&s.home))
-                                {
-                                    enqueue(
-                                        &mut queue,
-                                        &mut queued,
-                                        (source.health.id.clone(), path),
-                                    );
-                                }
+                            {
+                                enqueue(&mut queue, &mut queued, (source.health.id.clone(), path));
                             }
                         }
                     }
@@ -382,11 +401,21 @@ impl Backend {
                             })
                             .collect::<Vec<_>>();
                         if !scopes.is_empty()
-                            && rpc_sender.try_send(crate::rpc::Request { scopes }).is_ok()
+                            && rpc_sender
+                                .try_send(NetworkRequest::Quotas(crate::rpc::Request { scopes }))
+                                .is_ok()
                         {
                             quota_in_flight = true;
                         }
                         last_quota = Instant::now();
+                    }
+                    if !news_in_flight
+                        && Utc::now().timestamp() >= news.next_attempt
+                        && rpc_sender
+                            .try_send(NetworkRequest::News(Box::new(news.clone())))
+                            .is_ok()
+                    {
+                        news_in_flight = true;
                     }
                     let batch_start = Instant::now();
                     while batch_start.elapsed() < Duration::from_millis(250) {
@@ -428,6 +457,7 @@ impl Backend {
                         let recent = store.recent_sessions(None, 10);
                         if let Ok(mut state) = shared.write() {
                             state.settings = settings.clone();
+                            state.news = news.view();
                             state.collecting = !queue.is_empty();
                             state.sources = sources.iter().map(|s| s.health.clone()).collect();
                             let live = quota

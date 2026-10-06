@@ -105,8 +105,8 @@ fn mirror_and_archive_replays_deduplicate_and_sessions_are_distinct() {
         store
             .commit_batch(
                 &cursor(p.clone(), "windows"),
-                &[meta.clone()],
-                &[fact.clone()],
+                std::slice::from_ref(&meta),
+                std::slice::from_ref(&fact),
                 &[],
                 chrono_tz::Asia::Shanghai
             )
@@ -117,8 +117,8 @@ fn mirror_and_archive_replays_deduplicate_and_sessions_are_distinct() {
         store
             .commit_batch(
                 &cursor(p.clone(), "wsl"),
-                &[meta.clone()],
-                &[fact.clone()],
+                std::slice::from_ref(&meta),
+                std::slice::from_ref(&fact),
                 &[],
                 chrono_tz::Asia::Shanghai
             )

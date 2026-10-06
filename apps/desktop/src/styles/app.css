@@ -612,3 +612,16 @@ meter::-webkit-meter-optimum-value {
   background: var(--accent);
   border-radius: 4px;
 }
+.news-text {
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  line-height: 1.8;
+}
+.news-card .row-bottom {
+  gap: 12px;
+  align-items: baseline;
+}
+.news-card .text-button {
+  flex: none;
+}

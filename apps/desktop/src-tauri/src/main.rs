@@ -1,10 +1,30 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod backend;
+mod news;
 mod platform;
 mod rpc;
 
 use backend::{Backend, Settings, Snapshot};
 use tauri::{Emitter, Manager, State};
+use tauri_plugin_opener::OpenerExt;
+
+#[tauri::command]
+fn open_source(url: String, app: tauri::AppHandle) -> Result<(), String> {
+    let parsed = url::Url::parse(&url).map_err(|_| "来源地址无效")?;
+    if parsed.scheme() != "https"
+        || !parsed.username().is_empty()
+        || parsed.password().is_some()
+        || !matches!(
+            parsed.host_str(),
+            Some("codex-resets.com" | "x.com" | "twitter.com")
+        )
+    {
+        return Err("来源地址不在允许的消息站点中".into());
+    }
+    app.opener()
+        .open_url(url, None::<&str>)
+        .map_err(|_| "无法打开来源链接".into())
+}
 
 #[tauri::command]
 fn get_snapshot(state: State<'_, Backend>) -> Result<Snapshot, String> {
@@ -48,13 +68,15 @@ fn window_action(action: String, app: tauri::AppHandle) -> Result<(), String> {
 }
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_single_instance::init(|app, _, _| {
             platform::show_details(app, None)
         }))
         .invoke_handler(tauri::generate_handler![
             get_snapshot,
             set_settings,
-            window_action
+            window_action,
+            open_source
         ])
         .setup(|app| {
             let directory = app.path().app_local_data_dir()?;
@@ -86,10 +108,9 @@ fn main() {
             if matches!(
                 event,
                 tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit
-            ) {
-                if let Some(state) = app.try_state::<Backend>() {
-                    state.shutdown();
-                }
+            ) && let Some(state) = app.try_state::<Backend>()
+            {
+                state.shutdown();
             }
         });
 }

@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { QuotaBucket } from '../lib/types';
   import { untilReset, windowLabel } from '../lib/format';
-  let { bucket, now, status } = $props<{ bucket: QuotaBucket; now: number; status: string }>();
+  let { bucket, now, status }: { bucket: QuotaBucket; now: number; status: string } = $props();
   const stale = $derived(
     now - new Date(bucket.captured_at).getTime() > 6 * 60 * 1000 || status !== 'connected',
   );

@@ -13,6 +13,8 @@
 - Windows 日志目录监听及 60 秒修复扫描；已运行 WSL 的路径探测与 30 秒轮询。
 - 基础设置持久化、源状态与不可用信息。
 - Codex app-server 的 `initialize` / `account/read` / `account/rateLimits/read` 只读调用，哈希账户与 workspace 身份、真实窗口长度、快照缓存、单飞和失败退避。额度子进程启动时有 15 秒全程超时，正常退出清理自建进程。
+- Codex Resets 公开状态及近期历史接口、ETag、Retry-After、有界响应、no-store 缓存控制，公告 / 计划 / 预测 / 观察分类及原文入口；消息缓存可离线显示。
+- 蓝紫色强调色在深浅主题、图标和原生界面中同步；设置草稿不会被后台数据刷新覆盖，可撤销未保存修改。
 
 以上“已落地”表示代码具备路径，不等同于完成原生功能或性能验收。当前 WSL 轮询及路径访问还需要负载、发行版停止及权限场景验证。
 
@@ -24,7 +26,7 @@
 - [ ] 统计时区切换及物化桶重建；模型 / session 分页与 session 详情。
 - [ ] 官方版本化价格资源，价格日期 / tier / 长上下文口径及未知价格覆盖率。
 - [ ] 额度 RPC 完整异常与多账户场景验证、WSL RPC 接入实测；本机 Codex 0.160.0 的只读 quota 已在原生界面验证。
-- [ ] Codex Resets 公共接口、ETag / Retry-After、原始来源链接与消息分类。
+- [ ] Codex Resets 原生联网显示和历史分页验证；接口、缓存控制与分类已实现并通过自动测试。
 - [ ] 额度恢复确认、低额度及消息通知、持久化去重、免打扰。
 - [ ] 来源开关、手动 WSL 路径、诊断脱敏、开机启动和设置完整性。
 - [ ] 真实速度能力检测：目前仅提供不可用说明，没有连续样本时不显示数值。
@@ -35,4 +37,4 @@
 
 ## 当前检查
 
-2026-10-06：`cargo test -p pulse-core` 通过 23 项测试；`cargo check -p codexpulse` 和 `cargo build -p codexpulse` 通过；`pnpm check` 无错误或警告；`pnpm build:ui` 通过。已实际运行本机数据与额度界面。尚无原生进程组性能验收结果，也没有完整首版通过结论。
+2026-10-06：`cargo test --workspace` 通过 30 项测试（核心 26、HTTP 4）；`cargo clippy --workspace --all-targets -- -D warnings` 和 `cargo build -p codexpulse` 通过；`pnpm check` 无错误或警告；`pnpm build:ui` 通过。已实际运行本机数据、额度与蓝紫主题界面。消息接入后的原生检查被用户 Escape 中断，未将其标为通过。尚无原生进程组性能验收结果，也没有完整首版通过结论。

@@ -3,6 +3,7 @@ import { listen } from '@tauri-apps/api/event';
 import type { Snapshot, Settings } from './types';
 export const native = isTauri();
 export const empty: Snapshot = {
+  news: { items: [], status: '', last_success: null, last_attempt: null },
   quota: { buckets: [], sources: {} },
   settings: {
     theme: 'system',
@@ -52,3 +53,7 @@ export const windowAction = (action: string) =>
   native ? invoke<void>('window_action', { action }) : Promise.resolve();
 export const onEvent = <T>(name: string, callback: (value: T) => void) =>
   native ? listen<T>(name, (e) => callback(e.payload)) : Promise.resolve(() => {});
+export const openSource = (url: string) =>
+  native
+    ? invoke<void>('open_source', { url })
+    : Promise.reject(new Error('请在桌面应用中打开来源'));
