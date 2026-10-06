@@ -1,6 +1,9 @@
 <script lang="ts">
+  import { translator as t, locale, localizeError } from '../lib/i18n';
+
   import { tick } from 'svelte';
   import { modelPage } from '../lib/ipc';
+  import { formatUsd } from '../lib/format';
   import type { ModelPage, ModelPageRequest } from '../lib/types';
   import Icon from './Icon.svelte';
   let {
@@ -25,7 +28,7 @@
   const measure = (value: number, unknown: number, events: number) =>
     unknown === events ? '—' : `${number(value)}${unknown ? '*' : ''}`;
   const money = (cost: number, unpriced: number, events: number) =>
-    unpriced === events ? '待计价' : `$${(cost / 1e9).toFixed(2)}${unpriced ? '*' : ''}`;
+    unpriced === events ? $t('待计价') : `${formatUsd(cost)}${unpriced ? '*' : ''}`;
   $effect(() => {
     const request = { ...query, cursor: query.cursor ? { ...query.cursor } : null };
     if (!request.cursor) void revision;
@@ -62,8 +65,8 @@
   }
 </script>
 
-{#if error}<p class="cp-note" role="alert">{error}</p>
-  <button class="cp-textbutton" onclick={refreshList}>重试查询</button>{/if}
+{#if error}<p class="cp-note" role="alert">{localizeError(error, $locale)}</p>
+  <button class="cp-textbutton" onclick={refreshList}>{$t('重试查询')}</button>{/if}
 <div aria-busy={loading}>
   {#each list?.items ?? [] as m (m.model)}
     <button
@@ -74,7 +77,8 @@
     >
       <span class="cp-model-label"
         ><strong class="cp-truncate" title={m.model}>{m.model}</strong><small
-          >{m.sessions} 个 sessions
+          >{m.sessions}
+          {$t('个 sessions')}
           {#if list && list.known_total > 0 && m.unknown_totals < m.events}
             · {((m.total / list.known_total) * 100).toFixed(1)}%{m.unknown_totals
               ? '*'
@@ -83,7 +87,10 @@
         {#if list && list.known_total > 0 && m.unknown_totals < m.events}<span
             class="cp-model-bar"
             role="img"
-            aria-label={`${m.model} 占周期已知 token 用量的 ${((m.total / list.known_total) * 100).toFixed(1)}%`}
+            aria-label={$t('{_0} 占周期已知 token 用量的 {_1}%', {
+              _0: m.model,
+              _1: ((m.total / list.known_total) * 100).toFixed(1),
+            })}
             ><span style:width={`${Math.min(100, (m.total / list.known_total) * 100)}%`}
             ></span></span
           >{/if}
@@ -91,7 +98,10 @@
       <span
         ><span
           ><b>{measure(m.total, m.unknown_totals, m.events)}</b><small
-            >{money(m.cost_nanousd, m.unpriced_events, m.events)}</small
+            title={$t('按当前 API 价格估算')}
+            >{m.reference.pending
+              ? $t('计算中…')
+              : money(m.reference.cost_nanousd, m.reference.unpriced_events, m.events)}</small
           ></span
         ><Icon name={selected === m.model ? 'up' : 'right'} /></span
       >
@@ -99,49 +109,64 @@
     {#if selected === m.model}
       <div class="cp-model-detail">
         <div class="cp-metrics">
-          <div><span>输入</span><strong>{measure(m.input, m.unknown_input, m.events)}</strong></div>
           <div>
-            <span>其中缓存</span><strong>{measure(m.cached, m.unknown_cached, m.events)}</strong>
+            <span>{$t('输入')}</span><strong>{measure(m.input, m.unknown_input, m.events)}</strong>
           </div>
           <div>
-            <span>输出</span><strong>{measure(m.output, m.unknown_output, m.events)}</strong>
+            <span>{$t('其中缓存')}</span><strong
+              >{measure(m.cached, m.unknown_cached, m.events)}</strong
+            >
+          </div>
+          <div>
+            <span>{$t('输出')}</span><strong>{measure(m.output, m.unknown_output, m.events)}</strong
+            >
           </div>
         </div>
-        {#if m.unpriced_events || m.incomplete_events}
+        {#if m.reference.unpriced_events || m.incomplete_events}
           <p class="cp-note">
-            {m.unpriced_events
-              ? `${m.unpriced_events} 条未计价记录${m.unpriced_tokens ? ` · ${number(m.unpriced_tokens)} tokens` : ''}`
+            {m.reference.unpriced_events
+              ? $t('{_0} 条信息不足{_1}', {
+                  _0: m.reference.unpriced_events,
+                  _1: m.reference.unpriced_tokens
+                    ? ` · ${number(m.reference.unpriced_tokens)} tokens`
+                    : '',
+                })
               : ''}{m.incomplete_events
-              ? `${m.unpriced_events ? ' · ' : ''}${m.incomplete_events} 条记录缺少拆分字段`
+              ? $t('{_0}{_1} 条记录缺少拆分字段', {
+                  _0: m.unpriced_events ? ' · ' : '',
+                  _1: m.incomplete_events,
+                })
               : ''}
           </p>
         {/if}
         <button class="cp-textbutton" disabled={loading} onclick={() => sessions(m.model)}
-          >查看此模型最近 30 天的 sessions <Icon name="right" /></button
+          >{$t('查看此模型最近 30 天的 sessions')} <Icon name="right" /></button
         >
       </div>
     {/if}
   {:else}
-    {#if loading}<p class="cp-note">正在读取模型分类…</p>{:else if !error}<p class="cp-note">
-        尚无可归属的模型用量。
+    {#if loading}<p class="cp-note">{$t('正在读取模型分类…')}</p>{:else if !error}<p
+        class="cp-note"
+      >
+        {$t('尚无可归属的模型用量。')}
       </p>{/if}
   {/each}
 </div>
 {#if list?.unknown_total_events}<p class="cp-note">
-    图表按已知 tokens 计算；缺少总量的记录不按零处理。
+    {$t('图表按已知 tokens 计算；缺少总量的记录不按零处理。')}
   </p>{/if}
 {#if list?.next || list?.previous}
   <div class="cp-pager">
     <button disabled={loading || !list?.previous} onclick={() => navigate('previous')}
-      ><Icon name="arrow" /> 上一页</button
+      ><Icon name="arrow" /> {$t('上一页')}</button
     >
     <button disabled={loading || !list?.next} onclick={() => navigate('next')}
-      >下一页 <Icon name="right" /></button
+      >{$t('下一页')} <Icon name="right" /></button
     >
   </div>
 {/if}
 {#if query.cursor && list && list.watermark !== revision}
   <button class="cp-textbutton" disabled={loading} onclick={refreshList}
-    >分类有更新 · 刷新列表 <Icon name="right" /></button
+    >{$t('分类有更新 · 刷新列表')} <Icon name="right" /></button
   >
 {/if}

@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { translator as t, locale, localizeError } from '../lib/i18n';
+
   import type { RefreshConfig, Snapshot } from '../lib/types';
   import { setRefresh, refreshNow } from '../lib/ipc';
   import { sourceNames } from '../lib/format';
@@ -9,35 +11,51 @@
   let error = $state('');
   let custom = $state<Record<string, boolean>>({});
   const time = (value: string | null) =>
-    value ? `上次更新 ${new Date(value).toLocaleString()}` : '尚未更新';
-  const failures: Record<string, string> = {
-    connected: '已连接',
-    ready: '已就绪',
-    verifying_account: '正在确认账号',
-    awaiting_refresh: '等待首次刷新',
-    credentials_unreadable: '无法读取登录凭据',
-    credentials_invalid: '登录文件格式不兼容',
-    credential_config_invalid: '认证存储配置不兼容',
-    credential_store_unsupported: '系统凭据库暂不支持直读',
-    credentials_ephemeral: '凭据仅存于 Codex 进程内存',
-    credentials_expired: '登录已过期，请在 Codex 中重新登录',
-    not_signed_in: '未登录',
-    reauth_required: '需要在 Codex 中重新登录',
-    auth_mode_unsupported: '该登录方式不支持账号额度',
-    custom_backend_unsupported: '自定义后端不支持此额度接口',
-    account_identity_unavailable: '无法确认账号',
-    network_error: '网络请求失败',
-    unsupported_response: '额度接口响应不兼容',
-    account_mismatch: '接口账号与凭据不符',
-    credentials_changed: '账号或凭据已变化，旧结果已丢弃',
-    proxy_config_invalid: 'Codex .env 代理配置无效',
-    http_429: '服务端限流',
-    http_403: '接口拒绝访问',
-    body_too_large: '接口响应过大',
-    body_read_error: '响应读取失败',
-  };
+    value
+      ? $t('上次更新 {_0}', {
+          _0: new Date(value).toLocaleString($locale === 'zh' ? 'zh-CN' : 'en-US'),
+        })
+      : $t('尚未更新');
+  const failures: Record<string, string> = $derived({
+    connected: $t('已连接'),
+    ready: $t('已就绪'),
+    verifying_account: $t('正在确认账号'),
+    awaiting_refresh: $t('等待首次刷新'),
+    credentials_unreadable: $t('无法读取登录凭据'),
+    credentials_invalid: $t('登录文件格式不兼容'),
+    credential_config_invalid: $t('认证存储配置不兼容'),
+    credential_store_unsupported: $t('系统凭据库暂不支持直读'),
+    credentials_ephemeral: $t('凭据仅存于 Codex 进程内存'),
+    credentials_expired: $t('登录已过期，请在 Codex 中重新登录'),
+    not_signed_in: $t('未登录'),
+    reauth_required: $t('需要在 Codex 中重新登录'),
+    auth_mode_unsupported: $t('该登录方式不支持账号额度'),
+    custom_backend_unsupported: $t('自定义后端不支持此额度接口'),
+    account_identity_unavailable: $t('无法确认账号'),
+    network_error: $t('网络请求失败'),
+    unsupported_response: $t('额度接口响应不兼容'),
+    account_mismatch: $t('接口账号与凭据不符'),
+    credentials_changed: $t('账号或凭据已变化，旧结果已丢弃'),
+    proxy_config_invalid: $t('Codex .env 代理配置无效'),
+    http_429: $t('服务端限流'),
+    http_403: $t('接口拒绝访问'),
+    body_too_large: $t('接口响应过大'),
+    body_read_error: $t('响应读取失败'),
+    history_timeout: $t('重置历史同步超时'),
+    history_too_large: $t('重置历史超出读取上限'),
+    history_page_too_large: $t('重置历史超出读取上限'),
+    history_limit_exceeded: $t('重置历史超出读取上限'),
+    invalid_history: $t('重置历史格式不兼容'),
+    invalid_history_pagination: $t('重置历史格式不兼容'),
+    invalid_history_cursor: $t('重置历史分页暂不可用'),
+    history_cursor_did_not_advance: $t('重置历史分页暂不可用'),
+    missing_history_cache: $t('等待重置历史同步'),
+  });
   const label = (code: string) =>
-    failures[code] ?? (code.startsWith('http_') ? `接口返回 ${code.slice(5)}` : code || '等待刷新');
+    failures[code] ??
+    (code.startsWith('http_')
+      ? $t('接口返回 {_0}', { _0: code.slice(5) })
+      : code || $t('等待刷新'));
   const isFailure = (code: string) =>
     !['', 'connected', 'ready', 'verifying_account', 'awaiting_refresh'].includes(code);
   async function change(group: 'quota' | 'news', config: RefreshConfig) {
@@ -64,17 +82,17 @@
 </script>
 
 <div class="cp-divider"></div>
-<div class="cp-sectionhead"><span>网络刷新</span><small>自动保存</small></div>
+<div class="cp-sectionhead"><span>{$t('网络刷新')}</span><small>{$t('自动保存')}</small></div>
 {#each groups as group}
   {@const config = group === 'quota' ? data.settings.quota_refresh : data.settings.news_refresh}
   {@const state = group === 'quota' ? data.quota : data.news}
-  {@const name = group === 'quota' ? '账号额度' : 'Resets 消息'}
+  {@const name = group === 'quota' ? $t('额度与账户统计') : $t('Resets 消息')}
   {@const busy = state.request_status === 'refreshing' || state.request_status === 'queued'}
   <div class="refresh-group">
     <div class="cp-setting refresh-row">
       <span class="refresh-name">{name}</span>
       <select
-        aria-label={`${name}刷新频率`}
+        aria-label={$t('{_0}刷新频率', { _0: name })}
         oninput={(e) => e.stopPropagation()}
         value={config.mode === 'manual'
           ? 'manual'
@@ -93,22 +111,24 @@
         }}
       >
         {#each presets as seconds}<option value={String(seconds)}
-            >每 {seconds < 60 ? `${seconds} 秒` : `${seconds / 60} 分钟`}</option
+            >{$t(seconds < 60 ? '每 {value} 秒' : '每 {value} 分钟', {
+              value: seconds < 60 ? seconds : seconds / 60,
+            })}</option
           >{/each}
-        <option value="custom">自定义间隔</option>
-        <option value="manual">手动</option>
+        <option value="custom">{$t('自定义间隔')}</option>
+        <option value="manual">{$t('手动')}</option>
       </select>
       <button
         class="cp-textbutton"
         disabled={busy || saving !== null}
-        onclick={() => void refresh(group)}>{busy ? '刷新中…' : '刷新'}</button
+        onclick={() => void refresh(group)}>{busy ? $t('刷新中…') : $t('刷新')}</button
       >
     </div>
     {#if config.mode === 'auto' && (custom[group] || !presets.includes(config.interval_seconds))}
       <label class="custom-interval"
-        >间隔（秒）
+        >{$t('间隔（秒）')}
         <input
-          aria-label={`${name}自定义刷新秒数`}
+          aria-label={$t('{_0}自定义刷新秒数', { _0: name })}
           type="number"
           min="30"
           max="86400"
@@ -125,26 +145,31 @@
     {/if}
     <p class="cp-note refresh-meta" role="status">
       {time(state.last_success)}
-      {#if state.request_status === 'backoff'}
-        · 稍后重试{/if}
+      {#if state.request_status === 'backoff'}{$t('· 稍后重试')}{/if}
     </p>
     {#if group === 'quota'}
       {#each Object.entries(data.quota.sources) as [id, source]}
         {#if isFailure(source.status)}<p class="cp-note" role="status">
             {sourceNames([id], data.sources)} · {label(source.status)}
           </p>{/if}
+        {#if isFailure(source.profile_status)}<p class="cp-note" role="status">
+            {sourceNames([id], data.sources)}
+            {$t('· 账户统计：')}{label(source.profile_status)}
+          </p>{/if}
       {/each}
     {:else}
       {#if isFailure(data.news.status)}<p class="cp-note" role="status">
-          重置公告 / Tibo · {label(data.news.status)}
+          {$t('重置公告 / Tibo ·')}
+          {label(data.news.status)}
         </p>{/if}
       {#if isFailure(data.news.challenge_status)}<p class="cp-note" role="status">
-          28 天挑战 · {label(data.news.challenge_status)}
+          {$t('28 天挑战 ·')}
+          {label(data.news.challenge_status)}
         </p>{/if}
     {/if}
   </div>
 {/each}
-{#if error}<p class="cp-note" role="alert">{error}</p>{/if}
+{#if error}<p class="cp-note" role="alert">{localizeError(error, $locale)}</p>{/if}
 
 <style>
   .refresh-group {

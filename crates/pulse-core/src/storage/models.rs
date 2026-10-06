@@ -71,6 +71,7 @@ fn decimal(value: &str) -> Result<i64, StoreError> {
 }
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct ModelRow {
+    pub reference: super::ReferenceEstimate,
     #[serde(flatten)]
     pub usage: ModelUsage,
     pub events: u64,
@@ -132,7 +133,8 @@ impl Store {
         };
         // The immutable, append-only ledger watermark fixes membership and sort keys
         // across pages while ingestion proceeds. One grouped query counts sessions;
-        // no per-model queries, JSON decoding or unbounded IPC arrays are involved.
+        // session counts use this single query; reference reads are bounded by page size.
+        // No JSON decoding or unbounded IPC arrays are involved.
         let sql = format!("WITH grouped AS (
             SELECT model,COALESCE(SUM(total),0) AS total,COALESCE(SUM(input),0) AS input,
                 COALESCE(SUM(cached),0) AS cached,COALESCE(SUM(output),0) AS output,
@@ -178,6 +180,7 @@ impl Store {
                             unknown_cached: unsigned(row, 14)?,
                             unknown_output: unsigned(row, 15)?,
                             unpriced_events: unsigned(row, 16)?,
+                            reference: Default::default(),
                         },
                         unsigned(row, 9)?,
                         unsigned(row, 10)?,
@@ -188,6 +191,14 @@ impl Store {
             )?
             .collect::<Result<Vec<_>, _>>()?;
         rows.truncate(PAGE_SIZE);
+        for row in &mut rows {
+            row.0.reference = self.model_reference(
+                &day_boundary(&request.from_day, timezone)?,
+                &day_boundary_next(&request.through_day, timezone)?,
+                &row.0.usage.model,
+                watermark,
+            )?;
+        }
         if matches!(request.direction, ModelDirection::Previous) {
             rows.reverse();
         }

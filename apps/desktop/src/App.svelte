@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { translator as t, locale, localizeError } from './lib/i18n';
+
   import { onMount, tick } from 'svelte';
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import {
@@ -13,27 +15,35 @@
     defaultSessionQuery,
     readNews,
   } from './lib/ipc';
-  import type { Settings, SessionPageRequest, ModelPageRequest } from './lib/types';
+  import type { Settings, SessionPageRequest, ModelPageRequest, Snapshot } from './lib/types';
   import QuotaCard from './components/QuotaCard.svelte';
-  import NewsCard from './components/NewsCard.svelte';
+  import NewsPane from './components/NewsPane.svelte';
   import Icon from './components/Icon.svelte';
   import ResetStatus from './components/ResetStatus.svelte';
-  import ChallengePanel from './components/ChallengePanel.svelte';
+  import AccountSummary from './components/AccountSummary.svelte';
   import ModelsPane from './components/ModelsPane.svelte';
   import SessionsPane from './components/SessionsPane.svelte';
   import SourceSettings from './components/SourceSettings.svelte';
   import RefreshSettings from './components/RefreshSettings.svelte';
+  import StartupSettings from './components/StartupSettings.svelte';
+  import DiagnosticsPanel from './components/DiagnosticsPanel.svelte';
+  import { subscriptionGroup } from './lib/subscriptions';
+  import { refreshLanguage } from './lib/system-language';
   import {
     windowLabel,
     sessionTokens,
     sessionActivity,
     sessionLabel,
     sourceNames,
+    formatUsd,
   } from './lib/format';
   import { openSource } from './lib/ipc';
   let data = $state(empty);
   let mode = $state<'compact' | 'details'>(native ? 'compact' : 'details');
   let page = $state('overview');
+  let newsChallenge = $state(false);
+  let newsLimit = $state(5);
+  const scrollKey = () => (page === 'news' && newsChallenge ? 'challenge' : page);
   let selectedModel = $state<string | null>(null);
   let selectedSession = $state<string | null>(null);
   let modelQuery = $state<ModelPageRequest>({
@@ -62,20 +72,20 @@
   let scroll = $state<Record<string, number>>({});
   let content: HTMLDivElement | undefined = $state();
   let restoreScroll = false;
-  const tabs = [
-    ['overview', '总览'],
-    ['models', '模型'],
+  const tabs = $derived([
+    ['overview', $t('总览')],
+    ['models', $t('模型')],
     ['sessions', 'Sessions'],
-    ['news', '消息'],
-    ['settings', '设置'],
-  ];
-  const accents: [Settings['accent'], string, string, string][] = [
-    ['blue', '蓝色', '#8bbbff', '#2261d6'],
-    ['violet', '紫色', '#b5b4ff', '#5148bf'],
-    ['teal', '青绿', '#6cdbc7', '#0b7564'],
-    ['amber', '琥珀', '#f2c675', '#915600'],
-    ['rose', '玫红', '#ffa7c4', '#aa3462'],
-  ];
+    ['news', 'Tibo'],
+    ['settings', $t('设置')],
+  ]);
+  const accents: [Settings['accent'], string, string, string][] = $derived([
+    ['blue', $t('蓝色'), '#8bbbff', '#2261d6'],
+    ['violet', $t('紫色'), '#b5b4ff', '#5148bf'],
+    ['teal', $t('青绿'), '#6cdbc7', '#0b7564'],
+    ['amber', $t('琥珀'), '#f2c675', '#915600'],
+    ['rose', $t('玫红'), '#ffa7c4', '#aa3462'],
+  ]);
   const number = (n: number) =>
     new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 }).format(n);
   const compactNumber = (n: number) =>
@@ -92,40 +102,48 @@
     `${shortDate(data.usage.from_day)} — ${shortDate(data.usage.through_day)}`,
   );
   const money = (cost: number, unpriced: number) =>
-    unpriced > 0
-      ? cost > 0
-        ? `$${(cost / 1e9).toFixed(2)}*`
-        : '待计价'
-      : `$${(cost / 1e9).toFixed(2)}`;
+    unpriced > 0 ? (cost > 0 ? `${formatUsd(cost)}*` : $t('待计价')) : formatUsd(cost);
   const time = (ts: string | null) =>
     ts
-      ? new Intl.DateTimeFormat('zh-CN', {
-          month: 'short',
+      ? new Intl.DateTimeFormat($locale === 'zh' ? 'zh-CN' : 'en-US', {
+          month: $locale === 'zh' ? 'short' : 'numeric',
           day: 'numeric',
           hour: '2-digit',
           minute: '2-digit',
+          hour12: false,
         }).format(new Date(ts))
-      : '尚未同步';
+      : $t('尚未同步');
   const activityInfo = $derived(sessionActivity(data, now));
+  const referenceMoney = (value: Snapshot['usage']['reference']) =>
+    value.pending ? $t('计算中…') : money(value.cost_nanousd, value.unpriced_events);
   const working = $derived(
     activityInfo.sessions.find((s) => s.meta.id === selectedSession) ?? activityInfo.working,
   );
   const activity = $derived(activityInfo.state);
   const activityLabel = $derived(
     activity === 'busy'
-      ? `忙${activityInfo.sessions.length > 1 ? activityInfo.sessions.length : ''}`
+      ? $t('忙{_0}', { _0: activityInfo.sessions.length > 1 ? activityInfo.sessions.length : '' })
       : activity === 'idle'
-        ? '闲'
+        ? $t('闲')
         : '?',
   );
   const activityTitle = $derived(
     activity === 'busy'
-      ? `${activityInfo.sessions.length} 个 session 工作中（最近 5 分钟有日志事件）`
+      ? $t('{_0} 个 session 工作中（最近 5 分钟有日志事件）', { _0: activityInfo.sessions.length })
       : activity === 'idle'
-        ? '未检测到工作中的 session'
-        : '工作状态未知：日志过期或数据源未连接',
+        ? $t('未检测到工作中的 session')
+        : $t('工作状态未知：日志过期或数据源未连接'),
   );
   const current = $derived(working ?? data.recent[0]);
+  const outputRate = $derived(current?.meta.output_rate);
+  const rateFresh = $derived(
+    outputRate && (outputRate.completed || now - Date.parse(outputRate.measured_at) <= 60000),
+  );
+  const rateText = $derived(
+    rateFresh && outputRate
+      ? ((outputRate.output_tokens * 1000) / outputRate.elapsed_ms).toFixed(1)
+      : '—',
+  );
   const compactQuota = $derived(data.quota.buckets[0]);
   const compactWindows = $derived(
     [compactQuota?.secondary ?? compactQuota?.primary].filter((w) => w != null),
@@ -138,10 +156,41 @@
   );
   const highest = $derived(Math.max(1, ...data.usage.days.map((d) => d.total)));
   const unreadKeys = $derived(data.news.unread_keys ?? []);
+  const accountBucket = $derived(
+    data.quota.buckets.find((bucket) => bucket.limit_id === 'codex' && bucket.identity_confirmed),
+  );
+  const accountSource = $derived(
+    accountBucket
+      ? data.quota.sources[accountBucket.source_id]
+      : Object.values(data.quota.sources).find((source) => source.identity && source.profile),
+  );
+  const accountName = $derived(
+    accountSource?.profile?.display_name ||
+      (accountSource?.profile?.username
+        ? `@${accountSource.profile.username.replace(/^@/, '')}`
+        : accountSource?.identity
+          ? $t('账户资料同步中')
+          : $t('账户待连接')),
+  );
+  const accountPlan = $derived(
+    accountBucket?.plan
+      ? ((
+          {
+            free: 'Free',
+            plus: 'Plus',
+            pro: 'Pro',
+            team: 'Team',
+            business: 'Business',
+            enterprise: 'Enterprise',
+            edu: 'Edu',
+          } as Record<string, string>
+        )[accountBucket.plan.toLowerCase()] ?? accountBucket.plan)
+      : null,
+  );
   const importantUnread = $derived(data.news.important_unread ?? 0);
-  async function acknowledgeNews() {
+  async function acknowledgeNews(keys: string[] = [...unreadKeys]) {
     try {
-      await readNews([...unreadKeys]);
+      await readNews(keys);
       await refresh();
     } catch (e) {
       error = String(e);
@@ -157,8 +206,13 @@
   }
   async function goPage(next: string) {
     if (next === page) return;
-    if (content) scroll[page] = content.scrollTop;
+    if (content) scroll[scrollKey()] = content.scrollTop;
     page = next;
+    await restorePageScroll();
+  }
+  async function goNewsDetail(detail: boolean) {
+    if (content) scroll[scrollKey()] = content.scrollTop;
+    newsChallenge = detail;
     await restorePageScroll();
   }
   async function restorePageScroll(modelsReady = false) {
@@ -166,7 +220,7 @@
     await tick();
     // A paged model list has no height until its asynchronous read completes.
     if (mode === 'details' && page === 'models' && !modelsReady) return;
-    if (content) content.scrollTop = scroll[page] ?? 0;
+    if (content) content.scrollTop = scroll[scrollKey()] ?? 0;
     await tick();
     restoreScroll = false;
   }
@@ -174,6 +228,8 @@
     const view = {
       mode,
       page,
+      news_challenge: newsChallenge,
+      news_limit: newsLimit,
       selected_model: selectedModel,
       selected_session: selectedSession,
       session_query: sessionQuery,
@@ -252,64 +308,84 @@
     let disposed = false;
     let clock: ReturnType<typeof setInterval> | undefined;
     const clockVisible = (visible: boolean) => {
+      if (disposed) return;
       clearInterval(clock);
       if (visible) {
         now = Date.now();
-        clock = setInterval(() => (now = Date.now()), 60000);
+        void refreshLanguage();
+        clock = setInterval(() => {
+          now = Date.now();
+          void refreshLanguage();
+        }, 60000);
       }
     };
     clockVisible(!document.hidden);
-    const cleanups: (() => void)[] = [];
-    const events = [
-      onEvent('snapshot-changed', () => {
-        if (!document.hidden) void refresh();
-      }),
-      onEvent<[string, string | null]>('window-mode', ([next, target]) => {
-        if (content) scroll[page] = content.scrollTop;
-        const changed = mode !== next;
-        mode = next as typeof mode;
-        if (target && target !== page) void goPage(target);
-        else if (changed) void restorePageScroll();
-        void refresh();
-      }),
-      onEvent<Settings>('settings-applied', (next) => {
-        if (!settingsDirty || saving) {
-          settings = { ...next };
-          path = next.windows_home ?? '';
+    const subscriptions = subscriptionGroup([
+      () =>
+        onEvent('snapshot-changed', () => {
+          if (!disposed && !document.hidden) void refresh();
+        }),
+      () =>
+        onEvent<[string, string | null]>('window-mode', ([next, target]) => {
+          if (disposed) return;
+          if (content) scroll[scrollKey()] = content.scrollTop;
+          const changed = mode !== next;
+          mode = next as typeof mode;
+          if (target && target !== page) void goPage(target);
+          else if (changed) void restorePageScroll();
+          void refresh();
+        }),
+      () =>
+        onEvent<Settings>('settings-applied', (next) => {
+          if (disposed) return;
+          if (!settingsDirty || saving) {
+            settings = { ...next };
+            path = next.windows_home ?? '';
+          }
+          void refresh();
+        }),
+      () => onEvent<boolean>('window-visible', clockVisible),
+      () =>
+        onEvent<boolean>('glass-supported', (supported) => {
+          if (!disposed) glassSupported = supported;
+        }),
+    ]);
+    void subscriptions.ready
+      .catch(() => {
+        if (!disposed) error = '无法订阅自动更新，请重新打开面板';
+      })
+      .then(async () => {
+        if (!disposed) {
+          await refresh();
+          if (disposed) return;
+          const view = await getViewState();
+          if (disposed) return;
+          if (view) {
+            mode = view.mode;
+            page = tabs.some(([key]) => key === view.page) ? view.page : 'overview';
+            newsChallenge = view.news_challenge ?? false;
+            newsLimit = view.news_limit ?? 5;
+            selectedModel = view.selected_model;
+            selectedSession = view.selected_session;
+            sessionQuery = view.session_query ?? defaultSessionQuery();
+            if (
+              view.model_query?.from_day === data.usage.from_day &&
+              view.model_query?.through_day === data.usage.through_day &&
+              (!view.model_query.cursor ||
+                view.model_query.cursor.timezone === data.settings.timezone)
+            )
+              modelQuery = view.model_query;
+            scroll = view.scroll;
+            glassSupported = view.glass_supported;
+            floatingSupported = view.floating_supported;
+          }
+          viewReady = true;
+          await restorePageScroll();
         }
-        void refresh();
-      }),
-      onEvent<boolean>('window-visible', clockVisible),
-      onEvent<boolean>('glass-supported', (supported) => (glassSupported = supported)),
-    ];
-    void Promise.all(events).then(async (list) => {
-      if (disposed) list.forEach((fn) => fn());
-      else {
-        cleanups.push(...list);
-        await refresh();
-        const view = await getViewState();
-        if (disposed) return;
-        if (view) {
-          mode = view.mode;
-          page = view.page;
-          selectedModel = view.selected_model;
-          selectedSession = view.selected_session;
-          sessionQuery = view.session_query ?? defaultSessionQuery();
-          if (
-            view.model_query?.from_day === data.usage.from_day &&
-            view.model_query?.through_day === data.usage.through_day &&
-            (!view.model_query.cursor ||
-              view.model_query.cursor.timezone === data.settings.timezone)
-          )
-            modelQuery = view.model_query;
-          scroll = view.scroll;
-          glassSupported = view.glass_supported;
-          floatingSupported = view.floating_supported;
-        }
-        viewReady = true;
-        await restorePageScroll();
-      }
-    });
+      })
+      .catch(() => {
+        if (!disposed) error = '无法加载界面，请重新打开面板';
+      });
     const visible = () => {
       clockVisible(!document.hidden);
       if (!document.hidden) void refresh();
@@ -317,15 +393,17 @@
     document.addEventListener('visibilitychange', visible);
     const escape = (e: KeyboardEvent) => {
       if (e.key === 'Escape') void windowAction('compact');
-      if (e.ctrlKey && e.key.toLowerCase() === 'q') void windowAction('exit');
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'q') void windowAction('exit');
     };
     window.addEventListener('keydown', escape);
+    window.addEventListener('languagechange', refreshLanguage);
     return () => {
       clearInterval(clock);
       disposed = true;
-      cleanups.forEach((fn) => fn());
+      subscriptions.dispose();
       document.removeEventListener('visibilitychange', visible);
       window.removeEventListener('keydown', escape);
+      window.removeEventListener('languagechange', refreshLanguage);
     };
   });
 </script>
@@ -334,6 +412,7 @@
   class="cp-shell"
   class:native-shell={native}
   class:compact={mode === 'compact'}
+  class:menubar={!floatingSupported}
   class:opaque={!settings.glass || !glassSupported}
   data-theme={settings.theme}
   data-accent={settings.accent ?? 'blue'}
@@ -346,90 +425,112 @@
         class:cp-unknown={activity === 'unknown'}
         class:cp-indexing={data.collecting}
         onpointerdown={drag}
-        aria-label={`${activityTitle} · 拖动 CodexPulse 浮窗`}
-        title={`CodexPulse · ${activityTitle}${data.collecting ? ' · 索引中' : ''} · 拖动调整位置`}
-        ><span class="cp-activity-dot"></span><b>{activityLabel}</b></button
+        aria-label={$t('{_0} · 拖动 CodexPulse 浮窗', { _0: activityTitle })}
+        title={$t('CodexPulse · {_0}{_1} · 拖动调整位置', {
+          _0: activityTitle,
+          _1: data.collecting ? $t(' · 索引中') : '',
+        })}><span class="cp-activity-dot"></span><b>{activityLabel}</b></button
       >
       <button
         class="cp-compact-info"
         onclick={() => void windowAction(unreadKeys.length ? 'news' : 'expand')}
         aria-label={importantUnread
-          ? '查看新的重要重置消息'
+          ? $t('查看新的重要重置消息')
           : unreadKeys.length
-            ? '查看新消息'
-            : '展开 CodexPulse 详情'}
+            ? $t('查看新消息')
+            : $t('展开 CodexPulse 详情')}
       >
         {#each compactWindows as window}<span
             class:cp-stale={compactStale}
-            title={`${windowLabel(window)}剩余额度${compactStale ? ' · 快照已过期' : ''}`}
+            title={$t('{_0}剩余额度{_1}', {
+              _0: windowLabel(window, $locale),
+              _1: compactStale ? $t(' · 快照已过期') : '',
+            })}
             ><small
               >{window.duration_minutes && window.duration_minutes % 1440 === 0
                 ? `${window.duration_minutes / 1440}d`
                 : window.duration_minutes && window.duration_minutes % 60 === 0
                   ? `${window.duration_minutes / 60}h`
                   : window.duration_minutes === null
-                    ? '额'
+                    ? $t('额')
                     : `${window.duration_minutes}m`}</small
             ><b
               >{window.remaining_percent === null
                 ? '—'
                 : `${window.remaining_percent.toFixed(0)}%`}{compactStale ? '*' : ''}</b
             ></span
-          >{:else}<small class="cp-compact-wait">{data.collecting ? '索引中' : '等待额度'}</small
+          >{:else}<small class="cp-compact-wait"
+            >{data.collecting ? $t('索引中') : $t('等待额度')}</small
           >{/each}
         {#if importantUnread}<span
             class="cp-reset-alert"
-            title={`${importantUnread} 条新的重要重置消息 · 点击查看公告，实际额度以账户快照为准`}
-            >重置<span class="cp-news-indicator"></span></span
+            title={$t('{_0} 条新的重要重置消息 · 点击查看公告，实际额度以账户快照为准', {
+              _0: importantUnread,
+            })}>{$t('重置')}<span class="cp-news-indicator"></span></span
           >{:else}<span
             class="cp-compact-tokens"
-            title={`当前 session · ${current ? current.total.toLocaleString() + ' tokens' : '待采集'} · ${current?.models.join(' / ') || '模型未知'} · ${current ? money(current.cost_nanousd, current.unpriced_tokens) : '待计价'}`}
-            ><b>{sessionTokens(current, compactNumber)}</b><small>tok</small></span
+            title={$t('当前 session · {_0} · {_1} · {_2}', {
+              _0: current ? current.total.toLocaleString() + ' tokens' : $t('待采集'),
+              _1: current?.models.join(' / ') || $t('模型未知'),
+              _2: current ? referenceMoney(current.reference) : $t('待计价'),
+            })}><b>{sessionTokens(current, compactNumber)}</b><small>tok</small></span
           >{#if unreadKeys.length}<span
               class="cp-news-indicator"
-              title={`${unreadKeys.length} 条新动态`}
+              title={$t('{_0} 条新动态', { _0: unreadKeys.length })}
             ></span>{/if}{/if}
         <Icon name="right" />
       </button>
     </div>
   {:else}
     <header class="cp-header">
-      <button class="cp-logo" onpointerdown={drag} aria-label="拖动 CodexPulse 窗口"
+      <button class="cp-logo" onpointerdown={drag} aria-label={$t('拖动 CodexPulse 窗口')}
         ><Icon name="activity" /></button
       >
-      <button class="cp-brand" onpointerdown={drag} aria-label="拖动 CodexPulse 窗口"
+      <button class="cp-brand" onpointerdown={drag} aria-label={$t('拖动 CodexPulse 窗口')}
         ><strong>CodexPulse</strong><small
-          >额度快照{data.quota?.buckets[0]?.plan ? ` · ${data.quota.buckets[0].plan}` : ''}</small
+          >{$t('额度快照')}{data.quota?.buckets[0]?.plan
+            ? ` · ${data.quota.buckets[0].plan}`
+            : ''}</small
         ></button
       >
       {#if floatingSupported}<button
           class="cp-icon"
-          aria-label="切换窗口置顶"
+          aria-label={$t('切换窗口置顶')}
           aria-pressed={data.settings.always_on_top}
           onclick={() => void togglePin()}><Icon name="pin" /></button
         >{/if}
-      <button class="cp-icon" aria-label="打开设置" onclick={() => void goPage('settings')}
+      <button class="cp-icon" aria-label={$t('打开设置')} onclick={() => void goPage('settings')}
         ><Icon name="settings" /></button
-      ><button class="cp-icon" aria-label="收起详情" onclick={() => void windowAction('compact')}
-        ><Icon name="up" /></button
+      ><button
+        class="cp-icon"
+        aria-label={$t('收起详情')}
+        onclick={() => void windowAction('compact')}><Icon name="up" /></button
+      >
+      <button
+        class="cp-icon cp-exit"
+        aria-label={$t('退出 CodexPulse')}
+        title={$t('退出 CodexPulse')}
+        onclick={() => void windowAction('exit')}>{$t('退出')}</button
       >
     </header>
-    <button class="cp-source" onclick={() => void goPage('settings')}
+    <button
+      class="cp-source"
+      aria-label={$t('账户与数据源设置')}
+      onclick={() => void goPage('settings')}
       ><span
-        ><span class="cp-dot"></span><span
-          >{data.sources
-            .filter((s) => s.status === 'connected')
-            .map((s) => s.label)
-            .join(' + ') || '等待连接本地来源'}</span
+        ><span class="cp-dot"></span><span class="cp-truncate"
+          >{accountName}{accountPlan ? ` · ${accountPlan}` : ''}</span
         ></span
       ><Icon name="right" /></button
     >
-    <nav class="cp-tabs" aria-label="详情页面">
+    <nav class="cp-tabs" aria-label={$t('详情页面')}>
       {#each tabs.filter(([key]) => key !== 'settings') as [key, label]}<button
           aria-pressed={page === key}
           onclick={() => void goPage(key)}
-          >{label}{#if key === 'news' && data.news?.items.length}<span class="cp-count"
-              >{data.news.items.length}</span
+          >{label}{#if key === 'news' && unreadKeys.length}<span
+              class="cp-count"
+              aria-label={$t('{_0} 条未读新消息', { _0: unreadKeys.length })}
+              >{unreadKeys.length}</span
             >{/if}</button
         >{/each}
     </nav>
@@ -437,77 +538,86 @@
       class="cp-body"
       bind:this={content}
       onscroll={() => {
-        if (!restoreScroll && content) scroll[page] = content.scrollTop;
+        if (!restoreScroll && content) scroll[scrollKey()] = content.scrollTop;
       }}
     >
       {#if data.error || error || data.timezone_error}<p class="cp-method" role="status">
-          {error || data.error || data.timezone_error}
+          {localizeError(error || data.error || data.timezone_error, $locale)}
         </p>{/if}
       {#if page === 'overview'}
         {#each data.quota?.buckets ?? [] as bucket}{#if data.quota.buckets.length > 1}<div
               class="cp-sectionhead cp-bucket-label"
             >
-              <span>{bucket.name} · {bucket.plan ?? '套餐未知'}</span><small
+              <span>{bucket.name} · {bucket.plan ?? $t('套餐未知')}</span><small
                 >{bucket.source_id}</small
               >
             </div>{/if}<QuotaCard
             {bucket}
             {now}
+            allowance={bucket.limit_id === 'codex'
+              ? data.quota.sources[bucket.source_id]?.allowance
+              : undefined}
             status={data.quota.sources[bucket.source_id]?.status ?? 'unknown'}
             maxAgeSeconds={data.settings.quota_refresh.interval_seconds + 60}
           />{:else}<p class="cp-note">
             {data.settings.quota_refresh.mode === 'manual'
-              ? '暂无已验证额度缓存。手动模式可在设置中点击立即刷新。'
-              : '尚未获得有效额度快照，可在设置中查看来源状态。'}
+              ? $t('暂无已验证额度缓存。手动模式可在设置中点击立即刷新。')
+              : $t('尚未获得有效额度快照，可在设置中查看来源状态。')}
           </p>{/each}
         <ResetStatus news={data.news} {now} />
         <div class="cp-divider"></div>
-        <div class="cp-sectionhead">
-          <span
-            ><span class="cp-dot"></span>
-            {working ? '当前工作 session' : '最近工作 session'}</span
-          ><span class="cp-label cp-truncate"
-            >{sourceNames(current?.sources ?? [], data.sources)} · {current?.models.join(' / ') ||
-              '模型未知'}</span
-          >
-        </div>
-        <button
-          class="cp-session-title"
-          onclick={() => {
-            selectedSession = current?.meta.id ?? null;
-            sessionQuery = defaultSessionQuery();
-            void goPage('sessions');
-          }}
-          ><span class="cp-truncate" title={sessionLabel(current?.meta, data.settings.hide_titles)}
-            >{sessionLabel(current?.meta, data.settings.hide_titles)}</span
-          ><Icon name="arrow" /></button
-        >
-        {#if current?.meta.project && !data.settings.hide_projects}<p
-            class="cp-note cp-truncate"
-            title={current.meta.project}
-          >
-            项目：{current.meta.project}
-          </p>{/if}
-        <div class="cp-metrics">
-          <div>
-            <span>本 session tokens</span><strong>{sessionTokens(current, number)}</strong>
-          </div>
-          <div>
-            <span>美元估算</span><strong
-              >{current?.events
-                ? money(current.cost_nanousd, current.unpriced_tokens || current.unknown_totals)
-                : '—'}</strong
-            >
-          </div>
-          <div>
-            <span>当前输出速度</span><strong title="日志不提供连续输出 token 样本"
-              >— <small>tok/s</small></strong
-            >
-          </div>
-        </div>
-        <div class="cp-summary">
+        <section class="cp-session-overview" aria-label={working ? $t('当前会话') : $t('最近会话')}>
           <div class="cp-sectionhead">
-            <span>最近 30 天 · 所有模型</span><small>{dateRange}</small>
+            <span>{working ? $t('当前会话') : $t('最近会话')}</span>
+            <small class:cp-session-active={!!working}>
+              {#if working}<span class="cp-dot"></span>{/if}{working
+                ? $t('工作中')
+                : $t('最近记录')}
+            </small>
+          </div>
+          <button
+            class="cp-session-title"
+            onclick={() => {
+              selectedSession = current?.meta.id ?? null;
+              sessionQuery = defaultSessionQuery();
+              void goPage('sessions');
+            }}
+            ><span
+              class="cp-truncate"
+              title={sessionLabel(current?.meta, data.settings.hide_titles, $locale)}
+              >{sessionLabel(current?.meta, data.settings.hide_titles, $locale)}</span
+            ><Icon name="arrow" /></button
+          >
+          <div class="cp-session-meta">
+            <span class="cp-truncate"
+              >{sourceNames(current?.sources ?? [], data.sources)} · {current?.models.join(' / ') ||
+                $t('模型未知')}</span
+            >
+            {#if current?.meta.project && !data.settings.hide_projects}<span
+                class="cp-truncate"
+                title={current.meta.project}>{$t('项目：')}{current.meta.project}</span
+              >{/if}
+          </div>
+          <div class="cp-metrics">
+            <div>
+              <span>Tokens</span><strong>{sessionTokens(current, number)}</strong>
+            </div>
+            <div>
+              <span>{$t('API 等价估算')}</span><strong
+                >{current?.events ? referenceMoney(current.reference) : '—'}</strong
+              >
+            </div>
+            <div>
+              <span>{outputRate?.completed ? $t('上轮平均速度') : $t('本轮平均速度')}</span><strong
+                title={$t('本轮输出 tokens ÷ 轮次耗时（含推理、工具执行和等待）；有日志样本时刷新')}
+                >{rateText} <small>tok/s</small></strong
+              >
+            </div>
+          </div>
+        </section>
+        <section class="cp-summary" aria-label={$t('用量统计：最近 30 天与账户累计')}>
+          <div class="cp-sectionhead">
+            <span>{$t('最近 30 天累计')}</span><small>{dateRange}</small>
           </div>
           <div class="cp-total">
             <strong
@@ -516,30 +626,50 @@
               ></strong
             >
             <div>
-              <span>API 等价估算</span><b
-                >{money(data.usage.cost_nanousd, data.usage.unpriced_tokens)}</b
-              >
+              <span>{$t('当前 API 等价估算')}</span><b>{referenceMoney(data.usage.reference)}</b>
             </div>
           </div>
-          <div class="cp-chart" role="img" aria-label="最近三十个自然日 token 用量">
+          <p class="cp-note cp-pricing-coverage">
+            {data.usage.reference.price_date}
+            {$t('价格 · 区分缓存 / Fast / 长上下文')}
+          </p>
+          {#if data.usage.reference.unpriced_tokens > 0 && !data.usage.reference.pending}
+            <p class="cp-note cp-pricing-coverage">
+              {$t('覆盖')}
+              {number(Math.max(0, data.usage.total - data.usage.reference.unpriced_tokens))} tokens （{data
+                .usage.total
+                ? (
+                    (Math.max(0, data.usage.total - data.usage.reference.unpriced_tokens) /
+                      data.usage.total) *
+                    100
+                  ).toFixed(1)
+                : '0.0'}%） · {number(data.usage.reference.unpriced_tokens)}
+              {$t('信息不足')}
+            </p>
+          {/if}
+          <div class="cp-chart" role="img" aria-label={$t('最近三十个自然日 token 用量')}>
             {#each data.usage.days as day}<span
                 style:height={`${day.total ? Math.max(2, (day.total / highest) * 100) : 0}%`}
                 title={`${day.day}: ${day.total.toLocaleString()} tokens`}
               ></span>{/each}
           </div>
           <div class="cp-chartaxis">
-            <span>{shortDate(data.usage.from_day)}</span><span>每日 tokens</span><span
+            <span>{shortDate(data.usage.from_day)}</span><span>{$t('每日 tokens')}</span><span
               >{shortDate(data.usage.through_day)}</span
             >
           </div>
           <button class="cp-textbutton" onclick={() => void goPage('models')}
-            >{data.usage.sessions} 个 sessions · {data.usage.model_count} 个模型
-            <span>查看分类 <Icon name="right" /></span></button
+            >{data.usage.sessions}
+            {$t('个 sessions ·')}
+            {data.usage.model_count}
+            {$t('个模型')}
+            <span>{$t('查看分类')} <Icon name="right" /></span></button
           >
-        </div>
+          <AccountSummary {data} />
+        </section>
       {:else if page === 'models'}
         <div class="cp-sectionhead">
-          <span>最近 30 天 · 所有模型</span><small>{dateRange}</small>
+          <span>{$t('最近 30 天 · 所有模型')}</span><small>{dateRange}</small>
         </div>
         <div class="cp-total">
           <strong
@@ -548,21 +678,21 @@
             ></strong
           >
           <div>
-            <span>美元估算</span><b>{money(data.usage.cost_nanousd, data.usage.unpriced_tokens)}</b>
+            <span>{$t('当前 API 等价估算')}</span><b>{referenceMoney(data.usage.reference)}</b>
           </div>
         </div>
         <div class="cp-metrics cp-breakdown">
-          <div><span>输入</span><strong>{number(data.usage.input)}</strong></div>
-          <div><span>其中缓存</span><strong>{number(data.usage.cached)}</strong></div>
-          <div><span>输出</span><strong>{number(data.usage.output)}</strong></div>
+          <div><span>{$t('输入')}</span><strong>{number(data.usage.input)}</strong></div>
+          <div><span>{$t('其中缓存')}</span><strong>{number(data.usage.cached)}</strong></div>
+          <div><span>{$t('输出')}</span><strong>{number(data.usage.output)}</strong></div>
         </div>
         <div class="cp-sectionhead cp-modelheading">
-          <span>按模型分类</span><small>Tokens 占比 / 估算 USD</small>
+          <span>{$t('按模型分类')}</span><small>{$t('Tokens 占比 / 估算 USD')}</small>
         </div>
         <ModelsPane
           bind:query={modelQuery}
           bind:selected={selectedModel}
-          revision={data.usage.fact_revision}
+          revision={`${data.usage.fact_revision}:${data.usage.reference.cost_nanousd}:${data.usage.reference.pending}`}
           ready={() => void restorePageScroll(true)}
           sessions={(model) => {
             sessionQuery = {
@@ -576,7 +706,8 @@
           }}
         />
         <p class="cp-note">
-          {data.usage.sessions} 个独立 sessions；一个 session 可使用多个模型。缓存属于输入，汇总不重复计算。
+          {data.usage.sessions}
+          {$t('个独立 sessions；一个 session 可使用多个模型。缓存属于输入，汇总不重复计算。')}
         </p>
       {:else if page === 'sessions'}
         <SessionsPane
@@ -590,99 +721,114 @@
           ready={() => void restorePageScroll()}
         />
       {:else if page === 'news'}
-        <div class="cp-sectionhead">
-          <span>消息与额度恢复</span><small
-            >{data.news?.status === 'connected' ? '已同步' : '等待同步'}</small
-          >
-        </div>
-        <ResetStatus news={data.news} {now} />
-        <ChallengePanel news={data.news} {now} />
-        <div class="cp-sectionhead"><span>重置公告与历史</span><small>公开消息</small></div>
-        {#if unreadKeys.length}<div class="cp-sectionhead">
-            <span
-              >{importantUnread
-                ? `${importantUnread} 条重要重置消息`
-                : `${unreadKeys.length} 条新动态`}</span
-            ><button class="cp-textbutton" onclick={() => void acknowledgeNews()}
-              >全部标为已读</button
-            >
-          </div>{/if}
-        {#each data.news?.items ?? [] as item (`${item.kind}:${item.id}`)}<NewsCard
-            {item}
-            {now}
-            unread={unreadKeys.includes(
-              `${item.kind[0].toUpperCase()}${item.kind.slice(1)}:${item.id}`,
-            )}
-          />{:else}<p class="cp-note">
-            暂时没有消息。公共接口每 5 分钟同步，遇到限流等待服务器指定时间。
-          </p>{/each}
-        <p class="cp-note">消息出现不代表当前账户已恢复；账户恢复需要额度快照确认。</p>
-        <button
-          class="cp-textbutton"
-          onclick={() =>
-            void openSource('https://codex-resets.com').catch((e) => (error = String(e)))}
-          >数据来自 Codex Resets <Icon name="external" /></button
-        >
-        <p class="cp-note">最近成功同步：{time(data.news?.last_success ?? null)}</p>
+        <NewsPane
+          news={data.news}
+          {now}
+          timezone={data.settings.timezone}
+          bind:limit={newsLimit}
+          detail={newsChallenge}
+          navigate={(detail) => void goNewsDetail(detail)}
+          acknowledge={acknowledgeNews}
+        />
       {:else if page === 'settings'}
-        <div class="cp-sectionhead"><span>显示与数据源</span><small>本地设置</small></div>
+        <div class="cp-sectionhead">
+          <span>{$t('显示与数据源')}</span><small>{$t('本地设置')}</small>
+        </div>
+        {#if !floatingSupported}<StartupSettings />{/if}
         <section oninput={() => (settingsDirty = true)} onchange={() => (settingsDirty = true)}>
           <label class="cp-setting"
-            >外观<select bind:value={settings.theme}
-              ><option value="system">跟随系统</option><option value="light">浅色</option><option
-                value="dark">深色</option
-              ></select
+            >{$t('外观')}<select bind:value={settings.theme}
+              ><option value="system">{$t('跟随系统')}</option><option value="light"
+                >{$t('浅色')}</option
+              ><option value="dark">{$t('深色')}</option></select
             ></label
           ><label class="cp-setting"
-            ><span>毛玻璃效果<small class="cp-setting-hint">关闭后使用不透明背景</small></span
-            ><input type="checkbox" role="switch" bind:checked={settings.glass} /></label
+            ><span
+              >{$t('毛玻璃效果')}<small class="cp-setting-hint">{$t('关闭后使用不透明背景')}</small
+              ></span
+            ><input
+              type="checkbox"
+              role="switch"
+              switch={floatingSupported ? undefined : true}
+              bind:checked={settings.glass}
+            /></label
           >
           <label class="cp-setting"
             ><span
-              >隐藏会话标题<small class="cp-setting-hint">详情使用短 ID，悬停提示也隐藏名称</small
+              >{$t('隐藏会话标题')}<small class="cp-setting-hint"
+                >{$t('详情使用短 ID，悬停提示也隐藏名称')}</small
               ></span
-            ><input type="checkbox" role="switch" bind:checked={settings.hide_titles} /></label
-          >
-          <label class="cp-setting"
-            ><span>隐藏项目名称</span><input
+            ><input
               type="checkbox"
               role="switch"
+              switch={floatingSupported ? undefined : true}
+              bind:checked={settings.hide_titles}
+            /></label
+          >
+          <label class="cp-setting"
+            ><span>{$t('隐藏项目名称')}</span><input
+              type="checkbox"
+              role="switch"
+              switch={floatingSupported ? undefined : true}
               bind:checked={settings.hide_projects}
             /></label
           >
           {#if floatingSupported}<label class="cp-setting"
               ><span
-                >显示桌面浮窗<small class="cp-setting-hint">关闭后通过系统托盘查看详情</small></span
-              ><input type="checkbox" role="switch" bind:checked={settings.floating} /></label
-            ><label class="cp-setting"
-              ><span>浮窗始终置顶</span><input
+                >{$t('显示桌面浮窗')}<small class="cp-setting-hint"
+                  >{$t('关闭后通过系统托盘查看详情')}</small
+                ></span
+              ><input
                 type="checkbox"
                 role="switch"
+                switch={floatingSupported ? undefined : true}
+                bind:checked={settings.floating}
+              /></label
+            ><label class="cp-setting"
+              ><span>{$t('浮窗始终置顶')}</span><input
+                type="checkbox"
+                role="switch"
+                switch={floatingSupported ? undefined : true}
                 bind:checked={settings.always_on_top}
               /></label
             >{/if}
           <div class="cp-divider"></div>
-          <div class="cp-sectionhead"><span>采集来源</span><small>本机 · 只读</small></div>
+          <div class="cp-sectionhead">
+            <span>{$t('采集来源')}</span><small>{$t('本机 · 只读')}</small>
+          </div>
           <label class="cp-setting"
-            ><span>Windows Codex App / CLI</span><input
+            ><span>{floatingSupported ? 'Windows' : 'macOS'} Codex App / CLI</span><input
               type="checkbox"
               role="switch"
+              switch={floatingSupported ? undefined : true}
               bind:checked={settings.windows_enabled}
             /></label
-          ><label class="cp-setting"
-            ><span>已运行的 WSL<small class="cp-setting-hint">不主动启动已停止的发行版</small></span
-            ><input type="checkbox" role="switch" bind:checked={settings.wsl_enabled} /></label
-          ><label class="cp-path"
-            >Windows Codex home<input
+          >{#if floatingSupported}<label class="cp-setting"
+              ><span
+                >{$t('已运行的 WSL')}<small class="cp-setting-hint"
+                  >{$t('不主动启动已停止的发行版')}</small
+                ></span
+              ><input
+                type="checkbox"
+                role="switch"
+                switch={floatingSupported ? undefined : true}
+                bind:checked={settings.wsl_enabled}
+              /></label
+            >{/if}<label class="cp-path"
+            >{floatingSupported ? 'Windows' : 'macOS'} Codex home<input
               bind:value={path}
-              placeholder="自动探测 CODEX_HOME 或 .codex"
+              placeholder={$t('自动探测 CODEX_HOME 或 .codex')}
             /></label
           >
-          <SourceSettings bind:settings changed={() => (settingsDirty = true)} />
+          <SourceSettings
+            bind:settings
+            windows={floatingSupported}
+            changed={() => (settingsDirty = true)}
+          />
           <RefreshSettings {data} reload={refresh} />
           <div class="cp-divider"></div>
           <fieldset class="accent-picker">
-            <legend>主题颜色</legend>
+            <legend>{$t('主题颜色')}</legend>
             <div class="accent-options">
               {#each accents as [key, label, dark, light]}<label
                   class:chosen={settings.accent === key}
@@ -692,7 +838,7 @@
                     name="accent"
                     value={key}
                     bind:group={settings.accent}
-                    aria-label={`${label}${key === 'blue' ? '（默认）' : ''}`}
+                    aria-label={`${label}${key === 'blue' ? $t('（默认）') : ''}`}
                   /><span class="accent-swatch" aria-hidden="true"></span><span>{label}</span
                   ></label
                 >{/each}
@@ -700,50 +846,58 @@
           </fieldset>
         </section>
         <button class="cp-save" disabled={saving} onclick={() => void save()}
-          >{saving ? '正在保存…' : '保存设置'}</button
+          >{saving ? $t('正在保存…') : $t('保存设置')}</button
         >{#if settingsDirty}<button
             class="cp-textbutton"
             onclick={() => {
               settings = copySettings(data.settings);
               path = data.settings.windows_home ?? '';
               settingsDirty = false;
-            }}>撤销未保存的修改</button
+            }}>{$t('撤销未保存的修改')}</button
           >{/if}
         <div class="cp-divider"></div>
-        <div class="cp-sectionhead"><span>来源状态</span><small>只读采集</small></div>
+        <div class="cp-sectionhead">
+          <span>{$t('来源状态')}</span><small>{$t('只读采集')}</small>
+        </div>
         {#each data.sources as source}<div class="cp-source-status">
             <div class="cp-sectionhead">
               <span>{source.label}</span><small
                 >{source.status === 'connected'
-                  ? '已连接'
+                  ? $t('已连接')
                   : source.status === 'no_logs'
-                    ? '暂无日志'
+                    ? $t('暂无日志')
                     : source.status === 'read_error'
-                      ? '读取失败'
+                      ? $t('读取失败')
                       : source.status === 'wsl_stopped'
-                        ? '发行版已停止'
+                        ? $t('发行版已停止')
                         : source.status === 'wsl_unavailable'
-                          ? '无法确认运行状态'
-                          : '探测中'}</small
+                          ? $t('无法确认运行状态')
+                          : $t('探测中')}</small
               >
             </div>
             <p class="cp-note">
-              {source.path}<br />{source.files} 个日志 · {source.issues} 个解析问题 · {time(
-                source.last_read,
-              )}
+              {source.path}<br />{source.files}
+              {$t('个日志 ·')}
+              {source.issues}
+              {$t('个解析问题 ·')}
+              {time(source.last_read)}
             </p>
-          </div>{:else}<p class="cp-note">等待来源探测</p>{/each}
+          </div>{:else}<p class="cp-note">{$t('等待来源探测')}</p>{/each}
+        {#if !floatingSupported}<DiagnosticsPanel />{/if}
       {/if}
     </div>
     <footer class="cp-footer">
       <span
-        >{data.collecting ? '正在建立本地索引…' : `本地用量 · ${time(data.updated_at)} 更新`}</span
-      >{#if data.usage.cost_nanousd > 0 && data.usage.unpriced_tokens > 0}<span
+        >{data.collecting
+          ? $t('正在建立本地索引…')
+          : $t('本地用量 · {_0} 更新', { _0: time(data.updated_at) })}</span
+      >{#if data.usage.reference.unpriced_events > 0 && !data.usage.reference.pending}<span
           class="cp-price-note"
-          title={`另有 ${data.usage.unpriced_tokens.toLocaleString()} tokens 未计价`}
-          >* 已计价部分</span
+          title={$t('另有 {_0} tokens 缺少模型价格、服务层级或完整计数', {
+            _0: data.usage.reference.unpriced_tokens.toLocaleString(),
+          })}>{$t('* 估算未覆盖全部用量')}</span
         >{/if}<button class="cp-textbutton" onclick={() => void windowAction('compact')}
-        >收起详情 <Icon name="up" /></button
+        >{$t('收起详情')} <Icon name="up" /></button
       >
     </footer>
   {/if}

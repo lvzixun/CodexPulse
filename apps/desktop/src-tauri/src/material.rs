@@ -48,7 +48,13 @@ pub fn transparency_allowed() -> bool {
             result == 2 || (result == 0 && enabled != 0)
         }
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "macos")]
+    {
+        let workspace = objc2_app_kit::NSWorkspace::sharedWorkspace();
+        !workspace.accessibilityDisplayShouldReduceTransparency()
+            && !workspace.accessibilityDisplayShouldIncreaseContrast()
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
     {
         false
     }

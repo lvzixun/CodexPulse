@@ -2,6 +2,8 @@ use pulse_core::news::{Challenge, NewsItem, challenge_page, history_items, merge
 use serde::{Deserialize, Serialize};
 use std::{io::Read, time::Duration};
 
+mod history;
+
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct Feed {
     pub items: Vec<NewsItem>,
@@ -12,6 +14,10 @@ pub struct Feed {
     pub failures: u32,
     pub status_cache: Cache,
     pub history_cache: Cache,
+    #[serde(default)]
+    pub history_limit: u32,
+    #[serde(default)]
+    pub history_pages: Vec<history::Page>,
     #[serde(default)]
     pub latest_reset: Option<NewsItem>,
     #[serde(default)]
@@ -57,6 +63,7 @@ impl Translator {
         let mut failure = None;
         if now >= self.next_attempt {
             let agent: ureq::Agent = ureq::Agent::config_builder()
+                .tls_config(crate::http_quota::tls_config())
                 .timeout_global(Some(Duration::from_secs(10)))
                 .http_status_as_error(false)
                 .max_redirects(0)
@@ -101,6 +108,7 @@ impl Translator {
 struct FeedUpdate {
     status: Cache,
     history: Cache,
+    history_pages: Vec<history::Page>,
     items: Vec<NewsItem>,
     wait: i64,
 }
@@ -119,6 +127,13 @@ pub struct NewsSnapshot {
     pub challenge: Option<Challenge>,
     pub challenge_status: String,
     pub challenge_fetched_at: Option<String>,
+    pub reset_stats: pulse_core::news::ResetStats,
+    pub reset_history: Vec<ResetDate>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResetDate {
+    pub occurred_at: String,
+    pub reset_type: String,
 }
 impl Feed {
     pub fn for_storage(&self) -> Self {
@@ -127,6 +142,7 @@ impl Feed {
             feed.items.clear();
             feed.status_cache = Cache::default();
             feed.history_cache = Cache::default();
+            feed.history_pages.clear();
             feed.last_success = None;
             feed.latest_reset = None;
             feed.scheduled_reset = None;
@@ -139,6 +155,7 @@ impl Feed {
         feed
     }
     pub fn view(&self) -> NewsSnapshot {
+        let calendar_since = chrono::Utc::now().timestamp() - 190 * 86400;
         NewsSnapshot {
             request_status: self.request_status.clone(),
             next_attempt: self.display_next_attempt,
@@ -162,6 +179,33 @@ impl Feed {
                 .and_then(|v| serde_json::from_value(v).ok()),
             challenge_status: self.challenge_status.clone(),
             challenge_fetched_at: self.challenge_cache.fetched_at.clone(),
+            reset_stats: pulse_core::news::reset_stats(
+                self.status_cache
+                    .body
+                    .as_ref()
+                    .unwrap_or(&serde_json::Value::Null),
+                self.history_cache
+                    .body
+                    .as_ref()
+                    .unwrap_or(&serde_json::Value::Null),
+            ),
+            reset_history: self
+                .history_cache
+                .body
+                .as_ref()
+                .and_then(|body| history_items(body).ok())
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|item| matches!(item.reset_type.as_deref(), Some("regular" | "banked")))
+                .filter(|item| {
+                    chrono::DateTime::parse_from_rfc3339(&item.occurred_at)
+                        .is_ok_and(|at| at.timestamp() >= calendar_since)
+                })
+                .map(|item| ResetDate {
+                    occurred_at: item.occurred_at,
+                    reset_type: item.reset_type.unwrap(),
+                })
+                .collect(),
         }
     }
 }
@@ -169,6 +213,7 @@ pub fn fetch(mut old: Feed, interval: u64, manual: bool, cancelled: &dyn Fn() ->
     let now = chrono::Utc::now();
     old.last_attempt = Some(now.to_rfc3339());
     let agent: ureq::Agent = ureq::Agent::config_builder()
+        .tls_config(crate::http_quota::tls_config())
         .timeout_global(Some(Duration::from_secs(10)))
         .http_status_as_error(false)
         .max_redirects(0)
@@ -186,10 +231,18 @@ pub fn fetch(mut old: Feed, interval: u64, manual: bool, cancelled: &dyn Fn() ->
         if cancelled() {
             return Err(("cancelled".into(), 0));
         }
-        let (history, wait_b) = fetch_endpoint(
-            &agent,
-            "https://codex-resets.com/api/v1/resets?limit=20&order=desc",
-            &old.history_cache,
+        let empty_history = Cache::default();
+        let (history, history_pages, wait_b) = history::fetch(
+            &old.history_pages,
+            if old.history_limit == 100 {
+                &old.history_cache
+            } else {
+                &empty_history
+            },
+            cancelled,
+            |url, cache, timeout| {
+                fetch_resource_until(&agent, url, cache, Resource::Json, Some(timeout))
+            },
         )?;
         let status_items = status_items(
             status
@@ -208,6 +261,7 @@ pub fn fetch(mut old: Feed, interval: u64, manual: bool, cancelled: &dyn Fn() ->
         Ok(FeedUpdate {
             status,
             history,
+            history_pages,
             items: merge(status_items, history_items),
             wait: wait_a.max(wait_b),
         })
@@ -217,6 +271,8 @@ pub fn fetch(mut old: Feed, interval: u64, manual: bool, cancelled: &dyn Fn() ->
             Ok(update) => {
                 old.status_cache = update.status;
                 old.history_cache = update.history;
+                old.history_pages = update.history_pages;
+                old.history_limit = 100;
                 old.items = update.items;
                 let status = old
                     .status_cache
@@ -296,6 +352,15 @@ fn fetch_resource(
     old: &Cache,
     resource: Resource,
 ) -> Result<(Cache, i64), FetchError> {
+    fetch_resource_until(agent, url, old, resource, None)
+}
+fn fetch_resource_until(
+    agent: &ureq::Agent,
+    url: &str,
+    old: &Cache,
+    resource: Resource,
+    timeout: Option<Duration>,
+) -> Result<(Cache, i64), FetchError> {
     let mut request = agent
         .get(url)
         .header("User-Agent", "CodexPulse/0.1.0 (+https://codex-resets.com)")
@@ -312,6 +377,9 @@ fn fetch_resource(
         && old.body.is_some()
     {
         request = request.header("If-None-Match", etag);
+    }
+    if let Some(timeout) = timeout {
+        request = request.config().timeout_global(Some(timeout)).build();
     }
     let mut response = request.call().map_err(|_| ("network_error".into(), 300))?;
     let retry = response
@@ -400,6 +468,184 @@ mod tests {
         thread,
     };
 
+    #[test]
+    #[ignore = "explicit public pagination probe; no credentials or message text"]
+    fn live_history_cursor_advances() {
+        let agent: ureq::Agent = ureq::Agent::config_builder()
+            .tls_config(crate::http_quota::tls_config())
+            .timeout_global(Some(Duration::from_secs(10)))
+            .http_status_as_error(false)
+            .max_redirects(0)
+            .build()
+            .into();
+        let (head, _) = fetch_endpoint(
+            &agent,
+            "https://codex-resets.com/api/v1/resets?limit=1&order=desc",
+            &Cache::default(),
+        )
+        .unwrap();
+        let head = head.body.unwrap();
+        assert_eq!(head["data"].as_array().unwrap().len(), 1);
+        assert_eq!(head["pagination"]["has_more"], true);
+        let cursor = head["pagination"]["next_cursor"].as_str().unwrap();
+        assert!(cursor.len() <= 1024);
+        let mut url = url::Url::parse("https://codex-resets.com/api/v1/resets").unwrap();
+        url.query_pairs_mut()
+            .append_pair("limit", "1")
+            .append_pair("order", "desc")
+            .append_pair("cursor", cursor);
+        let (next, _) = fetch_endpoint(&agent, url.as_str(), &Cache::default()).unwrap();
+        let next = next.body.unwrap();
+        assert_eq!(next["data"].as_array().unwrap().len(), 1);
+        assert_ne!(head["data"][0]["id"], next["data"][0]["id"]);
+        assert!(
+            head["data"][0]["announced_at"].as_str().unwrap()
+                > next["data"][0]["announced_at"].as_str().unwrap()
+        );
+        println!("public cursor advanced to a different older record; no body or cursor printed");
+    }
+
+    #[test]
+    #[ignore = "explicit read-only public feed probe; reports phases and pagination without credentials or message text"]
+    fn measure_live_public_feed_phases() {
+        fn category(error: &ureq::Error) -> &'static str {
+            match error {
+                ureq::Error::Timeout(_) => "timeout",
+                ureq::Error::Protocol(_) => "protocol",
+                ureq::Error::Io(_) => "io",
+                ureq::Error::HostNotFound => "dns",
+                ureq::Error::Tls(_) | ureq::Error::Rustls(_) => "tls",
+                _ => "other",
+            }
+        }
+        let agent: ureq::Agent = ureq::Agent::config_builder()
+            .tls_config(crate::http_quota::tls_config())
+            .timeout_global(Some(Duration::from_secs(10)))
+            .http_status_as_error(false)
+            .max_redirects(0)
+            .build()
+            .into();
+        for (name, url) in [
+            ("status", "https://codex-resets.com/api/v1/status"),
+            (
+                "history",
+                "https://codex-resets.com/api/v1/resets?limit=100&order=desc",
+            ),
+        ] {
+            let started = std::time::Instant::now();
+            let result = agent
+                .get(url)
+                .header("User-Agent", "CodexPulse/0.1.0 (+https://codex-resets.com)")
+                .header("Accept", "application/json")
+                .call();
+            let mut report = serde_json::json!({"resource": name});
+            match result {
+                Err(error) => {
+                    report["phase"] = "request".into();
+                    report["error_category"] = category(&error).into();
+                }
+                Ok(mut response) => {
+                    report["http_status"] = response.status().as_u16().into();
+                    report["headers_ms"] = (started.elapsed().as_millis() as u64).into();
+                    let mut bytes = Vec::new();
+                    match response
+                        .body_mut()
+                        .as_reader()
+                        .take(512 * 1024 + 1)
+                        .read_to_end(&mut bytes)
+                    {
+                        Ok(_) => {
+                            report["phase"] = "complete".into();
+                            report["body_bytes"] = bytes.len().into();
+                            report["valid_bounded_json"] = (bytes.len() <= 512 * 1024
+                                && serde_json::from_slice::<serde_json::Value>(&bytes).is_ok())
+                            .into();
+                            if bytes.len() <= 512 * 1024
+                                && let Ok(value) =
+                                    serde_json::from_slice::<serde_json::Value>(&bytes)
+                            {
+                                report["pagination"] = serde_json::json!({
+                                    "has_more": value["pagination"]["has_more"].as_bool(),
+                                    "has_cursor": value["pagination"]["next_cursor"].is_string(),
+                                });
+                                report["rows"] = value["data"].as_array().map(Vec::len).into();
+                            }
+                        }
+                        Err(error) => {
+                            report["phase"] = "body".into();
+                            report["io_kind"] = format!("{:?}", error.kind()).into();
+                            report["error_category"] = error
+                                .get_ref()
+                                .and_then(|e| e.downcast_ref::<ureq::Error>())
+                                .map(category)
+                                .unwrap_or("other")
+                                .into();
+                            report["partial_bytes"] = bytes.len().into();
+                        }
+                    }
+                }
+            }
+            report["total_ms"] = (started.elapsed().as_millis() as u64).into();
+            println!("{report}");
+        }
+    }
+
+    #[test]
+    fn calendar_projection_is_separate_from_the_hundred_message_limit() {
+        let at = chrono::Utc::now().to_rfc3339();
+        let data = (0..110)
+            .map(|id| {
+                serde_json::json!({"id":id.to_string(),"reset_type":"regular",
+            "announced_at":at,"text":"Synthetic public text must not enter calendar DTO",
+            "source":{"type":"observed"}})
+            })
+            .collect::<Vec<_>>();
+        let history = serde_json::json!({"meta":{"api_version":"v1"},"data":data,"pagination":{"has_more":false}});
+        let feed = Feed {
+            items: merge(vec![], history_items(&history).unwrap()),
+            history_cache: Cache {
+                body: Some(history),
+                ..Cache::default()
+            },
+            ..Feed::default()
+        };
+        let view = feed.view();
+        assert_eq!(view.items.len(), 100);
+        assert_eq!(view.reset_history.len(), 110);
+        assert!(view.reset_stats.history_complete);
+        let dates = serde_json::to_value(view.reset_history).unwrap();
+        assert_eq!(dates[0].as_object().unwrap().len(), 2);
+        assert!(!dates.to_string().contains("Synthetic public text"));
+    }
+
+    #[test]
+    #[ignore = "explicit bounded public history traversal; no credentials, cursors or message text"]
+    fn live_complete_history_uses_cursor_reader() {
+        let agent: ureq::Agent = ureq::Agent::config_builder()
+            .tls_config(crate::http_quota::tls_config())
+            .timeout_global(Some(Duration::from_secs(10)))
+            .http_status_as_error(false)
+            .max_redirects(0)
+            .build()
+            .into();
+        let (aggregate, pages, _) =
+            history::fetch(&[], &Cache::default(), &|| false, |url, cache, timeout| {
+                fetch_resource_until(&agent, url, cache, Resource::Json, Some(timeout))
+            })
+            .unwrap();
+        let stats = pulse_core::news::reset_stats(
+            &serde_json::Value::Null,
+            aggregate.body.as_ref().unwrap(),
+        );
+        assert!(stats.history_complete);
+        assert!(stats.total.is_some_and(|n| n > 1));
+        assert!(stats.longest_wait_days.is_some());
+        println!(
+            "{}",
+            serde_json::json!({"pages":pages.len(),"rows":stats.total,"longest_wait_days":stats.longest_wait_days})
+        );
+    }
+
     fn serve(response: String) -> (String, thread::JoinHandle<String>) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let url = format!("http://{}/feed", listener.local_addr().unwrap());
@@ -426,6 +672,7 @@ mod tests {
 
     fn agent() -> ureq::Agent {
         ureq::Agent::config_builder()
+            .tls_config(crate::http_quota::tls_config())
             .http_status_as_error(false)
             .timeout_global(Some(Duration::from_secs(3)))
             .build()

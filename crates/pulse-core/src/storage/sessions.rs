@@ -326,6 +326,7 @@ impl Store {
             unknown_totals,
             cost_nanousd: cost,
             unpriced_tokens: unpriced,
+            reference: self.reference_estimate("", "", Some(id))?,
         }))
     }
     pub fn session_detail(

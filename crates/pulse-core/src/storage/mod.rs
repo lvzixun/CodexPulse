@@ -10,11 +10,13 @@ use serde::{Deserialize, Serialize};
 use std::{path::Path, time::Duration};
 mod models;
 mod queries;
+mod reference;
 mod sessions;
 mod timezone;
 mod titles;
 pub use models::{ModelCursor, ModelDirection, ModelPage, ModelPageRequest, ModelRow};
 pub use queries::{DayUsage, RecentSession, UsageSummary};
+pub use reference::ReferenceEstimate;
 pub use sessions::{
     PageDirection, PriceCoverage, SessionCursor, SessionDetail, SessionDetailRequest,
     SessionFilter, SessionModel, SessionPage, SessionPageRequest, TokenMeasure, UsageBreakdown,
@@ -67,6 +69,8 @@ pub struct ModelUsage {
 pub struct Store {
     connection: Connection,
     timezone_rebuild: Option<timezone::TimezoneRebuild>,
+    reference_version: String,
+    reference_date: String,
 }
 impl Store {
     pub fn open(path: impl AsRef<Path>) -> Result<Self, StoreError> {
@@ -83,7 +87,7 @@ impl Store {
             [],
             |row| row.get(0),
         )?;
-        if version > 5 {
+        if version > 7 {
             return Err(StoreError::NewerSchema);
         }
         if version < 3 {
@@ -138,9 +142,24 @@ impl Store {
             tx.execute_batch(include_str!("../../migrations/005-model-pages.sql"))?;
             tx.commit()?;
         }
+        if version < 6 {
+            let tx = connection.transaction()?;
+            tx.execute_batch(include_str!("../../migrations/006-reference-prices.sql"))?;
+            tx.commit()?;
+        }
+        if version < 7 {
+            let tx = connection.transaction()?;
+            tx.execute_batch(include_str!(
+                "../../migrations/007-reference-query-indexes.sql"
+            ))?;
+            tx.commit()?;
+        }
+        let book = crate::pricing::PriceBook::bundled()?;
         Ok(Self {
             connection,
             timezone_rebuild: None,
+            reference_version: book.fingerprint(),
+            reference_date: book.checked_at().unwrap_or_default().into(),
         })
     }
     pub fn in_memory() -> Result<Self, StoreError> {

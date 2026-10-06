@@ -2,10 +2,13 @@
 node_modules/
 apps/desktop/src-tauri/gen/
 target/
+releases/
 dist/
 build/
 .svelte-kit/
 .vite/
+__pycache__/
+*.py[cod]
 
 # Local development data and credentials
 .env

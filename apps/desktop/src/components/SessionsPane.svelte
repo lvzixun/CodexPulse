@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { translator as t, locale, localizeError } from '../lib/i18n';
+
   import { sessionLabel, sessionRunState } from '../lib/format';
   import { sessionPage, defaultSessionQuery } from '../lib/ipc';
   import type { SessionPage, SessionPageRequest, SourceHealth } from '../lib/types';
@@ -30,13 +32,13 @@
   const rows = $derived(list?.items ?? []);
   const time = (ts: string) =>
     Number.isFinite(Date.parse(ts))
-      ? new Date(ts).toLocaleString('zh-CN', {
+      ? new Date(ts).toLocaleString($locale === 'zh' ? 'zh-CN' : 'en-US', {
           month: 'short',
           day: 'numeric',
           hour: '2-digit',
           minute: '2-digit',
         })
-      : '时间未知';
+      : $t('时间未知');
   $effect(() => {
     const request = { ...query, filter: { ...query.filter } };
     if (!request.cursor) void revision;
@@ -75,11 +77,12 @@
       onclick={() => {
         query = defaultSessionQuery();
         selected = null;
-      }}>全部 Sessions</button
+      }}>{$t('全部 Sessions')}</button
     >
   </div>{/if}
-{#if listError}<p class="cp-note" role="alert">{listError}</p>
-  <button class="cp-textbutton" onclick={() => (query = { ...query })}>重试查询</button>{/if}
+{#if listError}<p class="cp-note" role="alert">{localizeError(listError, $locale)}</p>
+  <button class="cp-textbutton" onclick={() => (query = { ...query })}>{$t('重试查询')}</button
+  >{/if}
 <div class="cp-session-list" aria-busy={loading}>
   {#each rows as s (s.meta.id)}
     {@const state = sessionRunState(s, sources, now)}
@@ -91,17 +94,21 @@
         onclick={() => (selected = selected === s.meta.id ? null : s.meta.id)}
       >
         <span class="cp-session-heading"
-          ><span class="cp-truncate" title={sessionLabel(s.meta, hideTitles)}
-            >{sessionLabel(s.meta, hideTitles)}</span
+          ><span class="cp-truncate" title={sessionLabel(s.meta, hideTitles, $locale)}
+            >{sessionLabel(s.meta, hideTitles, $locale)}</span
           ><span
             class="cp-session-state"
             class:cp-session-running={state === 'running'}
             title={state === 'unknown'
-              ? '日志过期或来源不可用，无法确认是否仍在运行'
+              ? $t('日志过期或来源不可用，无法确认是否仍在运行')
               : state === 'running'
-                ? '最近 5 分钟有活动且来源已连接'
+                ? $t('最近 5 分钟有活动且来源已连接')
                 : undefined}
-            >{state === 'running' ? '运行中' : state === 'completed' ? '已结束' : '状态未知'}</span
+            >{state === 'running'
+              ? $t('运行中')
+              : state === 'completed'
+                ? $t('已结束')
+                : $t('状态未知')}</span
           ></span
         >
         <span class="cp-session-time">{time(s.meta.last_activity)}</span><span
@@ -113,13 +120,15 @@
           <SessionDetails id={s.meta.id} {revision} {hideProjects} {sources} {ready} />
         </div>{/if}
     </div>
-  {:else}{#if !loading && !listError}<p class="cp-note">还没有采集到 Sessions。</p>{/if}{/each}
+  {:else}{#if !loading && !listError}<p class="cp-note">
+        {$t('还没有采集到 Sessions。')}
+      </p>{/if}{/each}
 </div>
-{#if !rows.length && loading}<p class="cp-note">正在读取 Sessions…</p>{/if}
+{#if !rows.length && loading}<p class="cp-note">{$t('正在读取 Sessions…')}</p>{/if}
 {#if list?.newer || list?.older}<div class="cp-pager">
     <button disabled={loading || !list?.newer} onclick={() => navigate('newer')}
-      ><Icon name="arrow" /> 较新</button
+      ><Icon name="arrow" /> {$t('较新')}</button
     ><button disabled={loading || !list?.older} onclick={() => navigate('older')}
-      >较早 <Icon name="right" /></button
+      >{$t('较早')} <Icon name="right" /></button
     >
   </div>{/if}

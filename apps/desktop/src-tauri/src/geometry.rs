@@ -84,6 +84,7 @@ impl Area {
         }
     }
 }
+#[cfg(any(not(target_os = "macos"), test))]
 pub fn choose<'a>(areas: &'a [Area], anchor: Option<&Anchor>) -> Option<&'a Area> {
     anchor
         .and_then(|a| a.monitor.as_ref())

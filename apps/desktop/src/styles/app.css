@@ -363,6 +363,12 @@ main[data-theme='light'] .accent-swatch {
 .cp-icon[aria-pressed='true'] {
   color: var(--cp-accent);
 }
+.cp-shell .cp-icon.cp-exit {
+  width: auto;
+  padding-inline: 7px;
+  font-size: 11px;
+  white-space: nowrap;
+}
 .cp-source {
   display: flex;
   justify-content: space-between;
@@ -449,6 +455,42 @@ main[data-theme='light'] .accent-swatch {
 .cp-metrics strong {
   font-size: 17px;
   letter-spacing: -0.4px;
+}
+.cp-session-overview {
+  padding: 14px;
+  background: var(--cp-soft);
+  border-radius: 15px;
+}
+.cp-session-overview .cp-sectionhead > span {
+  font-weight: 600;
+}
+.cp-session-overview .cp-sectionhead small {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--cp-muted);
+  font-size: 10px;
+}
+.cp-session-overview .cp-sectionhead .cp-dot {
+  margin-right: 0;
+}
+.cp-session-overview .cp-sectionhead .cp-session-active {
+  color: var(--cp-accent);
+}
+.cp-session-overview .cp-session-title {
+  padding: 7px 0 4px !important;
+}
+.cp-session-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 10px;
+  color: var(--cp-muted);
+}
+.cp-session-overview .cp-metrics {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--cp-line);
 }
 .cp-summary {
   margin-top: 19px;
@@ -959,7 +1001,9 @@ body {
   color: var(--cp-muted);
 }
 .cp-reset-status strong {
-  font-size: 13px;
+  font-size: 18px;
+  font-weight: 650;
+  line-height: 1.4;
 }
 .cp-challenge {
   margin: 20px 0;
@@ -1170,4 +1214,442 @@ meter.cp-low::-webkit-meter-optimum-value {
     animation: none !important;
     transition: none !important;
   }
+}
+
+/* AppKit supplies the background material; keep the WebView surface transparent. */
+main.menubar {
+  color-scheme: dark;
+  --bg: transparent;
+  --solid: #3a3c40;
+  --card: rgba(255, 255, 255, 0.055);
+  --border: rgba(255, 255, 255, 0.12);
+  --text: #f5f5f7;
+  --muted: #d0d1d5;
+  --mac-selection: rgba(255, 255, 255, 0.16);
+  --cp-glass: transparent;
+  font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  line-height: 1.4;
+  border-radius: 20px;
+  background: var(--bg);
+}
+main.menubar[data-theme='light'] {
+  color-scheme: light;
+  --bg: transparent;
+  --solid: #f2f2f4;
+  --card: rgba(0, 0, 0, 0.035);
+  --border: rgba(0, 0, 0, 0.1);
+  --text: #1d1d1f;
+  --muted: #55555a;
+  --mac-selection: rgba(255, 255, 255, 0.9);
+}
+@media (prefers-color-scheme: light) {
+  main.menubar[data-theme='system'] {
+    color-scheme: light;
+    --bg: transparent;
+    --solid: #f2f2f4;
+    --card: rgba(0, 0, 0, 0.035);
+    --border: rgba(0, 0, 0, 0.1);
+    --text: #1d1d1f;
+    --muted: #55555a;
+    --mac-selection: rgba(255, 255, 255, 0.9);
+  }
+}
+main.menubar.opaque {
+  background: var(--solid);
+}
+.menubar .cp-header {
+  padding: 16px 18px 10px;
+  gap: 8px;
+}
+.menubar .cp-brand strong {
+  font-size: 15px;
+  letter-spacing: -0.2px;
+}
+.menubar .cp-brand small {
+  display: none;
+}
+.menubar .cp-logo {
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+}
+.menubar .cp-icon {
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  background: transparent !important;
+}
+.menubar .cp-icon:hover {
+  background: var(--card) !important;
+}
+.menubar .cp-source {
+  padding: 0 18px 12px !important;
+}
+.menubar .cp-tabs {
+  margin: 0 18px;
+  padding: 2px;
+  gap: 2px;
+  border-radius: 9px;
+}
+.menubar .cp-tabs button {
+  padding: 5px 0;
+  border-radius: 7px;
+  font-size: 12px;
+}
+.menubar .cp-tabs button[aria-pressed='true'] {
+  background: var(--mac-selection);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+  font-weight: 600;
+}
+.menubar .cp-body {
+  padding: 16px 18px;
+}
+.menubar .cp-divider {
+  margin: 15px 0;
+}
+.menubar .cp-summary {
+  border-radius: 12px;
+  padding: 12px;
+  margin-top: 20px;
+}
+.menubar .cp-session-overview {
+  border-radius: 12px;
+  padding: 12px;
+}
+.menubar .cp-total > strong {
+  font-size: 28px;
+  letter-spacing: -0.8px;
+}
+.menubar .cp-total b {
+  font-size: 17px;
+}
+.menubar .cp-reset-status {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin: 14px 0 0;
+  padding: 14px;
+  background: var(--card);
+  border: 1px solid var(--cp-line);
+  border-radius: 12px;
+}
+.menubar .cp-reset-status > div {
+  margin-bottom: 0;
+}
+.menubar .cp-reset-status strong {
+  font-size: 18px;
+}
+.menubar .cp-reset-status > div > span {
+  font-size: 12px;
+}
+.cp-reset-status > small {
+  grid-column: 1 / -1;
+}
+
+/* Messages form one reading list; only lengthy bodies need expansion. */
+.cp-news-list {
+  margin-top: 8px;
+}
+.cp-news-row {
+  padding: 16px 0;
+  border-bottom: 1px solid var(--cp-line);
+}
+.cp-news-row-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.cp-news-row-heading strong {
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+.cp-news-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  margin: 4px 0 7px;
+  font-size: 11px;
+  color: var(--cp-muted);
+}
+.cp-news-meta .cp-reset-label {
+  color: var(--cp-amber);
+}
+.cp-news-excerpt {
+  margin: 0 0 7px;
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+.cp-news-clamped {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  overflow: hidden;
+}
+.cp-news-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+}
+.cp-news-pane .cp-textbutton {
+  width: auto;
+  justify-content: flex-start;
+  gap: 5px;
+}
+.cp-news-actions .cp-news-read {
+  margin-left: auto;
+}
+.cp-news-history {
+  margin-top: 14px;
+}
+.cp-new-label {
+  color: var(--cp-accent);
+  font-size: 11px;
+  font-weight: 600;
+}
+.cp-news-source {
+  margin-top: 24px;
+  padding-top: 12px;
+  border-top: 1px solid var(--cp-line);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+.cp-news-source small {
+  font-size: 11px;
+  color: var(--cp-muted);
+}
+.menubar .cp-note {
+  line-height: 1.5;
+}
+.menubar .cp-setting {
+  padding: 10px 0;
+}
+.menubar .cp-setting select,
+.menubar .cp-path input {
+  background: var(--card);
+  border-radius: 6px;
+  padding: 4px 7px;
+}
+.menubar input[role='switch'] {
+  appearance: auto;
+  width: 32px;
+  height: 18px;
+}
+.menubar .cp-footer {
+  padding: 10px 18px;
+}
+.menubar .cp-price-note,
+.menubar .cp-count,
+.menubar .cp-session-overview .cp-sectionhead small,
+.menubar .cp-session-meta,
+.menubar .cp-chartaxis,
+.menubar .cp-footer,
+.menubar .cp-session-state {
+  font-size: 11px;
+}
+.menubar .cp-session-title {
+  font-size: 13px !important;
+}
+.menubar .cp-textbutton {
+  color: var(--cp-accent) !important;
+}
+
+.cp-pricing-coverage {
+  margin: 8px 0 0;
+}
+
+.cp-reset-overview {
+  padding: 14px 0 16px;
+  border-bottom: 1px solid var(--cp-line);
+}
+.cp-reset-recent {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+}
+.cp-reset-recent strong {
+  display: block;
+  margin-top: 4px;
+  font-size: 28px;
+  line-height: 1.25;
+  font-weight: 650;
+  color: var(--cp-text);
+}
+.cp-reset-recent > span {
+  padding-bottom: 4px;
+}
+.cp-reset-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 16px 0;
+}
+.cp-reset-metrics > div + div {
+  border-left: 1px solid var(--cp-line);
+  padding-left: 12px;
+}
+.cp-reset-metrics dt {
+  color: var(--cp-muted);
+  font-size: 11px;
+}
+.cp-reset-metrics dd {
+  margin: 4px 0 0;
+  font-size: 19px;
+  font-weight: 600;
+}
+.cp-reset-calendar-heading,
+.cp-reset-legend {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 11px;
+}
+.cp-reset-calendar-heading {
+  justify-content: space-between;
+  margin-top: 8px;
+}
+.cp-reset-calendar-heading strong {
+  font-size: 12px;
+  font-weight: 600;
+}
+.cp-reset-calendar-heading > span,
+.cp-reset-legend {
+  color: var(--cp-muted);
+}
+.cp-reset-legend {
+  margin: 6px 0 8px;
+}
+.cp-reset-legend span {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.cp-reset-legend i,
+.cp-reset-day {
+  background: var(--cp-soft);
+  border-radius: 2px;
+}
+.cp-reset-legend i {
+  width: 8px;
+  height: 8px;
+}
+.cp-reset-legend .regular,
+.cp-reset-day.regular {
+  background: var(--cp-accent);
+}
+.cp-reset-legend .banked,
+.cp-reset-day.banked {
+  background: var(--cp-amber);
+}
+.cp-reset-calendar-scroll {
+  padding: 3px 1px 5px;
+}
+.cp-reset-calendar {
+  display: grid;
+  grid-template-rows: 16px repeat(7, 10px);
+  gap: 2px;
+  width: 100%;
+}
+.cp-shell .cp-reset-day {
+  width: 100%;
+  height: 10px;
+  padding: 0;
+  border: 0;
+  background: var(--cp-line);
+}
+.cp-shell .cp-reset-day.regular {
+  background: var(--cp-accent);
+}
+.cp-shell .cp-reset-day.banked {
+  background: var(--cp-amber);
+}
+.cp-shell .cp-reset-day.unknown {
+  opacity: 0.35;
+}
+.cp-reset-day.selected {
+  outline: 1px solid var(--cp-text);
+  outline-offset: 1px;
+}
+.cp-reset-month {
+  width: max-content;
+  font-size: 11px;
+  color: var(--cp-muted);
+}
+.cp-reset-scope {
+  margin: 7px 0 0;
+  font-size: 11px;
+}
+.cp-reset-day-info {
+  margin: 6px 0 0;
+}
+.cp-challenge-preview {
+  padding: 14px 0;
+  border-bottom: 1px solid var(--cp-line);
+}
+.cp-challenge-open {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  padding: 0;
+  text-align: left;
+  border: 0;
+  background: transparent;
+}
+.cp-challenge-open strong {
+  font-size: 14px;
+}
+.cp-challenge-open small {
+  display: block;
+  font-size: 11px;
+  color: var(--cp-muted);
+  margin-top: 3px;
+}
+.cp-challenge-open > span:last-child {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  color: var(--cp-muted);
+}
+.cp-challenge-open svg {
+  width: 15px;
+  height: 15px;
+}
+.cp-challenge-latest {
+  margin-top: 12px;
+}
+.cp-challenge-latest > small {
+  color: var(--cp-muted);
+  font-size: 11px;
+}
+.cp-challenge-latest > strong {
+  display: block;
+  margin: 4px 0 6px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.cp-challenge-latest .cp-news-excerpt {
+  margin-bottom: 0;
+}
+.cp-challenge-back {
+  margin-bottom: 14px;
+}
+.cp-back-icon {
+  display: flex;
+  transform: rotate(180deg);
+}
+.cp-challenge-day {
+  margin-top: 18px;
+}
+.cp-challenge-day .cp-news-row {
+  padding: 10px 0 14px;
+}
+.cp-news-feed-heading {
+  margin-top: 18px;
 }

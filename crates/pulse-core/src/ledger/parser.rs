@@ -1,4 +1,4 @@
-use crate::domain::{ParseIssue, SessionMeta, TokenCounts, UsageFact};
+use crate::domain::{OutputRate, ParseIssue, SessionMeta, TokenCounts, UsageFact};
 use chrono::DateTime;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -21,6 +21,10 @@ pub struct ParserState {
     pub ordinal: u64,
     pub inherited_until: Option<u64>,
     pub inherited: bool,
+    #[serde(default)]
+    pub rate_started_at: Option<String>,
+    #[serde(default)]
+    pub rate_output: Option<u64>,
 }
 
 #[derive(Debug, Default)]
@@ -98,6 +102,7 @@ impl ParserState {
                 parent_id: parent,
                 status: "unknown".into(),
                 last_activity: timestamp.clone().unwrap_or_default(),
+                output_rate: None,
             });
             return ParseOutput {
                 session: self.session.clone(),
@@ -141,6 +146,11 @@ impl ParserState {
             }
             "task_started" | "turn_started" => {
                 self.turn_id = text(payload, "turn_id");
+                self.rate_started_at = timestamp.clone();
+                self.rate_output = Some(0);
+                if let Some(session) = self.session.as_mut() {
+                    session.output_rate = None;
+                }
                 self.set_activity("active", timestamp.as_deref());
                 ParseOutput {
                     session: self.session.clone(),
@@ -148,6 +158,10 @@ impl ParserState {
                 }
             }
             "task_complete" | "turn_completed" => {
+                if text(payload, "turn_id") == self.turn_id {
+                    self.update_rate(timestamp.as_deref(), payload["duration_ms"].as_u64(), true);
+                }
+                self.rate_started_at = None;
                 self.set_activity("completed", timestamp.as_deref());
                 ParseOutput {
                     session: self.session.clone(),
@@ -155,6 +169,10 @@ impl ParserState {
                 }
             }
             "turn_aborted" => {
+                self.rate_started_at = None;
+                if let Some(session) = self.session.as_mut() {
+                    session.output_rate = None;
+                }
                 self.set_activity("interrupted", timestamp.as_deref());
                 ParseOutput {
                     session: self.session.clone(),
@@ -172,6 +190,32 @@ impl ParserState {
             if let Some(ts) = timestamp {
                 session.last_activity = ts.into();
             }
+        }
+    }
+    fn update_rate(&mut self, timestamp: Option<&str>, duration: Option<u64>, completed: bool) {
+        let sample = (|| {
+            let start = DateTime::parse_from_rfc3339(self.rate_started_at.as_deref()?).ok()?;
+            let end_text = timestamp?;
+            let end = DateTime::parse_from_rfc3339(end_text).ok()?;
+            let observed = u64::try_from((end - start).num_milliseconds()).ok()?;
+            if observed == 0 {
+                return None;
+            }
+            // Completion duration is supplied by the client. Reject contradictory timing.
+            let elapsed_ms = duration.unwrap_or(observed);
+            if elapsed_ms == 0 || elapsed_ms.abs_diff(observed) > 2000 {
+                return None;
+            }
+            let output_tokens = self.rate_output.filter(|n| *n > 0)?;
+            Some(OutputRate {
+                output_tokens,
+                elapsed_ms,
+                measured_at: end_text.into(),
+                completed,
+            })
+        })();
+        if let Some(session) = self.session.as_mut() {
+            session.output_rate = sample;
         }
     }
     fn issue(code: &str, timestamp: Option<String>) -> ParseOutput {
@@ -270,6 +314,8 @@ impl ParserState {
             };
         }
         let Some(tokens) = owned else {
+            self.rate_output = None;
+            self.update_rate(Some(&ts), None, false);
             let mut result = Self::issue("usage_ownership_unresolved", timestamp);
             result.quota_observation = quota;
             return result;
@@ -285,6 +331,13 @@ impl ParserState {
         }
         if tokens.input.is_none() || tokens.output.is_none() {
             quality = "unsplit";
+        }
+        if self.rate_started_at.is_some() {
+            self.rate_output = self
+                .rate_output
+                .zip(tokens.output)
+                .and_then(|(a, b)| a.checked_add(b));
+            self.update_rate(Some(&ts), None, false);
         }
         let fingerprint = serde_json::to_vec(&(
             1,

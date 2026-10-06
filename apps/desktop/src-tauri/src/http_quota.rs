@@ -12,7 +12,9 @@ use std::{
     time::Duration,
 };
 
+pub const PROFILE_URL: &str = "https://chatgpt.com/backend-api/wham/profiles/me";
 pub const USAGE_URL: &str = "https://chatgpt.com/backend-api/wham/usage";
+pub const RESET_CREDITS_URL: &str = "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits";
 #[derive(Clone)]
 pub struct Scope {
     pub source_id: String,
@@ -50,12 +52,15 @@ impl From<&str> for Failure {
 #[derive(Debug)]
 pub struct Readout {
     pub buckets: Vec<QuotaBucket>,
+    pub allowance: crate::account_allowance::AccountAllowance,
+    pub allowance_retry_after: i64,
     pub proxy_source: String,
 }
 pub struct ResultSet {
     pub scope: Scope,
     pub stamp: Stamp,
     pub result: Result<Readout, Failure>,
+    pub profile: Result<crate::account_profile::AccountProfile, Failure>,
 }
 fn bytes(path: &Path, optional: bool) -> Result<Vec<u8>, Failure> {
     let file = match File::open(path) {
@@ -256,11 +261,11 @@ pub fn probe(scope: &Scope) -> Stamp {
         },
     }
 }
-pub fn checked_fetch(
+pub fn checked_fetch<T>(
     scope: &Scope,
     mut started: impl FnMut(&Stamp),
-    fetcher: impl FnOnce(&Credentials) -> Result<Readout, Failure>,
-) -> (Stamp, Result<Readout, Failure>) {
+    fetcher: impl FnOnce(&Credentials) -> Result<T, Failure>,
+) -> (Stamp, Result<T, Failure>) {
     match load(scope) {
         Ok(credentials) => {
             let initial = credentials.stamp.clone();
@@ -287,13 +292,30 @@ pub fn fetch(scope: &Scope, credentials: &Credentials) -> Result<Readout, Failur
         return Err(credentials.stamp.status.as_str().into());
     }
     let agent: ureq::Agent = ureq::Agent::config_builder()
+        .tls_config(tls_config())
         .proxy(credentials.proxy.clone())
         .timeout_global(Some(Duration::from_secs(15)))
         .max_redirects(0)
         .http_status_as_error(false)
         .build()
         .into();
-    fetch_with(&agent, USAGE_URL, scope, credentials)
+    let mut result = fetch_with(&agent, USAGE_URL, scope, credentials)?;
+    if probe(scope) != credentials.stamp {
+        return Err("credentials_changed".into());
+    }
+    match fetch_json(&agent, RESET_CREDITS_URL, credentials).and_then(|value| {
+        result
+            .allowance
+            .apply_cards(&value, chrono::Utc::now())
+            .map_err(Failure::from)
+    }) {
+        Ok(()) => {}
+        Err(error) => {
+            result.allowance.expiration_status = error.code;
+            result.allowance_retry_after = error.retry_after;
+        }
+    }
+    Ok(result)
 }
 fn fetch_with(
     agent: &ureq::Agent,
@@ -301,6 +323,49 @@ fn fetch_with(
     scope: &Scope,
     c: &Credentials,
 ) -> Result<Readout, Failure> {
+    let response = fetch_json(agent, url, c)?;
+    let mut buckets = normalize(
+        &scope.source_id,
+        c.stamp.identity.as_deref().unwrap_or(""),
+        &response,
+    )?;
+    for bucket in &mut buckets {
+        bucket.identity_confirmed = c.identity_confirmed;
+    }
+    Ok(Readout {
+        buckets,
+        allowance: crate::account_allowance::usage(&response),
+        allowance_retry_after: 0,
+        proxy_source: c.proxy_source.clone(),
+    })
+}
+pub fn tls_config() -> ureq::tls::TlsConfig {
+    #[cfg(target_os = "macos")]
+    {
+        ureq::tls::TlsConfig::builder()
+            .root_certs(ureq::tls::RootCerts::PlatformVerifier)
+            .build()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        ureq::tls::TlsConfig::default()
+    }
+}
+pub fn fetch_profile(c: &Credentials) -> Result<crate::account_profile::AccountProfile, Failure> {
+    if c.stamp.status != "ready" {
+        return Err(c.stamp.status.as_str().into());
+    }
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .tls_config(tls_config())
+        .proxy(c.proxy.clone())
+        .timeout_global(Some(Duration::from_secs(15)))
+        .max_redirects(0)
+        .http_status_as_error(false)
+        .build()
+        .into();
+    crate::account_profile::normalize(&fetch_json(&agent, PROFILE_URL, c)?)
+}
+fn fetch_json(agent: &ureq::Agent, url: &str, c: &Credentials) -> Result<Value, Failure> {
     let mut request = agent
         .get(url)
         .header("Authorization", &format!("Bearer {}", c.token))
@@ -345,18 +410,7 @@ fn fetch_with(
     {
         return Err("account_mismatch".into());
     }
-    let mut buckets = normalize(
-        &scope.source_id,
-        c.stamp.identity.as_deref().unwrap_or(""),
-        &response,
-    )?;
-    for bucket in &mut buckets {
-        bucket.identity_confirmed = c.identity_confirmed;
-    }
-    Ok(Readout {
-        buckets,
-        proxy_source: c.proxy_source.clone(),
-    })
+    Ok(response)
 }
 fn window(v: &Value) -> Option<QuotaWindow> {
     let used = v["used_percent"]
@@ -472,6 +526,32 @@ mod tests {
         });
         (url, handle)
     }
+    #[test]
+    #[ignore = "requires explicit access to the current local Codex login and network"]
+    fn live_account_readouts() {
+        let scope = Scope {
+            source_id: "macos".into(),
+            home: std::env::var_os("CODEX_HOME")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| PathBuf::from(std::env::var_os("HOME").unwrap()).join(".codex")),
+            wsl: None,
+        };
+        let (_, quota) = checked_fetch(&scope, |_| {}, |c| fetch(&scope, c));
+        let quota = quota.unwrap();
+        assert!(!quota.buckets.is_empty());
+        assert!(quota.allowance.balance.is_some() || quota.allowance.unlimited);
+        assert!(quota.allowance.reset_cards.is_some());
+        assert_eq!(quota.allowance.expiration_status, "connected");
+        println!("{}", serde_json::to_string(&quota.allowance).unwrap());
+        let (_, profile) = checked_fetch(&scope, |_| {}, fetch_profile);
+        let profile = profile.unwrap();
+        assert!(profile.username.is_some() || profile.display_name.is_some());
+        assert!(!profile.stats_unavailable);
+        assert!(profile.lifetime_tokens.is_some());
+        assert!(profile.peak_daily_tokens.is_some());
+        assert!(profile.longest_running_turn_sec.is_some());
+        assert!(profile.longest_streak_days.is_some() && profile.current_streak_days.is_some());
+    }
     fn agent() -> ureq::Agent {
         ureq::Agent::config_builder()
             .proxy(None)
@@ -518,6 +598,8 @@ mod tests {
                 // External owner publishes another login while the old request is in flight.
                 auth(&scope, "account-b", "subject-b");
                 Ok(Readout {
+                    allowance: Default::default(),
+                    allowance_retry_after: 0,
                     buckets: normalize(
                         "test",
                         credentials.stamp.identity.as_deref().unwrap(),

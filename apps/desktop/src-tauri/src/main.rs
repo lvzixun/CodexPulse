@@ -1,8 +1,14 @@
 #![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
+mod account_allowance;
+mod account_profile;
 mod backend;
+mod diagnostics;
 mod geometry;
 mod http_quota;
 mod inbox;
+mod language;
+#[cfg(target_os = "macos")]
+mod macos;
 mod material;
 mod news;
 mod platform;
@@ -10,10 +16,19 @@ mod refresh;
 #[cfg(test)]
 mod rpc;
 mod source_config;
+mod startup;
+mod window_lifecycle;
 
 use backend::{Backend, Settings, Snapshot};
 use tauri::{Manager, State};
 use tauri_plugin_opener::OpenerExt;
+
+#[tauri::command]
+fn get_system_language(app: tauri::AppHandle) -> &'static str {
+    let language = language::system_language();
+    language::refresh_tray(&app, language);
+    language
+}
 
 #[tauri::command]
 fn open_source(url: String, app: tauri::AppHandle) -> Result<(), String> {
@@ -134,9 +149,7 @@ async fn get_session_detail(
         .map_err(|_| "采集器已停止".to_string())?
 }
 #[tauri::command]
-fn get_view_state(
-    state: State<'_, platform::WindowsWindowHost>,
-) -> Result<platform::ViewState, String> {
+fn get_view_state(state: State<'_, platform::WindowHost>) -> Result<platform::ViewState, String> {
     state
         .view
         .lock()
@@ -146,7 +159,7 @@ fn get_view_state(
 #[tauri::command]
 fn remember_view(
     view: platform::ViewState,
-    state: State<'_, platform::WindowsWindowHost>,
+    state: State<'_, platform::WindowHost>,
 ) -> Result<(), String> {
     state.remember_view(view)
 }
@@ -179,6 +192,66 @@ async fn window_action(action: String, app: tauri::AppHandle) -> Result<(), Stri
     };
     Ok(())
 }
+async fn startup_status_on_main(
+    app: tauri::AppHandle,
+    enabled: Option<bool>,
+) -> Result<startup::Status, String> {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let handle = app.clone();
+    app.run_on_main_thread(move || {
+        let _ = tx.send(startup::update(&handle, enabled));
+    })
+    .map_err(|_| "登录项服务不可用")?;
+    rx.await.map_err(|_| "登录项服务已停止")?
+}
+#[tauri::command]
+async fn get_startup_status(app: tauri::AppHandle) -> Result<startup::Status, String> {
+    startup_status_on_main(app, None).await
+}
+#[tauri::command]
+async fn set_startup_enabled(
+    app: tauri::AppHandle,
+    enabled: bool,
+) -> Result<startup::Status, String> {
+    startup_status_on_main(app, Some(enabled)).await
+}
+#[tauri::command]
+async fn open_startup_settings(app: tauri::AppHandle) -> Result<(), String> {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app.run_on_main_thread(move || {
+        let _ = tx.send(startup::open_settings());
+    })
+    .map_err(|_| "登录项服务不可用")?;
+    rx.await.map_err(|_| "登录项服务已停止")?
+}
+fn diagnostic_text(backend: &Backend, host: &platform::WindowHost) -> Result<String, String> {
+    let window = host.diagnostics()?;
+    let snapshot = backend.snapshot.read().map_err(|_| "采集状态不可用")?;
+    diagnostics::Report::from_snapshot(&snapshot, window).text()
+}
+#[tauri::command]
+fn get_diagnostics(
+    state: State<'_, Backend>,
+    host: State<'_, platform::WindowHost>,
+) -> Result<String, String> {
+    diagnostic_text(&state, &host)
+}
+#[tauri::command]
+async fn copy_diagnostics(
+    app: tauri::AppHandle,
+    state: State<'_, Backend>,
+    host: State<'_, platform::WindowHost>,
+) -> Result<String, String> {
+    let text = diagnostic_text(&state, &host)?;
+    let clipboard_text = text.clone();
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app.run_on_main_thread(move || {
+        let _ = tx.send(diagnostics::copy(&clipboard_text));
+    })
+    .map_err(|_| "剪贴板服务不可用")?;
+    rx.await.map_err(|_| "剪贴板服务已停止")??;
+    Ok(text)
+}
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -186,6 +259,7 @@ fn main() {
             platform::show_details(app, None)
         }))
         .invoke_handler(tauri::generate_handler![
+            get_system_language,
             get_snapshot,
             refresh_now,
             set_refresh,
@@ -196,12 +270,27 @@ fn main() {
             get_session_detail,
             set_settings,
             window_action,
+            get_startup_status,
+            set_startup_enabled,
+            open_startup_settings,
+            get_diagnostics,
+            copy_diagnostics,
             open_source,
             get_view_state,
             remember_view
         ])
         .setup(|app| {
-            app.manage(platform::WindowsWindowHost::default());
+            app.manage(language::Current(std::sync::Mutex::new(
+                language::system_language(),
+            )));
+            app.manage(platform::WindowHost::default());
+            #[cfg(target_os = "macos")]
+            if let Ok(directory) = app.path().app_log_dir() {
+                app.state::<platform::WindowHost>()
+                    .lifecycle
+                    .enable(directory);
+                platform::trace_window(app.handle(), window_lifecycle::Event::Started, None);
+            }
             let directory = app.path().app_local_data_dir()?;
             std::fs::create_dir_all(&directory)?;
             let backend = Backend::start(app.handle().clone(), directory.join("pulse.sqlite"))?;
@@ -226,16 +315,29 @@ fn main() {
             tauri::WindowEvent::ScaleFactorChanged { .. } => {
                 platform::scale_changed(window.app_handle())
             }
+            #[cfg(target_os = "macos")]
+            tauri::WindowEvent::Focused(false) => platform::hide(window.app_handle()),
             tauri::WindowEvent::ThemeChanged(_) => platform::refresh_material(window.app_handle()),
+            tauri::WindowEvent::Destroyed => platform::trace_window(
+                window.app_handle(),
+                window_lifecycle::Event::Destroyed,
+                Some(false),
+            ),
             _ => {}
         })
         .build(tauri::generate_context!())
         .expect("CodexPulse failed to start")
         .run(|app, event| {
+            #[cfg(target_os = "macos")]
+            if matches!(event, tauri::RunEvent::Reopen { .. }) {
+                platform::trace_window(app, window_lifecycle::Event::Reopen, None);
+                platform::show_details(app, None);
+            }
             if let tauri::RunEvent::ExitRequested {
                 code: None, api, ..
             } = &event
             {
+                platform::trace_window(app, window_lifecycle::Event::ExitRequested, None);
                 // Destroying the last hidden WebView leaves the native tray and collectors alive.
                 api.prevent_exit();
                 return;
@@ -245,6 +347,8 @@ fn main() {
                 tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit
             ) && let Some(state) = app.try_state::<Backend>()
             {
+                #[cfg(target_os = "macos")]
+                macos::shutdown(app);
                 state.shutdown();
             }
         });

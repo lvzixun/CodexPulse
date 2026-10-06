@@ -64,3 +64,35 @@ fn cancelled_schedule_is_not_a_confirmed_next_reset() {
         json!({"meta":{"api_version":"v1"},"data":{"scheduled_reset":{"status":"cancelled"}}});
     assert!(status_items(&data).unwrap().is_empty());
 }
+
+#[test]
+fn public_reset_stats_require_full_valid_history_for_longest_wait() {
+    let row = |id: &str, at: &str| json!({"id":id,"reset_type":"regular","announced_at":at,"text":"Synthetic public record","source":{"type":"x_post","author":"thsottiaux"}});
+    let status = json!({"data":{"stats":{"total":57,"avg_interval_days":6.8}}});
+    let mut history = json!({"meta":{"api_version":"v1"},"pagination":{"has_more":false},"data":[row("b","2026-01-12T00:00:00Z"),row("a","2026-01-01T00:00:00Z")]});
+    let result = pulse_core::news::reset_stats(&status, &history);
+    assert_eq!(result.total, Some(57));
+    assert_eq!(result.average_interval_days, Some(6.8));
+    assert_eq!(result.longest_wait_days, Some(11.0));
+    assert!(result.history_complete);
+    history["pagination"]["has_more"] = json!(true);
+    let partial = pulse_core::news::reset_stats(&status, &history);
+    assert_eq!(partial.total, Some(57));
+    assert!(partial.longest_wait_days.is_none());
+    assert!(!partial.history_complete);
+    history["pagination"]["has_more"] = json!(false);
+    history["data"][0]["announced_at"] = json!("invalid date");
+    assert!(!pulse_core::news::reset_stats(&status, &history).history_complete);
+    assert_eq!(
+        pulse_core::news::reset_stats(&json!(null), &json!(null)),
+        pulse_core::news::ResetStats::default()
+    );
+}
+
+#[test]
+fn oversized_history_is_an_error_instead_of_silent_truncation() {
+    let rows = (0..=pulse_core::news::MAX_HISTORY_ROWS).map(|id| json!({"id":id.to_string(),"reset_type":"regular","announced_at":"2026-01-01T00:00:00Z","text":"Synthetic reset","source":{"type":"observed"}})).collect::<Vec<_>>();
+    let history = json!({"meta":{"api_version":"v1"},"data":rows,"pagination":{"has_more":false}});
+    assert_eq!(history_items(&history).unwrap_err(), "history_too_large");
+    assert!(!pulse_core::news::reset_stats(&json!(null), &history).history_complete);
+}

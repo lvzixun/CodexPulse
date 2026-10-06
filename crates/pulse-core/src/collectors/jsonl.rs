@@ -39,7 +39,7 @@ fn identity(meta: &Metadata) -> String {
     #[cfg(unix)]
     {
         use std::os::unix::fs::MetadataExt;
-        return format!("{}:{}", meta.dev(), meta.ino());
+        format!("{}:{}", meta.dev(), meta.ino())
     }
     #[cfg(windows)]
     {

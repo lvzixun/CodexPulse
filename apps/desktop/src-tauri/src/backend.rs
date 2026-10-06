@@ -28,10 +28,12 @@ pub struct Settings {
     pub glass: bool,
     pub floating: bool,
     pub always_on_top: bool,
+    // Retain the original serialized keys for existing settings; these fields
+    // describe the native local source on both Windows and macOS.
     pub windows_enabled: bool,
     pub wsl_enabled: bool,
     pub windows_home: Option<String>,
-    pub windows_sources: Vec<crate::source_config::WindowsSource>,
+    pub windows_sources: Vec<crate::source_config::LocalSource>,
     pub wsl_sources: Vec<crate::source_config::WslSource>,
     pub wsl_auto_detect: bool,
     pub hide_titles: bool,
@@ -48,10 +50,10 @@ impl Default for Settings {
             theme: "system".into(),
             accent: "blue".into(),
             glass: true,
-            floating: true,
+            floating: cfg!(windows),
             always_on_top: true,
             windows_enabled: true,
-            wsl_enabled: true,
+            wsl_enabled: cfg!(windows),
             windows_home: None,
             windows_sources: Vec::new(),
             wsl_sources: Vec::new(),
@@ -85,7 +87,7 @@ impl Settings {
         if self
             .windows_home
             .as_ref()
-            .is_some_and(|p| !crate::source_config::valid_windows_home(p))
+            .is_some_and(|p| !crate::source_config::valid_local_home(p))
         {
             return Err("Codex home 必须是绝对路径".into());
         }
@@ -147,6 +149,10 @@ impl Snapshot {
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct QuotaSource {
+    pub allowance: Option<crate::account_allowance::AccountAllowance>,
+    pub profile: Option<crate::account_profile::AccountProfile>,
+    pub profile_status: String,
+    pub profile_last_success: Option<String>,
     pub home: String,
     pub status: String,
     pub last_attempt: String,
@@ -341,10 +347,31 @@ impl Backend {
                                         }
                                     },
                                 );
+                                let (profile_stamp, mut profile) = crate::http_quota::checked_fetch(
+                                    &scope,
+                                    |_| {},
+                                    |credentials| {
+                                        if worker_stop.load(Ordering::Relaxed)
+                                            || worker_quota_epoch.load(Ordering::Relaxed)
+                                                != generation
+                                        {
+                                            Err("cancelled".into())
+                                        } else {
+                                            crate::http_quota::fetch_profile(credentials)
+                                        }
+                                    },
+                                );
+                                let (stamp, result) = if stamp != profile_stamp {
+                                    profile = Err("credentials_changed".into());
+                                    (profile_stamp, Err("credentials_changed".into()))
+                                } else {
+                                    (stamp, result)
+                                };
                                 results.push(crate::http_quota::ResultSet {
                                     scope,
                                     stamp,
                                     result,
+                                    profile,
                                 });
                             }
                             if !worker_stop.load(Ordering::Relaxed) {
@@ -531,7 +558,8 @@ impl Backend {
                         Ok(Message::Refresh(group, reply)) => {
                             let result = match group.as_str() {
                                 "quota" => {
-                                    quota_schedule.request();
+                                    request_quota_refresh(&mut quota_schedule, &mut quota);
+
                                     Ok(())
                                 }
                                 "news" => {
@@ -706,17 +734,55 @@ impl Backend {
                                         .get_mut(&scope.source_id)
                                         .expect("reconciled source");
                                     state.last_attempt = Utc::now().to_rfc3339();
+                                    match response.profile {
+                                        Ok(profile) => {
+                                            state.profile_status = "connected".into();
+                                            state.profile_last_success =
+                                                Some(state.last_attempt.clone());
+                                            state.profile = Some(profile);
+                                        }
+                                        Err(error) => {
+                                            state.profile_status = error.code.clone();
+                                            if [
+                                                "not_signed_in",
+                                                "reauth_required",
+                                                "account_mismatch",
+                                                "credentials_unreadable",
+                                                "credentials_invalid",
+                                                "credentials_changed",
+                                            ]
+                                            .contains(&error.code.as_str())
+                                            {
+                                                state.profile = None;
+                                                state.profile_last_success = None;
+                                            }
+                                        }
+                                    }
                                     match response.result {
                                         Ok(readout) => {
                                             state.status = "connected".into();
                                             state.failures = 0;
-                                            state.retry_at = 0;
+                                            state.retry_at = if readout.allowance_retry_after > 0 {
+                                                now.saturating_add(readout.allowance_retry_after)
+                                            } else {
+                                                0
+                                            };
+                                            state.allowance = Some(readout.allowance);
                                             state.last_success = Some(state.last_attempt.clone());
                                             state.buckets = readout.buckets;
                                             state.proxy_source = readout.proxy_source;
                                         }
                                         Err(error) => {
                                             state.status = error.code.clone();
+                                            if [
+                                                "reauth_required",
+                                                "credentials_expired",
+                                                "credentials_changed",
+                                            ]
+                                            .contains(&error.code.as_str())
+                                            {
+                                                state.allowance = None;
+                                            }
                                             if error.code == "credentials_changed" {
                                                 state.retry_at = 0;
                                                 quota_schedule.next = 0;
@@ -737,6 +803,7 @@ impl Backend {
                                             .contains(&error.code.as_str())
                                             {
                                                 state.buckets.clear();
+                                                state.allowance = None;
                                             }
                                         }
                                     }
@@ -804,13 +871,28 @@ impl Backend {
                                 .or_else(|| std::env::var_os("CODEX_HOME").map(PathBuf::from))
                                 .unwrap_or_else(|| {
                                     PathBuf::from(
-                                        std::env::var_os("USERPROFILE").unwrap_or_default(),
+                                        std::env::var_os(if cfg!(windows) {
+                                            "USERPROFILE"
+                                        } else {
+                                            "HOME"
+                                        })
+                                        .unwrap_or_default(),
                                     )
                                     .join(".codex")
                                 });
                             windows.push((
-                                "windows".to_owned(),
-                                "Windows App / CLI".to_owned(),
+                                if cfg!(target_os = "macos") {
+                                    "macos"
+                                } else {
+                                    "windows"
+                                }
+                                .to_owned(),
+                                if cfg!(target_os = "macos") {
+                                    "macOS App / CLI"
+                                } else {
+                                    "Windows App / CLI"
+                                }
+                                .to_owned(),
                                 home,
                             ));
                             windows.extend(
@@ -820,7 +902,15 @@ impl Backend {
                                     .filter(|s| s.enabled)
                                     .map(|s| {
                                         (
-                                            format!("windows:{}", s.id),
+                                            format!(
+                                                "{}:{}",
+                                                if cfg!(target_os = "macos") {
+                                                    "macos"
+                                                } else {
+                                                    "windows"
+                                                },
+                                                s.id
+                                            ),
                                             s.label.clone(),
                                             PathBuf::from(&s.home),
                                         )
@@ -920,6 +1010,10 @@ impl Backend {
                             }) {
                                 if let Some(q) = quota.sources.get_mut(&source.health.id) {
                                     q.buckets.clear();
+                                    q.allowance = None;
+                                    q.profile = None;
+                                    q.profile_last_success = None;
+                                    q.profile_status = "verifying_account".into();
                                     q.identity = None;
                                     q.status = "verifying_account".into();
                                 }
@@ -1065,6 +1159,11 @@ impl Backend {
                     }
                     // Small transactions on the existing single writer keep local ingestion,
                     // settings and queries responsive throughout historical rebuilding.
+                    match store.step_reference_prices(&prices, 1024) {
+                        Ok(n) if n > 0 => dirty = true,
+                        Err(_) => dirty = true,
+                        _ => {}
+                    }
                     let rebuild_start = Instant::now();
                     while store.timezone_rebuild_status().is_some()
                         && !collector_stop.load(Ordering::Relaxed)
@@ -1126,6 +1225,10 @@ impl Backend {
                                         stamp.identity.is_some() && stamp.identity == q.identity
                                     }) {
                                         q.buckets.clear();
+                                        q.allowance = None;
+                                        q.profile = None;
+                                        q.profile_last_success = None;
+                                        q.profile_status = "verifying_account".into();
                                         if !stamps.contains_key(id) {
                                             q.status = "verifying_account".into();
                                         }
@@ -1152,6 +1255,8 @@ impl Backend {
                                 _ => state.error = Some("账本查询失败；请查看数据源状态".into()),
                             }
                         }
+                        #[cfg(target_os = "macos")]
+                        crate::macos::update_status(&app);
                         // Hidden windows receive no stream of state events; opening reads cache.
                         if app
                             .get_webview_window("pulse")
@@ -1271,6 +1376,17 @@ fn initial_settings(store: &Store) -> Result<Settings, Box<dyn std::error::Error
     Ok(settings)
 }
 
+fn request_quota_refresh(schedule: &mut crate::refresh::Schedule, quota: &mut QuotaState) {
+    // Explicit retries can recover client transport failures immediately. Preserve
+    // server backoff (including Retry-After), authentication failures and single flight.
+    for state in quota.sources.values_mut() {
+        if matches!(state.status.as_str(), "network_error" | "body_read_error") {
+            state.retry_at = 0;
+        }
+    }
+    schedule.request();
+}
+
 fn persist_quota(
     store: &Store,
     quota: &mut QuotaState,
@@ -1282,7 +1398,14 @@ fn persist_quota(
             .flat_map(|s| s.buckets.clone())
             .collect(),
     );
-    store.set_setting("quota", quota)
+    // Account profile remains in memory; never persist personal names/handles.
+    let mut persisted = quota.clone();
+    for source in persisted.sources.values_mut() {
+        source.profile = None;
+        source.profile_status.clear();
+        source.profile_last_success = None;
+    }
+    store.set_setting("quota", &persisted)
 }
 fn scope(source: &Source) -> crate::http_quota::Scope {
     crate::http_quota::Scope {
@@ -1314,13 +1437,21 @@ fn reconcile_identity(
         state.home = home;
         state.identity = stamp.identity.clone();
         state.buckets.clear();
+        state.allowance = None;
+        state.profile = None;
+        state.profile_status = "awaiting_refresh".into();
+        state.profile_last_success = None;
         state.last_success = None;
         state.failures = 0;
         state.retry_at = 0;
         state.status = "awaiting_refresh".into();
     }
     if stamp.status != "ready" {
+        state.allowance = None;
         state.status = stamp.status.clone();
+        state.profile_status = stamp.status.clone();
+        state.profile = None;
+        state.profile_last_success = None;
     }
     state.proxy_source = stamp.proxy_source.clone();
     quota.last_success = quota
@@ -1521,14 +1652,43 @@ mod tests {
             .buckets
             .push(bucket);
         quota.sources.get_mut("windows").unwrap().last_success = Some("old success".into());
+        let state = quota.sources.get_mut("windows").unwrap();
+        state.profile = Some(crate::account_profile::AccountProfile {
+            display_name: Some("Private test name".into()),
+            ..Default::default()
+        });
+        state.profile_last_success = Some("old profile success".into());
+        state.allowance = Some(crate::account_allowance::AccountAllowance {
+            balance: Some(42.75),
+            reset_cards: Some(2),
+            ..Default::default()
+        });
+
         persist_quota(&store, &mut quota).unwrap();
         assert_eq!(quota.buckets.len(), 1);
+        assert!(quota.sources["windows"].profile.is_some());
+        let persisted: serde_json::Value = store.setting("quota").unwrap().unwrap();
+        assert!(!persisted.to_string().contains("Private test name"));
+        let cached: QuotaState = store.setting("quota").unwrap().unwrap();
+        assert!(cached.sources["windows"].profile.is_none());
+        assert_eq!(
+            cached.sources["windows"]
+                .allowance
+                .as_ref()
+                .unwrap()
+                .balance,
+            Some(42.75)
+        );
+
         let switched = crate::http_quota::Stamp {
             identity: Some("account-b-hash".into()),
             status: "ready".into(),
             ..Default::default()
         };
         reconcile_identity(&mut quota, &scope, &switched);
+        assert!(quota.sources["windows"].profile.is_none());
+        assert!(quota.sources["windows"].profile_last_success.is_none());
+        assert!(quota.sources["windows"].allowance.is_none());
         persist_quota(&store, &mut quota).unwrap();
         let saved: QuotaState = store.setting("quota").unwrap().unwrap();
         assert!(saved.buckets.is_empty());
@@ -1538,6 +1698,33 @@ mod tests {
             saved.sources["windows"].identity.as_deref(),
             Some("account-b-hash")
         );
+    }
+    #[test]
+    fn explicit_retry_recovers_transport_but_keeps_server_backoff_and_single_flight() {
+        let mut quota = QuotaState::default();
+        for (id, status) in [
+            ("transport", "network_error"),
+            ("limited", "http_429"),
+            ("auth", "reauth_required"),
+        ] {
+            quota.sources.insert(
+                id.into(),
+                QuotaSource {
+                    status: status.into(),
+                    retry_at: 900,
+                    ..Default::default()
+                },
+            );
+        }
+        let mut schedule = crate::refresh::Schedule::new();
+        request_quota_refresh(&mut schedule, &mut quota);
+        assert_eq!(quota.sources["transport"].retry_at, 0);
+        assert_eq!(quota.sources["limited"].retry_at, 900);
+        assert_eq!(quota.sources["auth"].retry_at, 900);
+        assert!(schedule.requested);
+        schedule.begin();
+        request_quota_refresh(&mut schedule, &mut quota);
+        assert!(!schedule.requested);
     }
     #[test]
     fn legacy_settings_keep_defaults_and_source_drafts_roundtrip() {
@@ -1577,6 +1764,7 @@ mod tests {
                 unknown_totals: 0,
                 cost_nanousd: 789,
                 unpriced_tokens: 0,
+                reference: Default::default(),
             });
             let display = snapshot.for_display();
             let json = serde_json::to_string(&display).unwrap();

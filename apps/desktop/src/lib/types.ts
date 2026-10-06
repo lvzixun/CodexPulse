@@ -31,6 +31,8 @@ export interface Settings {
 export interface ViewState {
   mode: 'compact' | 'details';
   page: string;
+  news_challenge: boolean;
+  news_limit: number;
   selected_model: string | null;
   selected_session: string | null;
   session_query: SessionPageRequest;
@@ -74,6 +76,7 @@ export interface ModelPage {
   unknown_total_events: number;
 }
 export interface ModelRow extends ModelUsage {
+  reference: ReferenceEstimate;
   events: number;
   unknown_totals: number;
   unknown_input: number;
@@ -96,8 +99,22 @@ export interface SessionMeta {
   parent_id: string | null;
   status: string;
   last_activity: string;
+  output_rate: {
+    output_tokens: number;
+    elapsed_ms: number;
+    measured_at: string;
+    completed: boolean;
+  } | null;
+}
+export interface ReferenceEstimate {
+  price_date: string;
+  cost_nanousd: number;
+  unpriced_tokens: number;
+  unpriced_events: number;
+  pending: boolean;
 }
 export interface RecentSession {
+  reference: ReferenceEstimate;
   meta: SessionMeta;
   models: string[];
   sources: string[];
@@ -191,6 +208,17 @@ export interface SourceHealth {
   files: number;
   issues: number;
 }
+export interface AccountProfile {
+  display_name: string | null;
+  username: string | null;
+  lifetime_tokens: number | null;
+  peak_daily_tokens: number | null;
+  longest_running_turn_sec: number | null;
+  longest_streak_days: number | null;
+  current_streak_days: number | null;
+  stats_as_of: string | null;
+  stats_unavailable: boolean;
+}
 export interface Snapshot {
   timezone_rebuild: { target_timezone: string; processed: number; ready: boolean } | null;
   timezone_error: string | null;
@@ -200,6 +228,7 @@ export interface Snapshot {
     unread_keys: string[];
     important_unread: number;
     items: NewsItem[];
+    reset_history: ResetDate[];
     status: string;
     last_success: string | null;
     last_attempt: string | null;
@@ -208,6 +237,12 @@ export interface Snapshot {
     challenge: Challenge | null;
     challenge_status: string;
     challenge_fetched_at: string | null;
+    reset_stats: {
+      total: number | null;
+      average_interval_days: number | null;
+      longest_wait_days: number | null;
+      history_complete: boolean;
+    };
   };
   quota: {
     request_status: string;
@@ -218,6 +253,10 @@ export interface Snapshot {
       string,
       {
         home: string;
+        allowance: AccountAllowance | null;
+        profile: AccountProfile | null;
+        profile_status: string;
+        profile_last_success: string | null;
         status: string;
         last_attempt: string;
         failures: number;
@@ -231,6 +270,7 @@ export interface Snapshot {
   };
   settings: Settings;
   usage: {
+    reference: ReferenceEstimate;
     from_day: string;
     through_day: string;
     timezone: string;
@@ -257,6 +297,15 @@ export interface QuotaWindow {
   duration_minutes: number | null;
   resets_at: number | null;
 }
+export interface AccountAllowance {
+  balance: number | null;
+  unlimited: boolean;
+  reset_cards: number | null;
+  applicable_reset_cards: number | null;
+  next_expiration: string | null;
+  next_expiring_count: number | null;
+  expiration_status: string;
+}
 export interface QuotaBucket {
   source_id: string;
   identity_key: string;
@@ -282,6 +331,10 @@ export interface NewsItem {
   author: string | null;
   source_url: string | null;
 }
+export interface ResetDate {
+  occurred_at: string;
+  reset_type: string;
+}
 export interface Challenge {
   start_date: string;
   days: number;
@@ -292,3 +345,5 @@ export interface Challenge {
     entries: { kind: string; title: string; text: string; source_url: string | null }[];
   }[];
 }
+export type StartupStatus =
+  'unsupported' | 'disabled' | 'enabled' | 'requires_approval' | 'unavailable';

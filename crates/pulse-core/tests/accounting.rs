@@ -502,3 +502,102 @@ fn optional_field_appearing_does_not_erase_known_total_delta() {
     assert_eq!(next.tokens.effective_total(), Some(25));
     assert_eq!(next.tokens.cached, None);
 }
+
+#[test]
+fn output_rate_uses_owned_turn_counts_and_survives_checkpoint() {
+    let mut p = state("speed");
+    // Earlier output in the session must not contribute to this turn.
+    usage(
+        &mut p,
+        counts(100, 60, 100),
+        counts(100, 60, 100),
+        "2026-10-01T00:00:01Z",
+    );
+    p.parse(&row(
+        "event_msg",
+        json!({"type":"task_started","turn_id":"turn"}),
+        "2026-10-01T00:01:00Z",
+    ));
+    usage(
+        &mut p,
+        counts(200, 120, 150),
+        counts(100, 60, 50),
+        "2026-10-01T00:01:05Z",
+    );
+    assert_eq!(
+        p.session
+            .as_ref()
+            .unwrap()
+            .output_rate
+            .as_ref()
+            .unwrap()
+            .output_tokens,
+        50
+    );
+    p = serde_json::from_str(&serde_json::to_string(&p).unwrap()).unwrap();
+    usage(
+        &mut p,
+        counts(300, 180, 200),
+        counts(100, 60, 50),
+        "2026-10-01T00:01:10Z",
+    );
+    // Duplicate cumulative sample does not add tokens twice.
+    usage(
+        &mut p,
+        counts(300, 180, 200),
+        counts(100, 60, 50),
+        "2026-10-01T00:01:10Z",
+    );
+    p.parse(&row(
+        "event_msg",
+        json!({"type":"task_complete","turn_id":"turn","duration_ms":12500}),
+        "2026-10-01T00:01:12.500Z",
+    ));
+    let rate = p.session.as_ref().unwrap().output_rate.as_ref().unwrap();
+    assert_eq!(
+        (rate.output_tokens, rate.elapsed_ms, rate.completed),
+        (100, 12500, true)
+    );
+    p.parse(&row(
+        "event_msg",
+        json!({"type":"task_started","turn_id":"next"}),
+        "2026-10-01T00:02:00Z",
+    ));
+    assert!(p.session.as_ref().unwrap().output_rate.is_none());
+    usage(
+        &mut p,
+        counts(10, 0, 2),
+        counts(10, 0, 2),
+        "2026-10-01T00:02:01Z",
+    );
+    assert!(p.session.as_ref().unwrap().output_rate.is_none());
+}
+
+#[test]
+fn output_rate_rejects_missing_or_contradictory_timing() {
+    let mut p = state("timing");
+    usage(
+        &mut p,
+        counts(100, 60, 10),
+        counts(100, 60, 10),
+        "2026-10-01T00:00:01Z",
+    );
+    assert!(p.session.as_ref().unwrap().output_rate.is_none());
+    p.parse(&row(
+        "event_msg",
+        json!({"type":"task_started","turn_id":"turn"}),
+        "2026-10-01T00:01:00Z",
+    ));
+    usage(
+        &mut p,
+        counts(200, 120, 20),
+        counts(100, 60, 10),
+        "2026-10-01T00:01:05Z",
+    );
+    p.parse(&row(
+        "event_msg",
+        json!({"type":"task_complete","turn_id":"turn","duration_ms":1}),
+        "2026-10-01T00:01:10Z",
+    ));
+    assert!(p.session.as_ref().unwrap().output_rate.is_none());
+}

@@ -33,7 +33,7 @@ fn legacy_schema_upgrades_and_newer_schema_is_rejected() {
             .query_row("SELECT MAX(version) FROM schema_version", [], |r| r
                 .get::<_, u32>(0))
             .unwrap(),
-        5
+        7
     );
     assert_eq!(
         connection
@@ -118,7 +118,7 @@ fn schema_three_adds_independent_titles_without_rebuilding_usage() {
             .query_row("SELECT MAX(version) FROM schema_version", [], |r| r
                 .get::<_, u32>(0))
             .unwrap(),
-        5
+        7
     );
     assert_eq!(
         connection
@@ -167,4 +167,62 @@ fn legacy_activity_migration_normalizes_metadata_in_multiple_batches() {
     }
     let connection = Connection::open(&path).unwrap();
     assert_eq!(connection.query_row("SELECT COUNT(*) FROM sessions WHERE last_activity='2026-10-01T00:00:00.000000000Z'",[],|r| r.get::<_,u32>(0)).unwrap(),260);
+}
+
+#[test]
+fn schema_six_reference_indexes_keep_projection_checkpoint_and_history() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("schema6.sqlite");
+    let connection = Connection::open(&path).unwrap();
+    for sql in [
+        include_str!("../migrations/001.sql"),
+        include_str!("../migrations/002-query-indexes.sql"),
+        include_str!("../migrations/003-session-integrity.sql"),
+        include_str!("../migrations/004-session-titles.sql"),
+        include_str!("../migrations/005-model-pages.sql"),
+        include_str!("../migrations/006-reference-prices.sql"),
+    ] {
+        connection.execute_batch(sql).unwrap();
+    }
+    connection.execute_batch("INSERT INTO sessions VALUES('s','{}','2026-10-06T00:00:00Z');
+        INSERT INTO usage_facts VALUES('f','s','m','2026-10-06T00:00:00.000Z',12,10,3,2,123,'{\"retained\":true}');
+        INSERT INTO reference_prices VALUES('f','reference-v',456);
+        INSERT INTO reference_price_state VALUES(1,'reference-v',1);").unwrap();
+    drop(connection);
+    drop(Store::open(&path).unwrap());
+    let connection = Connection::open(&path).unwrap();
+    assert_eq!(
+        connection
+            .query_row("SELECT cost_nanousd FROM usage_facts", [], |r| r
+                .get::<_, i64>(0))
+            .unwrap(),
+        123
+    );
+    assert_eq!(
+        connection
+            .query_row("SELECT cost_nanousd FROM reference_prices", [], |r| r
+                .get::<_, i64>(0))
+            .unwrap(),
+        456
+    );
+    assert_eq!(
+        connection
+            .query_row("SELECT through_rowid FROM reference_price_state", [], |r| r
+                .get::<_, i64>(0))
+            .unwrap(),
+        1
+    );
+    let plan = connection.prepare("EXPLAIN QUERY PLAN SELECT SUM(cost_nanousd),SUM(total) FROM reference_prices WHERE version='reference-v' AND occurred_at>='2026-10-01' AND occurred_at<'2026-11-01'").unwrap().query_map([],|r|r.get::<_,String>(3)).unwrap().collect::<Result<Vec<_>,_>>().unwrap();
+    assert!(
+        plan.iter()
+            .any(|s| s.contains("COVERING INDEX reference_range")),
+        "{plan:?}"
+    );
+    assert_eq!(
+        connection
+            .query_row("SELECT occurred_at FROM reference_prices", [], |r| r
+                .get::<_, String>(0))
+            .unwrap(),
+        "2026-10-06T00:00:00.000Z"
+    );
 }

@@ -97,6 +97,14 @@ impl TokenCounts {
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct OutputRate {
+    pub output_tokens: u64,
+    pub elapsed_ms: u64,
+    pub measured_at: String,
+    pub completed: bool,
+}
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SessionMeta {
     pub id: String,
     pub title: Option<String>,
@@ -106,6 +114,8 @@ pub struct SessionMeta {
     pub parent_id: Option<String>,
     pub status: String,
     pub last_activity: String,
+    #[serde(default)]
+    pub output_rate: Option<OutputRate>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

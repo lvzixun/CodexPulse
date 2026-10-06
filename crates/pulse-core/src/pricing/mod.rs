@@ -35,6 +35,25 @@ impl PriceBook {
         ))
     }
     pub fn price(&self, fact: &UsageFact) -> Option<(&Price, i64)> {
+        self.price_at(fact, &fact.timestamp)
+    }
+    /// API equivalence at the book's checked date, independent of historical billing.
+    /// This never changes a fact's recorded price or fills unknown request dimensions.
+    pub fn reference_price(&self, fact: &UsageFact) -> Option<(&Price, i64)> {
+        let at = self.checked_at()?;
+        self.price_at(fact, &format!("{at}T23:59:59Z"))
+    }
+    pub fn checked_at(&self) -> Option<&str> {
+        self.prices.iter().map(|p| p.checked_at.as_str()).max()
+    }
+    pub fn fingerprint(&self) -> String {
+        use sha2::{Digest, Sha256};
+        format!(
+            "{:x}",
+            Sha256::digest(serde_json::to_vec(self).expect("price book"))
+        )
+    }
+    fn price_at(&self, fact: &UsageFact, timestamp: &str) -> Option<(&Price, i64)> {
         fact.tokens.validate().ok()?;
         let input = fact.tokens.input?;
         if fact.request_input.is_some_and(|request| request != input) {
@@ -43,7 +62,7 @@ impl PriceBook {
         let cached = fact.tokens.cached?;
         let output = fact.tokens.output?;
         let writes = fact.tokens.cache_write?;
-        let at = DateTime::parse_from_rfc3339(&fact.timestamp)
+        let at = DateTime::parse_from_rfc3339(timestamp)
             .ok()?
             .with_timezone(&Utc);
         let tier = match fact.service_tier.as_deref()? {

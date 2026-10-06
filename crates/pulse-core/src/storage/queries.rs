@@ -22,6 +22,7 @@ pub struct RecentSession {
     pub unknown_totals: u64,
     pub cost_nanousd: i64,
     pub unpriced_tokens: u64,
+    pub reference: super::ReferenceEstimate,
 }
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct UsageSummary {
@@ -39,6 +40,7 @@ pub struct UsageSummary {
     pub model_count: u64,
     pub fact_revision: String,
     pub days: Vec<DayUsage>,
+    pub reference: super::ReferenceEstimate,
 }
 impl Store {
     pub fn setting<T: serde::de::DeserializeOwned>(
@@ -112,6 +114,11 @@ impl Store {
         }
         result.sessions =
             self.independent_sessions(&result.from_day, &result.through_day, timezone)?;
+        result.reference = self.reference_estimate(
+            &super::day_boundary(&result.from_day, timezone)?,
+            &super::day_boundary_next(&result.through_day, timezone)?,
+            None,
+        )?;
         let mut query=self.connection.prepare("SELECT SUM(total),SUM(cost_nanousd),SUM(unpriced_tokens) FROM daily_model_usage WHERE day=?1 AND timezone=?2 HAVING COUNT(*)>0")?;
         for offset in 0..30 {
             let day = from

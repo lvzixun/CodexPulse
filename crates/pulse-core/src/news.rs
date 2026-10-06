@@ -8,6 +8,8 @@ pub use challenge::{Challenge, ChallengeDay, ChallengeEntry, challenge_page};
 mod translations;
 pub use translations::translations_page;
 
+pub const MAX_HISTORY_ROWS: usize = 1000;
+
 pub fn important_reset(item: &NewsItem) -> bool {
     matches!(item.kind, NewsKind::Announcement | NewsKind::Scheduled)
         && item.source_type == "x_post"
@@ -37,6 +39,49 @@ pub struct NewsItem {
     pub source_type: String,
     pub author: Option<String>,
     pub source_url: Option<String>,
+}
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ResetStats {
+    pub total: Option<u64>,
+    pub average_interval_days: Option<f64>,
+    pub longest_wait_days: Option<f64>,
+    pub history_complete: bool,
+}
+
+/// Public-site statistics, not account-specific quota or executed recovery evidence.
+pub fn reset_stats(status: &Value, history: &Value) -> ResetStats {
+    let stats = &status["data"]["stats"];
+    let parsed = history_items(history);
+    let complete = parsed.is_ok()
+        && history["pagination"]["has_more"] == false
+        && history["data"]
+            .as_array()
+            .is_some_and(|r| r.len() <= MAX_HISTORY_ROWS);
+    let rows = parsed.unwrap_or_default();
+    let mut dates = rows
+        .iter()
+        .filter_map(|r| chrono::DateTime::parse_from_rfc3339(&r.occurred_at).ok())
+        .collect::<Vec<_>>();
+    dates.sort();
+    let longest = complete
+        .then(|| {
+            dates
+                .windows(2)
+                .map(|pair| (pair[1] - pair[0]).num_seconds() as f64 / 86_400.0)
+                .max_by(f64::total_cmp)
+        })
+        .flatten();
+    ResetStats {
+        total: stats["total"]
+            .as_u64()
+            .or_else(|| complete.then_some(rows.len() as u64)),
+        average_interval_days: stats["avg_interval_days"]
+            .as_f64()
+            .filter(|n| n.is_finite() && *n >= 0.0),
+        longest_wait_days: longest,
+        history_complete: complete,
+    }
 }
 pub fn status_items(response: &Value) -> Result<Vec<NewsItem>, &'static str> {
     check(response)?;
@@ -82,13 +127,11 @@ pub fn status_items(response: &Value) -> Result<Vec<NewsItem>, &'static str> {
 }
 pub fn history_items(response: &Value) -> Result<Vec<NewsItem>, &'static str> {
     check(response)?;
-    response["data"]
-        .as_array()
-        .ok_or("invalid_history")?
-        .iter()
-        .take(100)
-        .map(|row| reset(row, None))
-        .collect()
+    let rows = response["data"].as_array().ok_or("invalid_history")?;
+    if rows.len() > MAX_HISTORY_ROWS {
+        return Err("history_too_large");
+    }
+    rows.iter().map(|row| reset(row, None)).collect()
 }
 pub fn merge(status: Vec<NewsItem>, history: Vec<NewsItem>) -> Vec<NewsItem> {
     let mut items = status;

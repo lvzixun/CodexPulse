@@ -1,9 +1,9 @@
 use crate::backend::{Backend, Settings};
 use crate::geometry::{Anchor, Area, Placement};
+use crate::window_lifecycle::Event;
 use serde::{Deserialize, Serialize};
 use std::{
     path::PathBuf,
-    process::{Command, Stdio},
     sync::Mutex,
     time::{Duration, Instant},
 };
@@ -17,6 +17,10 @@ use tauri::{
 pub struct ViewState {
     pub mode: String,
     pub page: String,
+    #[serde(default)]
+    pub news_challenge: bool,
+    #[serde(default = "default_news_limit")]
+    pub news_limit: u32,
     pub selected_model: Option<String>,
     pub selected_session: Option<String>,
     #[serde(default)]
@@ -27,11 +31,16 @@ pub struct ViewState {
     pub glass_supported: bool,
     pub floating_supported: bool,
 }
+fn default_news_limit() -> u32 {
+    5
+}
 impl Default for ViewState {
     fn default() -> Self {
         Self {
-            mode: "compact".into(),
+            mode: if cfg!(windows) { "compact" } else { "details" }.into(),
             page: "overview".into(),
+            news_challenge: false,
+            news_limit: default_news_limit(),
             selected_model: None,
             selected_session: None,
             session_query: Default::default(),
@@ -42,40 +51,92 @@ impl Default for ViewState {
         }
     }
 }
-pub struct WindowsWindowHost {
+pub struct WindowHost {
+    pub lifecycle: crate::window_lifecycle::Trace,
+    generation: std::sync::atomic::AtomicU64,
     pub view: Mutex<ViewState>,
     anchor: Mutex<Option<Anchor>>,
     hidden_since: Mutex<Option<Instant>>,
     creating: Mutex<()>,
     material: Mutex<Option<bool>>,
+    pub last_hidden: Mutex<Option<Instant>>,
+    #[cfg(target_os = "macos")]
+    pub badge: Mutex<bool>,
+    #[cfg(target_os = "macos")]
+    pub deactivate_observer: std::sync::atomic::AtomicUsize,
     maintenance: Mutex<Instant>,
     release_pending: std::sync::atomic::AtomicBool,
 }
-impl Default for WindowsWindowHost {
+impl Default for WindowHost {
     fn default() -> Self {
         Self {
+            lifecycle: Default::default(),
+            generation: std::sync::atomic::AtomicU64::new(0),
             view: Mutex::new(ViewState::default()),
             anchor: Mutex::new(None),
             hidden_since: Mutex::new(None),
             creating: Mutex::new(()),
             material: Mutex::new(None),
+            last_hidden: Mutex::new(None),
+            #[cfg(target_os = "macos")]
+            badge: Mutex::new(false),
+            #[cfg(target_os = "macos")]
+            deactivate_observer: std::sync::atomic::AtomicUsize::new(0),
             maintenance: Mutex::new(Instant::now()),
             release_pending: std::sync::atomic::AtomicBool::new(false),
         }
     }
 }
-impl WindowsWindowHost {
+pub fn trace_window(app: &tauri::AppHandle, event: Event, visible: Option<bool>) {
+    if let Some(host) = app.try_state::<WindowHost>() {
+        host.lifecycle.record(
+            event,
+            host.generation.load(std::sync::atomic::Ordering::Relaxed),
+            visible,
+        );
+    }
+}
+impl WindowHost {
+    pub fn diagnostics(&self) -> Result<crate::diagnostics::Window, String> {
+        let view = self.view.lock().map_err(|_| "界面状态不可用")?;
+        Ok(crate::diagnostics::Window {
+            generation: self.generation.load(std::sync::atomic::Ordering::Relaxed),
+            page: match view.page.as_str() {
+                "overview" => "overview",
+                "models" => "models",
+                "sessions" => "sessions",
+                "news" => "news",
+                "settings" => "settings",
+                _ => "unknown",
+            },
+            glass_supported: view.glass_supported,
+            floating_supported: view.floating_supported,
+            lifecycle: self.lifecycle.diagnostics(),
+        })
+    }
     pub fn remember_view(&self, next: ViewState) -> Result<(), String> {
         let pages = ["overview", "models", "sessions", "news", "settings"];
+        let scroll_pages = [
+            "overview",
+            "models",
+            "sessions",
+            "news",
+            "settings",
+            "challenge",
+        ];
         if !pages.contains(&next.page.as_str())
+            || !(5..=105).contains(&next.news_limit)
             || next.selected_model.as_ref().is_some_and(|s| s.len() > 256)
             || next
                 .selected_session
                 .as_ref()
                 .is_some_and(|s| s.len() > 256)
-            || next.scroll.len() > pages.len()
+            || next.scroll.len() > scroll_pages.len()
             || next.scroll.iter().any(|(page, y)| {
-                !pages.contains(&page.as_str()) || !y.is_finite() || *y < 0.0 || *y > 10_000_000.0
+                !scroll_pages.contains(&page.as_str())
+                    || !y.is_finite()
+                    || *y < 0.0
+                    || *y > 10_000_000.0
             })
         {
             return Err("界面状态无效".into());
@@ -111,6 +172,8 @@ impl WindowsWindowHost {
         let mut view = self.view.lock().map_err(|_| "界面状态不可用")?;
         // The host owns mode/material/platform capabilities; the renderer owns navigation.
         view.page = next.page;
+        view.news_challenge = next.news_challenge;
+        view.news_limit = next.news_limit;
         view.selected_model = next.selected_model;
         view.selected_session = next.selected_session;
         view.session_query = next.session_query;
@@ -153,7 +216,7 @@ fn areas(app: &tauri::AppHandle) -> Vec<Area> {
     areas
 }
 fn ensure_window(app: &tauri::AppHandle) -> tauri::Result<tauri::WebviewWindow> {
-    let host = app.state::<WindowsWindowHost>();
+    let host = app.state::<WindowHost>();
     let _creation = host.creating.lock().expect("window creation state");
     if let Some(window) = app.get_webview_window("pulse") {
         return Ok(window);
@@ -174,11 +237,27 @@ fn ensure_window(app: &tauri::AppHandle) -> tauri::Result<tauri::WebviewWindow> 
             }
         })
         .build()?;
+    host.generation
+        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    trace_window(app, Event::Created, window.is_visible().ok());
+    #[cfg(target_os = "macos")]
+    crate::macos::prepare_window(&window);
     apply_settings(app, &settings(app));
     Ok(window)
 }
 fn position(app: &tauri::AppHandle, w: &tauri::WebviewWindow, compact: bool) {
-    let host = app.state::<WindowsWindowHost>();
+    #[cfg(target_os = "macos")]
+    {
+        crate::macos::position(app, w, &areas(app));
+    }
+    #[cfg(not(target_os = "macos"))]
+    position_floating(app, w, compact);
+    #[cfg(target_os = "macos")]
+    let _ = compact;
+}
+#[cfg(not(target_os = "macos"))]
+fn position_floating(app: &tauri::AppHandle, w: &tauri::WebviewWindow, compact: bool) {
+    let host = app.state::<WindowHost>();
     let anchor = host
         .anchor
         .lock()
@@ -206,7 +285,7 @@ fn position(app: &tauri::AppHandle, w: &tauri::WebviewWindow, compact: bool) {
     }
 }
 pub fn moved(app: &tauri::AppHandle, position: tauri::PhysicalPosition<i32>) {
-    let host = app.state::<WindowsWindowHost>();
+    let host = app.state::<WindowHost>();
     if !host.view.lock().is_ok_and(|v| v.mode == "compact") {
         return;
     }
@@ -244,17 +323,26 @@ pub fn moved(app: &tauri::AppHandle, position: tauri::PhysicalPosition<i32>) {
     }
 }
 pub fn hide(app: &tauri::AppHandle) {
-    if let Some(w) = app.get_webview_window("pulse") {
+    if let Some(w) = app.get_webview_window("pulse")
+        && w.is_visible().unwrap_or(false)
+    {
         let _ = app.emit("window-visible", false);
-        let _ = w.hide();
-        if let Ok(mut hidden) = app.state::<WindowsWindowHost>().hidden_since.lock() {
+        if w.hide().is_err() {
+            trace_window(app, Event::HideFailed, w.is_visible().ok());
+            return;
+        }
+        trace_window(app, Event::Hidden, w.is_visible().ok());
+        if let Ok(mut last) = app.state::<WindowHost>().last_hidden.lock() {
+            *last = Some(Instant::now());
+        }
+        if let Ok(mut hidden) = app.state::<WindowHost>().hidden_since.lock() {
             *hidden = Some(Instant::now());
         }
     }
 }
 /// Called by the existing collector scheduler. No extra maintenance thread/WebView.
 pub fn release_hidden(app: &tauri::AppHandle) {
-    let Some(host) = app.try_state::<WindowsWindowHost>() else {
+    let Some(host) = app.try_state::<WindowHost>() else {
         return;
     };
     let due = host
@@ -286,36 +374,73 @@ pub fn release_hidden(app: &tauri::AppHandle) {
         return;
     }
     let handle = app.clone();
-    let _ = app.run_on_main_thread(move || {
-        let host = handle.state::<WindowsWindowHost>();
-        if let Ok(mut hidden) = host.hidden_since.lock()
-            && hidden.is_some_and(|t| t.elapsed() >= Duration::from_secs(300))
-            && let Some(w) = handle.get_webview_window("pulse")
-            && !w.is_visible().unwrap_or(true)
-        {
-            // destroy bypasses CloseRequested; ExitRequested is guarded in main.
-            if w.destroy().is_ok() {
-                *hidden = None;
-                if let Ok(mut material) = host.material.lock() {
-                    *material = None;
+    trace_window(app, Event::ReleaseRequested, None);
+    if app
+        .run_on_main_thread(move || {
+            let host = handle.state::<WindowHost>();
+            if let Ok(mut hidden) = host.hidden_since.lock()
+                && hidden.is_some_and(|t| t.elapsed() >= Duration::from_secs(300))
+                && let Some(w) = handle.get_webview_window("pulse")
+                && !w.is_visible().unwrap_or(true)
+            {
+                // destroy bypasses CloseRequested; ExitRequested is guarded in main.
+                if w.destroy().is_ok() {
+                    trace_window(&handle, Event::ReleaseQueued, None);
+                    *hidden = None;
+                    if let Ok(mut material) = host.material.lock() {
+                        *material = None;
+                    }
+                } else {
+                    trace_window(&handle, Event::ReleaseFailed, w.is_visible().ok());
                 }
             }
-        }
+            host.release_pending
+                .store(false, std::sync::atomic::Ordering::Relaxed);
+        })
+        .is_err()
+    {
         host.release_pending
             .store(false, std::sync::atomic::Ordering::Relaxed);
-    });
+        trace_window(app, Event::ReleaseFailed, None);
+    }
 }
 pub fn setup(app: &tauri::App, settings: &Settings) -> Result<(), Box<dyn std::error::Error>> {
-    *app.state::<WindowsWindowHost>()
+    *app.state::<WindowHost>()
         .anchor
         .lock()
         .map_err(|_| "anchor state")? = settings.compact_anchor.clone();
-    let settings_item = MenuItem::with_id(app, "settings", "设置", true, None::<&str>)?;
+    let settings_item = MenuItem::with_id(
+        app,
+        "settings",
+        crate::language::text("设置", "Settings"),
+        true,
+        None::<&str>,
+    )?;
     let separator = PredefinedMenuItem::separator(app)?;
-    let exit = MenuItem::with_id(app, "exit", "退出", true, None::<&str>)?;
+    let exit = MenuItem::with_id(
+        app,
+        "exit",
+        crate::language::text("退出", "Quit"),
+        true,
+        None::<&str>,
+    )?;
     let menu = Menu::with_items(app, &[&settings_item, &separator, &exit])?;
-    TrayIconBuilder::new()
-        .icon(app.default_window_icon().ok_or("missing icon")?.clone())
+    #[cfg(target_os = "macos")]
+    app.handle()
+        .set_activation_policy(tauri::ActivationPolicy::Accessory)?;
+    let icon = {
+        #[cfg(target_os = "macos")]
+        {
+            crate::macos::icon()
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            app.default_window_icon().ok_or("missing icon")?.clone()
+        }
+    };
+    let tray = TrayIconBuilder::with_id("pulse-tray")
+        .icon(icon)
+        .icon_as_template(cfg!(target_os = "macos"))
         .tooltip("CodexPulse")
         .menu(&menu)
         .show_menu_on_left_click(false)
@@ -333,11 +458,20 @@ pub fn setup(app: &tauri::App, settings: &Settings) -> Result<(), Box<dyn std::e
                     ..
                 }
             ) {
+                #[cfg(target_os = "macos")]
+                crate::macos::toggle(tray.app_handle());
+                #[cfg(not(target_os = "macos"))]
                 show_details(tray.app_handle(), None);
             }
         })
         .build(app)?;
-    if settings.floating {
+    #[cfg(target_os = "macos")]
+    crate::macos::set_status_symbol(&tray);
+    #[cfg(not(target_os = "macos"))]
+    let _ = tray;
+    #[cfg(target_os = "macos")]
+    crate::macos::observe_deactivation(app.handle());
+    if cfg!(windows) && settings.floating {
         let w = ensure_window(app.handle())?;
         if settings.compact_anchor.is_none()
             && let Some((x, y)) = settings.compact_position
@@ -352,7 +486,7 @@ pub fn setup(app: &tauri::App, settings: &Settings) -> Result<(), Box<dyn std::e
 }
 pub fn apply_settings(app: &tauri::AppHandle, settings: &Settings) {
     if let Some(w) = app.get_webview_window("pulse") {
-        let _ = w.set_always_on_top(settings.always_on_top);
+        let _ = w.set_always_on_top(cfg!(target_os = "macos") || settings.always_on_top);
         let _ = w.set_theme(match settings.theme.as_str() {
             "dark" => Some(Theme::Dark),
             "light" => Some(Theme::Light),
@@ -368,7 +502,7 @@ pub fn refresh_material(app: &tauri::AppHandle) {
 }
 fn refresh_material_with(app: &tauri::AppHandle, settings: &Settings) {
     if let Some(w) = app.get_webview_window("pulse") {
-        let host = app.state::<WindowsWindowHost>();
+        let host = app.state::<WindowHost>();
         let allowed = settings.glass && crate::material::transparency_allowed();
         let Ok(mut previous) = host.material.lock() else {
             return;
@@ -378,7 +512,16 @@ fn refresh_material_with(app: &tauri::AppHandle, settings: &Settings) {
         }
         let effects = if allowed {
             Some(tauri::utils::config::WindowEffectsConfig {
-                effects: vec![tauri::utils::WindowEffect::Acrylic],
+                effects: if cfg!(target_os = "macos") {
+                    vec![
+                        tauri::utils::WindowEffect::LiquidGlassRegular,
+                        tauri::utils::WindowEffect::Popover,
+                    ]
+                } else {
+                    vec![tauri::utils::WindowEffect::Acrylic]
+                },
+                radius: cfg!(target_os = "macos").then_some(20.0),
+                state: cfg!(target_os = "macos").then_some(tauri::utils::WindowEffectState::Active),
                 ..Default::default()
             })
         } else {
@@ -402,7 +545,8 @@ pub fn show_details(app: &tauri::AppHandle, page: Option<&str>) {
     tauri::async_runtime::spawn_blocking(move || show_details_now(&handle, page.as_deref()));
 }
 fn show_details_now(app: &tauri::AppHandle, page: Option<&str>) {
-    let host = app.state::<WindowsWindowHost>();
+    trace_window(app, Event::ShowRequested, None);
+    let host = app.state::<WindowHost>();
     if let Ok(mut view) = host.view.lock() {
         view.mode = "details".into();
         if let Some(page) = page {
@@ -418,6 +562,7 @@ fn show_details_now(app: &tauri::AppHandle, page: Option<&str>) {
         let _ = w.show();
         let _ = app.emit("window-visible", true);
         let _ = w.set_focus();
+        trace_window(app, Event::Shown, w.is_visible().ok());
         let _ = app.emit("window-mode", ("details", page));
         let _ = app.emit("snapshot-changed", ());
     }
@@ -425,7 +570,7 @@ fn show_details_now(app: &tauri::AppHandle, page: Option<&str>) {
 pub fn correct_bounds(app: &tauri::AppHandle) {
     if let Some(w) = app.get_webview_window("pulse") {
         let compact = app
-            .state::<WindowsWindowHost>()
+            .state::<WindowHost>()
             .view
             .lock()
             .is_ok_and(|v| v.mode == "compact");
@@ -447,7 +592,7 @@ pub fn correct_bounds(app: &tauri::AppHandle) {
 pub fn scale_changed(app: &tauri::AppHandle) {
     if let Some(w) = app.get_webview_window("pulse") {
         let compact = app
-            .state::<WindowsWindowHost>()
+            .state::<WindowHost>()
             .view
             .lock()
             .is_ok_and(|v| v.mode == "compact");
@@ -456,9 +601,9 @@ pub fn scale_changed(app: &tauri::AppHandle) {
 }
 pub fn compact_or_hide(app: &tauri::AppHandle) {
     let settings = settings(app);
-    let host = app.state::<WindowsWindowHost>();
+    let host = app.state::<WindowHost>();
     if let Some(w) = app.get_webview_window("pulse") {
-        if settings.floating {
+        if cfg!(windows) && settings.floating {
             // Keep detail moves separate from the compact anchor. Capture resize-generated
             // move events only after both size and position have been restored.
             position(app, &w, true);
@@ -476,16 +621,17 @@ pub fn compact_or_hide(app: &tauri::AppHandle) {
         }
     }
 }
-fn command_output(mut cmd: Command) -> Option<String> {
+#[cfg(windows)]
+fn command_output(mut cmd: std::process::Command) -> Option<String> {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
         cmd.creation_flags(0x08000000);
     }
     let mut child = cmd
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
         .spawn()
         .ok()?;
     let started = Instant::now();
@@ -535,11 +681,11 @@ pub fn running_wsl_sources(
     #[cfg(not(windows))]
     {
         let _ = (auto, configured, cache);
-        return Vec::new();
+        Vec::new()
     }
     #[cfg(windows)]
     {
-        let mut list = Command::new("wsl.exe");
+        let mut list = std::process::Command::new("wsl.exe");
         list.args(["--list", "--running", "--quiet"]);
         let list = command_output(list);
         let names = list
@@ -590,7 +736,7 @@ pub fn running_wsl_sources(
                     status: "discovering",
                 });
             }
-            let mut home = Command::new("wsl.exe");
+            let mut home = std::process::Command::new("wsl.exe");
             home.args([
                 "-d",
                 name,
@@ -624,7 +770,15 @@ pub fn running_wsl_sources(
 
 #[cfg(test)]
 pub fn wsl_is_running(name: &str) -> bool {
-    let mut list = Command::new("wsl.exe");
-    list.args(["--list", "--running", "--quiet"]);
-    command_output(list).is_some_and(|output| output.lines().any(|line| line.trim() == name))
+    #[cfg(windows)]
+    {
+        let mut list = std::process::Command::new("wsl.exe");
+        list.args(["--list", "--running", "--quiet"]);
+        command_output(list).is_some_and(|output| output.lines().any(|line| line.trim() == name))
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = name;
+        false
+    }
 }
