@@ -146,9 +146,9 @@ fn position(app: &tauri::AppHandle, w: &tauri::WebviewWindow, compact: bool) {
         let p = area.place(
             anchor.as_ref(),
             if compact {
-                (336.0, 268.0)
+                (344.0, 278.0)
             } else {
-                (496.0, 700.0)
+                (460.0, 756.0)
             },
         );
         // Restrict the configured minimum on small remote-desktop work areas.

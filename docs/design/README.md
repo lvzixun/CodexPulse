@@ -2,6 +2,7 @@
 
 | 文档 | 内容 | 状态 |
 | --- | --- | --- |
-| [CodexPulse v1 设计案](codexpulse-v1.md) | 产品范围、功能、Windows/macOS UI、数据采集、统计口径、架构、性能预算、目录规划与验收 | 待实现 |
+| [CodexPulse v1 设计案](codexpulse-v1.md) | 产品范围、功能、Windows/macOS UI、数据采集、统计口径、架构、性能预算、目录规划与验收 | 实施中 |
+| [讨论中的 HTML 演示](codexpulse-prototype.html) | 浮窗、详情和设置的布局 / 样式基准；包含演示数据 | 参考基准 |
 
 设计依据：截至 2026-10-06 的产品讨论与文档核查。后续变更应更新设计案，重要技术取舍再单独记录到 `docs/adr/`。

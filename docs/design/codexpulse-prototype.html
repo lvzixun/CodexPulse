@@ -1,0 +1,224 @@
+<div id="cp-prototype">
+  <div class="viz-carousel viz-dotted-background" aria-label="CodexPulse 桌面入口" data-previous-label="上一个方向" data-next-label="下一个方向">
+    <section data-variant="Windows" aria-label="Windows 浮窗与托盘共用详情">
+      <div class="cp-scene" data-instance="float"><div class="cp-desktop-label" data-entry-label>Windows · 浮窗与托盘共用详情</div><div class="cp-mount"><button class="cp-restart cursor-interaction" data-action="restart" hidden><i data-lucide="activity" aria-hidden="true"></i>启动 CodexPulse</button></div><div class="cp-tray-menu" aria-label="CodexPulse 托盘右键菜单" hidden><button class="cursor-interaction" data-action="tray-settings"><i data-lucide="settings-2" aria-hidden="true"></i>设置</button><div class="cp-menu-divider"></div><button class="cursor-interaction" data-action="quit"><i data-lucide="power" aria-hidden="true"></i>退出</button></div><div class="cp-taskbar"><span>托盘 · 可右键</span><button class="cursor-interaction" data-launch="float" aria-label="打开 CodexPulse 详情，右键显示设置与退出" data-tooltip="单击查看详情；右键打开设置或退出"><i data-lucide="activity" aria-hidden="true"></i><span>CodexPulse</span></button><span>14:35</span></div></div>
+    </section>
+    <section data-variant="macOS 菜单栏" aria-label="macOS 菜单栏图标" hidden>
+      <div class="cp-scene cp-mac-scene" data-instance="mac"><div class="cp-desktop-label">macOS · 菜单栏入口 · 后续版本</div><div class="cp-menu"><span>Finder</span><span><button class="cp-menu-icon cursor-interaction" data-launch="mac" aria-label="打开 CodexPulse 菜单栏面板" aria-expanded="false"><i data-lucide="activity" aria-hidden="true"></i></button><span>Tue 14:35</span></span></div><div class="cp-mount"></div></div>
+    </section>
+  </div>
+  <template id="cp-surface-template">
+    <div class="cp-shell" aria-label="CodexPulse 毛玻璃浮窗">
+      <button class="cp-compact cursor-interaction" data-action="open" aria-label="展开 CodexPulse 详情" aria-expanded="false">
+        <span class="cp-brandrow"><span class="cp-logo"><i data-lucide="activity" aria-hidden="true"></i></span><strong>CodexPulse</strong><span class="cp-live"><span class="cp-dot"></span><span data-live>生成中</span></span><i data-lucide="chevron-down" aria-hidden="true"></i></span>
+        <span class="cp-quota"><span><span class="cp-label">5 小时剩余</span><strong>72<span class="cp-unit">%</span></strong><span class="cp-track"><span style="width:72%"></span></span><small>2 小时 18 分后重置</small></span><span><span class="cp-label">本周剩余</span><strong>24<span class="cp-unit">%</span></strong><span class="cp-track cp-amber"><span style="width:24%"></span></span><small>周五 16:00 重置</small></span></span>
+        <span class="cp-compact-session"><span><span class="cp-dot"></span> GPT-5.4 <small data-current-source>· WSL</small></span><b data-speed>48.6 tok/s</b></span>
+        <span class="cp-compact-bottom"><span>145.6K tokens <small>≈ $0.40</small></span><span class="cp-news-dot">消息 1</span></span>
+        <span class="cp-compact-foot"><span>演示数据</span><span>点击展开详情 <i data-lucide="arrow-up-right" aria-hidden="true"></i></span></span>
+      </button>
+      <div class="cp-expanded" hidden>
+        <header class="cp-header"><span class="cp-logo"><i data-lucide="activity" aria-hidden="true"></i></span><div class="cp-brand"><strong>CodexPulse</strong><small>个人账号 · Plus</small></div><button class="cp-icon cursor-interaction" data-action="pin" aria-label="切换浮窗置顶" aria-pressed="true"><i data-lucide="pin" aria-hidden="true"></i></button><button class="cp-icon cursor-interaction" data-action="settings" aria-label="打开设置"><i data-lucide="settings-2" aria-hidden="true"></i></button><button class="cp-icon cursor-interaction" data-action="close" aria-label="收起详情"><i data-lucide="chevron-up" aria-hidden="true"></i></button></header>
+        <button class="cp-source cursor-interaction" data-action="settings"><span><span class="cp-dot"></span><span data-source>Windows App + WSL · 同一账号</span></span><i data-lucide="chevron-right" aria-hidden="true"></i></button>
+        <nav class="cp-tabs" aria-label="详情页面"><button data-tab="overview" class="cursor-interaction" aria-pressed="true">总览</button><button data-tab="models" class="cursor-interaction" aria-pressed="false">模型</button><button data-tab="sessions" class="cursor-interaction" aria-pressed="false">Sessions</button><button data-tab="news" class="cursor-interaction" aria-pressed="false">消息 <span class="cp-count">1</span></button></nav>
+        <main class="cp-body" aria-live="polite">
+          <section data-page="overview">
+            <div class="cp-quota"><div><span class="cp-label">5 小时剩余</span><strong>72<span class="cp-unit">%</span></strong><span class="cp-track"><span style="width:72%"></span></span><small>2 小时 18 分后重置</small></div><div><span class="cp-label">本周剩余</span><strong>24<span class="cp-unit">%</span></strong><span class="cp-track cp-amber"><span style="width:24%"></span></span><small>周五 16:00 重置</small></div></div>
+            <div class="cp-divider"></div>
+            <div class="cp-sectionhead"><span><span class="cp-dot"></span> 最近工作 session</span><span class="cp-label" data-current-model>WSL · GPT-5.4</span></div>
+            <button class="cp-session-title cursor-interaction" data-action="active-session">实现 CodexPulse 数据采集 <i data-lucide="arrow-up-right" aria-hidden="true"></i></button>
+            <div class="cp-metrics"><div><span>本 session tokens</span><strong>145.6K</strong></div><div><span>美元估算</span><strong>$0.4049</strong></div><div><span>当前输出速度</span><strong data-speed>48.6 <small>tok/s</small></strong></div></div>
+            <div class="cp-summary"><div class="cp-sectionhead"><span>最近 30 天 · 所有模型</span><small>09/07 — 10/06</small></div><div class="cp-total"><strong>20.4<span>M tokens</span></strong><div><span>API 等价估算</span><b>$40.28</b></div></div><div class="cp-chart" role="img" aria-label="最近30天每日token用量，合计20.4M" data-chart></div><div class="cp-chartaxis"><span>09/07</span><span>每日 tokens · 最高 1.5M</span><span>10/06</span></div><button class="cp-textbutton cursor-interaction" data-action="models">78 个 sessions · 3 个模型 <span>查看分类 <i data-lucide="chevron-right" aria-hidden="true"></i></span></button></div>
+            <button class="cp-notice cursor-interaction" data-action="news"><i data-lucide="radio" aria-hidden="true"></i><span>Tibo 发布额度相关消息<small>待核验 · 以账户实际额度为准</small></span><i data-lucide="chevron-right" aria-hidden="true"></i></button>
+          </section>
+          <section data-page="models" hidden><div class="cp-sectionhead"><span>最近 30 天 · 所有模型</span><small>09/07 — 10/06</small></div><div class="cp-total"><strong>20.4<span>M tokens</span></strong><div><span>美元估算</span><b>$40.28</b></div></div><div class="cp-metrics cp-breakdown"><div><span>输入</span><strong>18.0M</strong></div><div><span>其中缓存</span><strong>12.0M</strong></div><div><span>输出</span><strong>2.4M</strong></div></div><div class="cp-sectionhead cp-modelheading"><span>按模型分类</span><small>Tokens / 估算 USD</small></div><div data-model-list></div><p class="cp-note">78 个独立 sessions；一个 session 可使用多个模型。缓存属于输入，汇总不重复计算。</p></section>
+          <section data-page="sessions" hidden><div class="cp-sectionhead"><span>最近工作 sessions</span><button class="cp-textbutton cursor-interaction" data-action="clear-scope" data-scope hidden>所有模型</button><small data-session-scope>全部模型</small></div><div class="cp-session-list" data-session-list></div><div data-session-detail></div></section>
+          <section data-page="news" hidden><div class="cp-sectionhead"><span>消息与额度恢复</span><small>消息样例</small></div><div class="cp-news-item"><span class="cp-tag">Tibo · 待核验</span><h3>额度相关公告</h3><p>收到 Tibo 的额度消息后，显示发布时间、原文与账户核验状态。</p><small>10/06 14:20 · 演示消息</small><button class="cp-textbutton cursor-interaction" data-action="original">查看原文 <i data-lucide="external-link" aria-hidden="true"></i></button><p class="cp-note" data-original hidden>此处为演示消息，尚未连接真实消息源。接入后可打开原文。</p></div><div class="cp-news-item"><span class="cp-tag cp-success">已确认恢复</span><h3>5 小时额度已重置</h3><p>账户额度由 8% 恢复到 100%。</p><small>10/06 12:17 · 演示账户事件</small></div><p class="cp-note">公告提示与账户实际额度恢复分别记录。</p></section>
+          <section data-page="settings" hidden><div class="cp-sectionhead"><span>显示与数据源</span><small>本地设置</small></div><label class="cp-setting">外观<select data-setting="theme" class="cursor-interaction"><option value="auto">跟随系统</option><option value="light">浅色</option><option value="dark">深色</option></select></label><div data-windows-only><label class="cp-setting"><span>显示桌面浮窗<small class="cp-setting-hint">关闭后通过系统托盘查看详情</small></span><input type="checkbox" data-setting="windowsFloat" checked></label><label class="cp-setting"><span>浮窗始终置顶</span><input type="checkbox" data-setting="pinned" checked></label></div><label class="cp-setting"><span>额度恢复通知</span><input type="checkbox" data-setting="notify" checked></label><div class="cp-divider"></div><div class="cp-sectionhead"><span>采集来源</span><small>本机 · 只读</small></div><label class="cp-setting"><span data-app-label>Windows Codex App</span><input type="checkbox" data-setting="app" checked></label><label class="cp-setting"><span data-cli-label>WSL Codex CLI</span><input type="checkbox" data-setting="cli" checked></label><p class="cp-note">同一账号共享额度。会话按标识去重，再汇总所有模型与各模型用量。</p><p class="cp-note" data-platform-note>Windows 使用托盘，并可开启浮窗；macOS 使用菜单栏图标，点击查看详情。</p></section>
+        </main>
+        <footer class="cp-footer"><span>演示数据 · 14:35 更新</span><button class="cp-textbutton cursor-interaction" data-action="close">收起详情 <i data-lucide="chevron-up" aria-hidden="true"></i></button></footer>
+      </div>
+    </div>
+  </template>
+</div>
+<style>
+#cp-prototype {font-family: "Segoe UI Variable", "Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif; font-size:13px; line-height:1.5; --cp-text:light-dark(#242b35,#eef2f8);--cp-muted:light-dark(#596477,#abb6c8);--cp-glass:light-dark(rgba(253,254,255,.78),rgba(27,33,44,.8));--cp-soft:light-dark(rgba(232,239,245,.65),rgba(255,255,255,.055));--cp-line:light-dark(rgba(77,95,120,.13),rgba(221,232,255,.13));--cp-accent:light-dark(#137966,#80d8c4);--cp-amber:light-dark(#9c6515,#ecc078);--cp-solid:light-dark(#f0f3f8,#171d28);--cp-outline:light-dark(rgba(255,255,255,.92),rgba(225,235,255,.19));color:var(--cp-text)}
+#cp-prototype .cp-scene {box-sizing:border-box;min-height:790px;padding:66px 26px 68px;position:relative;background:radial-gradient(ellipse at 5% 29%,light-dark(#bcdfda,#204b48),transparent 52%),radial-gradient(ellipse at 88% 69%,light-dark(#cbd1f2,#353455),transparent 56%),linear-gradient(125deg,light-dark(#e8eff6,#141d2b),light-dark(#e4e8f6,#1e2236));border-radius:18px;isolation:isolate}
+#cp-prototype .cp-mount {display:flex;justify-content:center;align-items:center;min-height:636px}
+#cp-prototype .cp-desktop-label {position:absolute;top:21px;left:24px;font-size:12px;color:var(--cp-muted)}
+#cp-prototype .cp-taskbar {position:absolute;bottom:14px;left:16px;right:16px;display:flex;justify-content:space-between;align-items:center;gap:10px;border:1px solid var(--cp-line);background:var(--cp-soft);border-radius:13px;padding:8px 12px;font-size:11px;color:var(--cp-muted);backdrop-filter:blur(18px)}
+#cp-prototype .cp-taskbar button {display:flex;align-items:center;gap:6px;color:var(--cp-text);padding:4px 8px;border-radius:8px;background:var(--cp-soft);border:0;font:inherit;font-size:12px}
+#cp-prototype .cp-taskbar>span:first-child {margin-right:auto}
+#cp-prototype .cp-menu {display:flex;justify-content:space-between;position:absolute;top:0;left:0;right:0;padding:7px 20px;background:var(--cp-soft);font-size:11px;border-radius:18px 18px 0 0}
+#cp-prototype .cp-menu span:last-child {display:flex;align-items:center;gap:12px}
+#cp-prototype .cp-mac-scene .cp-desktop-label {top:40px}
+#cp-prototype .cp-scene.cp-tray-mode .cp-mount {justify-content:flex-end;align-items:flex-end}
+#cp-prototype .cp-mac-scene .cp-mount {justify-content:flex-end;align-items:flex-start}
+#cp-prototype .cp-mac-scene .cp-shell {border-radius:18px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+#cp-prototype .cp-menu {align-items:center;padding-top:4px;padding-bottom:4px}
+#cp-prototype .cp-menu>span:last-child {display:flex;align-items:center;gap:12px}
+#cp-prototype .cp-menu-icon {display:flex;align-items:center;justify-content:center;width:28px;height:26px;border:0;border-radius:5px;background:transparent;color:var(--cp-text)}
+#cp-prototype .cp-menu-icon[aria-expanded=true] {background:var(--cp-soft)}
+#cp-prototype .cp-setting-hint {display:block;margin-top:3px}
+#cp-prototype .cp-tray-menu {position:absolute;bottom:70px;right:18px;z-index:2;width:156px;padding:5px;background:var(--cp-glass);border:1px solid var(--cp-outline);border-radius:11px;box-shadow:0 10px 28px light-dark(rgba(35,50,80,.18),rgba(0,0,0,.3));backdrop-filter:blur(26px)}
+#cp-prototype .cp-tray-menu button {display:flex;align-items:center;gap:10px;width:100%;padding:9px 11px;font:inherit;text-align:left;color:var(--cp-text);background:transparent;border:0;border-radius:6px}
+#cp-prototype .cp-tray-menu button:hover {background:var(--cp-soft)}
+#cp-prototype .cp-menu-divider {height:1px;background:var(--cp-line);margin:3px 6px}
+#cp-prototype .cp-tray-menu svg,#cp-prototype .cp-restart svg {width:16px;height:16px}
+#cp-prototype .cp-restart {display:flex;align-items:center;gap:10px;padding:12px 18px;font:inherit;color:var(--cp-text);background:var(--cp-glass);border:1px solid var(--cp-outline);border-radius:12px}
+#cp-prototype .cp-shell {width:344px;max-width:100%;box-sizing:border-box;background:var(--cp-glass);border:1px solid var(--cp-outline);border-radius:var(--cp-radius,24px);box-shadow:0 20px 65px light-dark(rgba(42,60,90,.2),rgba(0,0,0,.38)),inset 0 1px 0 var(--cp-outline);backdrop-filter:blur(var(--cp-blur,26px)) saturate(140%);-webkit-backdrop-filter:blur(var(--cp-blur,26px)) saturate(140%);transition:width .2s ease;color:var(--cp-text)}
+#cp-prototype .cp-shell.is-open {width:460px}
+#cp-prototype .cp-shell button {font:inherit;color:inherit;border:0;background:transparent}
+#cp-prototype .cp-shell strong,#cp-prototype .cp-shell b {font-weight:600;font-variant-numeric:tabular-nums}
+#cp-prototype .cp-shell small {font-size:11px;color:var(--cp-muted)}
+#cp-prototype [hidden] {display:none!important}
+#cp-prototype .cp-compact {display:block;width:100%;padding:18px 20px 13px!important;text-align:left;border-radius:inherit}
+#cp-prototype .cp-brandrow {display:flex;align-items:center;gap:9px;margin-bottom:19px}
+#cp-prototype .cp-brandrow strong {font-size:15px}
+#cp-prototype .cp-logo {width:29px;height:29px;display:inline-flex;align-items:center;justify-content:center;background:var(--cp-soft);border:1px solid var(--cp-line);border-radius:10px;color:var(--cp-accent);flex-shrink:0}
+#cp-prototype .cp-live {display:flex;align-items:center;gap:5px;margin-left:auto;font-size:11px;color:var(--cp-muted)}
+#cp-prototype .cp-dot {display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--cp-accent);vertical-align:middle;flex-shrink:0}
+#cp-prototype .cp-quota {display:grid;grid-template-columns:1fr 1fr;gap:24px;text-align:left}
+#cp-prototype .cp-quota>span,#cp-prototype .cp-quota>div {display:flex;flex-direction:column;min-width:0}
+#cp-prototype .cp-label {font-size:11px;color:var(--cp-muted)}
+#cp-prototype .cp-quota strong {font-size:30px;line-height:1.25;margin:4px 0 9px;letter-spacing:-1px}
+#cp-prototype .cp-unit {font-size:15px;letter-spacing:0;margin-left:3px;color:var(--cp-muted)}
+#cp-prototype .cp-track {display:block;height:4px;background:var(--cp-line);border-radius:10px;margin-bottom:7px}
+#cp-prototype .cp-track>span {display:block;height:100%;background:var(--cp-accent);border-radius:inherit}
+#cp-prototype .cp-track.cp-amber>span {background:var(--cp-amber)}
+#cp-prototype .cp-compact-session {display:flex;justify-content:space-between;gap:8px;margin-top:17px;padding-top:12px;border-top:1px solid var(--cp-line);font-size:12px}
+#cp-prototype .cp-compact-session b {font-size:12px}
+#cp-prototype .cp-compact-bottom {display:flex;justify-content:space-between;gap:8px;align-items:center;margin-top:5px;font-size:12px}
+#cp-prototype .cp-news-dot {font-size:11px;color:var(--cp-amber)}
+#cp-prototype .cp-compact-foot {display:flex;justify-content:space-between;color:var(--cp-muted);font-size:11px;margin-top:14px}
+#cp-prototype .cp-compact-foot>span:last-child {display:flex;align-items:center;gap:3px}
+#cp-prototype .cp-header {display:flex;align-items:center;gap:9px;padding:18px 19px 12px}
+#cp-prototype .cp-brand {display:flex;flex-direction:column;flex:1;min-width:0}
+#cp-prototype .cp-brand strong {font-size:16px;letter-spacing:-.3px}
+#cp-prototype .cp-icon {width:30px;height:30px;display:flex;align-items:center;justify-content:center;border-radius:9px;background:var(--cp-soft)!important;flex-shrink:0}
+#cp-prototype .cp-icon[aria-pressed=true] {color:var(--cp-accent)}
+#cp-prototype .cp-source {display:flex;justify-content:space-between;align-items:center;gap:8px;width:100%;padding:0 20px 13px!important;font-size:11px!important;color:var(--cp-muted)!important;text-align:left}
+#cp-prototype .cp-source>span {display:flex;align-items:center;gap:7px}
+#cp-prototype .cp-tabs {display:grid;grid-template-columns:repeat(4,1fr);gap:3px;margin:0 18px;padding:4px;background:var(--cp-soft);border-radius:12px}
+#cp-prototype .cp-tabs button {padding:7px 0;border-radius:9px;font-size:12px}
+#cp-prototype .cp-tabs button[aria-pressed=true] {background:var(--cp-glass);box-shadow:0 1px 5px light-dark(rgba(35,56,90,.08),rgba(0,0,0,.16))}
+#cp-prototype .cp-count {font-size:10px;color:var(--cp-amber);margin-left:2px}
+#cp-prototype .cp-body {padding:20px}
+#cp-prototype .cp-divider {height:1px;background:var(--cp-line);margin:19px 0}
+#cp-prototype .cp-sectionhead {display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:12px;font-weight:500}
+#cp-prototype .cp-sectionhead .cp-dot {margin-right:5px}
+#cp-prototype .cp-session-title {display:flex;justify-content:space-between;align-items:center;gap:8px;width:100%;padding:8px 0 10px!important;text-align:left;font-size:14px!important;font-weight:600!important}
+#cp-prototype .cp-metrics {display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
+#cp-prototype .cp-metrics>div {display:flex;flex-direction:column;gap:4px}
+#cp-prototype .cp-metrics span {font-size:11px;color:var(--cp-muted)}
+#cp-prototype .cp-metrics strong {font-size:17px;letter-spacing:-.4px}
+#cp-prototype .cp-summary {margin-top:19px;padding:14px;background:var(--cp-soft);border-radius:15px}
+#cp-prototype .cp-total {display:flex;justify-content:space-between;align-items:center;margin:12px 0 15px;gap:10px}
+#cp-prototype .cp-total>strong {font-size:33px;letter-spacing:-1px}
+#cp-prototype .cp-total>strong>span {font-size:12px;margin-left:5px;letter-spacing:0;color:var(--cp-muted);font-weight:400}
+#cp-prototype .cp-total>div {display:flex;flex-direction:column;text-align:right}
+#cp-prototype .cp-total>div>span {font-size:11px;color:var(--cp-muted)}
+#cp-prototype .cp-total b {font-size:19px}
+#cp-prototype .cp-chart {display:flex;align-items:flex-end;height:65px;gap:4px;border-bottom:1px solid var(--cp-line)}
+#cp-prototype .cp-chart>span {flex:1;min-width:0;background:var(--cp-accent);opacity:.55;border-radius:3px 3px 0 0}
+#cp-prototype .cp-chartaxis {display:flex;justify-content:space-between;gap:5px;margin-top:6px;font-size:10px;color:var(--cp-muted)}
+#cp-prototype .cp-textbutton {display:flex;align-items:center;justify-content:space-between;gap:5px;padding:7px 0!important;font-size:11px!important;color:var(--cp-muted)!important}
+#cp-prototype .cp-textbutton>span {display:flex;align-items:center;gap:4px}
+#cp-prototype .cp-summary>.cp-textbutton {width:100%;padding-bottom:0!important}
+#cp-prototype .cp-notice {display:flex;align-items:center;gap:10px;text-align:left;width:100%;padding:14px 0 0!important;font-size:12px!important}
+#cp-prototype .cp-notice>span {flex:1}
+#cp-prototype .cp-notice small {display:block;margin-top:2px}
+#cp-prototype .cp-notice>svg:first-child {color:var(--cp-amber)}
+#cp-prototype .cp-footer {display:flex;justify-content:space-between;align-items:center;gap:8px;padding:9px 20px 11px;border-top:1px solid var(--cp-line);font-size:10px;color:var(--cp-muted)}
+#cp-prototype .cp-footer .cp-textbutton {padding:0!important}
+#cp-prototype .cp-modelheading {margin:22px 0 5px}
+#cp-prototype .cp-modelrow {display:flex;justify-content:space-between;align-items:center;gap:10px;width:100%;padding:13px 0!important;text-align:left;border-bottom:1px solid var(--cp-line)!important}
+#cp-prototype .cp-modelrow>span {display:flex;flex-direction:column;gap:3px}
+#cp-prototype .cp-modelrow>span:last-child {text-align:right;flex-direction:row;align-items:center;gap:8px}
+#cp-prototype .cp-modelrow b {font-size:14px}
+#cp-prototype .cp-modelrow[aria-expanded=true]>span:first-child strong {color:var(--cp-accent)}
+#cp-prototype .cp-model-detail {background:var(--cp-soft);padding:12px;border-radius:12px;margin-top:8px}
+#cp-prototype .cp-model-detail .cp-metrics strong {font-size:15px}
+#cp-prototype .cp-note {font-size:11px;color:var(--cp-muted);line-height:1.7;margin:14px 0 0}
+#cp-prototype .cp-session-list {margin-top:9px}
+#cp-prototype .cp-sessionrow {display:flex;flex-direction:column;gap:3px;width:100%;padding:11px 12px!important;text-align:left;border-radius:11px;margin:4px 0}
+#cp-prototype .cp-sessionrow[aria-pressed=true] {background:var(--cp-soft)}
+#cp-prototype .cp-sessionrow>span {display:flex;justify-content:space-between;gap:8px}
+#cp-prototype .cp-sessionrow>span:first-child {font-size:12px;font-weight:500}
+#cp-prototype .cp-sessionrow>span:last-child {font-size:11px;color:var(--cp-muted)}
+#cp-prototype .cp-detail {margin-top:17px;padding-top:15px;border-top:1px solid var(--cp-line)}
+#cp-prototype .cp-detail .cp-metrics {row-gap:14px;margin-top:14px}
+#cp-prototype .cp-detail .cp-metrics strong {font-size:16px}
+#cp-prototype .cp-method {padding:10px 12px;background:var(--cp-soft);border-radius:10px;font-size:11px;color:var(--cp-muted)}
+#cp-prototype .cp-method a {color:var(--cp-accent)}
+#cp-prototype .cp-news-item {margin-top:15px;padding:15px;background:var(--cp-soft);border-radius:13px}
+#cp-prototype .cp-news-item h3 {font-size:14px;margin:10px 0 4px;font-weight:600}
+#cp-prototype .cp-news-item p {font-size:12px;margin:5px 0 8px}
+#cp-prototype .cp-tag {font-size:11px;color:var(--cp-amber)}
+#cp-prototype .cp-success {color:var(--cp-accent)}
+#cp-prototype .cp-setting {display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px 0;font-size:13px}
+#cp-prototype .cp-setting select {font:inherit;font-size:12px;color:var(--cp-text);background:var(--cp-solid);border:1px solid var(--cp-line);border-radius:8px;padding:6px 8px;max-width:160px}
+#cp-prototype input {accent-color:var(--cp-accent);width:17px;height:17px}
+#cp-prototype .cp-shell svg,#cp-prototype .cp-taskbar svg,#cp-prototype .cp-menu svg {width:16px;height:16px;flex-shrink:0}
+@media(max-width:440px) {#cp-prototype .cp-scene {padding:66px 10px 70px;min-height:820px}#cp-prototype .cp-mount {min-height:676px}#cp-prototype .cp-body {padding:17px 15px}#cp-prototype .cp-header {padding:15px 14px 11px;gap:6px}#cp-prototype .cp-icon {width:28px;height:28px}#cp-prototype .cp-source {padding-left:15px!important;padding-right:15px!important}#cp-prototype .cp-tabs {margin:0 12px}#cp-prototype .cp-quota {gap:15px}#cp-prototype .cp-summary {padding:12px}#cp-prototype .cp-total>strong {font-size:29px}#cp-prototype .cp-total>strong>span {font-size:11px}#cp-prototype .cp-compact {padding:16px!important}#cp-prototype .cp-footer {padding-left:15px;padding-right:15px}#cp-prototype .cp-taskbar>span:first-child {display:none}#cp-prototype .cp-sectionhead {gap:5px;flex-wrap:wrap}#cp-prototype .cp-metrics {gap:7px}#cp-prototype .cp-metrics strong {font-size:15px}#cp-prototype .cp-chart {gap:3px}#cp-prototype .cp-compact-bottom>span:first-child {font-size:11px}}
+@media(pointer:coarse) {#cp-prototype .cp-icon {min-width:40px;min-height:44px}#cp-prototype .cp-header {gap:4px}#cp-prototype .cp-logo {width:24px;height:27px}#cp-prototype .cp-brand strong {font-size:14px}#cp-prototype .cp-tabs button,#cp-prototype .cp-textbutton,#cp-prototype .cp-taskbar button {min-height:44px}#cp-prototype .cp-setting select {font-size:16px}#cp-prototype .cp-source {min-height:44px;padding-bottom:8px!important}}
+@media(prefers-reduced-motion:reduce) {#cp-prototype .cp-shell {transition:none}}
+</style>
+<script>
+(() => {
+const root=document.getElementById('cp-prototype');
+const modelData=[{id:'gpt-5.4',name:'GPT-5.4',input:10000000,cached:7000000,output:1200000,sessions:40,rates:[2.5,.25,15]},{id:'gpt-5.4-mini',name:'GPT-5.4 Mini',input:5000000,cached:3000000,output:800000,sessions:26,rates:[.75,.075,4.5]},{id:'gpt-5.3-codex',name:'GPT-5.3-Codex',input:3000000,cached:2000000,output:400000,sessions:18,rates:[1.75,.175,14]}];
+const sessions=[{id:'collector',title:'实现 CodexPulse 数据采集',model:'gpt-5.4',input:126400,cached:88480,output:19200,source:'cli',active:true,time:'14:35'},{id:'tray',title:'调整托盘面板交互',model:'gpt-5.4-mini',input:64000,cached:51200,output:8400,source:'app',active:false,time:'13:58'},{id:'tests',title:'检查额度去重逻辑',model:'gpt-5.3-codex',input:30400,cached:18240,output:4600,source:'cli',active:false,time:'12:41'}];
+const getModel=id=>modelData.find(m=>m.id===id), cost=(d,m)=>((d.input-d.cached)*m.rates[0]+d.cached*m.rates[1]+d.output*m.rates[2])/1e6, money=(d,n=2)=>'$'+d.toFixed(n), compact=n=>n>=1e6?(n/1e6).toFixed(1)+'M':(n/1000).toFixed(1)+'K', number=n=>n.toLocaleString('en-US');
+const baseView=open=>({open,page:'overview',model:null,session:'collector',scope:null,method:false,original:false});
+const defaults=()=>({version:6,theme:'auto',windowsFloat:true,pinned:true,notify:true,app:true,cli:true,generating:true,blur:26,radius:24,views:{float:baseView(false),mac:baseView(false)}});
+const restore=s=>{const p=s?.privateContent;if(![4,5,6].includes(p?.version))return defaults();const d=defaults();return {...d,...p,version:6,views:Object.fromEntries(Object.keys(d.views).map(k=>[k,{...d.views[k],...p.views?.[k]}]))}};
+let state=restore(window.openai?.widgetState);
+let trayMenuOpen=false,windowsRunning=true;
+for(const scene of root.querySelectorAll('[data-instance]')) {const fragment=root.querySelector('template').content.cloneNode(true);scene.querySelector('.cp-mount').append(fragment);scene.querySelector('.cp-shell').id='cp-'+scene.dataset.instance;}
+const weights=[3,5,4,8,6,2,1,4,7,10,8,5,2,3,6,9,12,7,4,1,3,6,8,11,9,5,3,4,7,8],sum=weights.reduce((a,b)=>a+b,0);
+for(const chart of root.querySelectorAll('[data-chart]')) chart.innerHTML=weights.map((w,i)=>{const amount=20400000*w/sum;const date=new Date(Date.UTC(2026,8,7+i));return `<span style="height:${amount/1500000*100}%" data-tooltip="${date.getUTCMonth()+1}/${date.getUTCDate()} · ${compact(amount)} tokens"></span>`}).join('');
+function save(){try{window.openai?.setWidgetState({modelContent:{product:'CodexPulse',windowsEntry:'浮窗和托盘单击共用同一个详情窗口；托盘右键仅设置与退出',windowsFloat:state.windowsFloat,macEntry:'仅菜单栏图标，点击展开面板',theme:state.theme,platforms:'Windows 首发，macOS 后续',modelSummary:'所有模型总计 + 每模型分类',expanded:state.views.float.open},privateContent:state})?.catch(()=>{});}catch{}}
+function speed(session){return session?.active&&state.cli&&state.generating?'48.6':'—'}
+function render(){
+root.style.colorScheme=state.theme==='auto'?'inherit':state.theme;root.style.setProperty('--cp-blur',state.blur+'px');root.style.setProperty('--cp-radius',state.radius+'px');
+for(const scene of root.querySelectorAll('[data-instance]')) {
+const instance=scene.dataset.instance,view=state.views[instance],shell=scene.querySelector('.cp-shell'),mac=instance==='mac';
+const floating=instance==='float'&&state.windowsFloat;
+shell.hidden=(!mac&&!windowsRunning)||(!view.open&&!floating);shell.classList.toggle('is-open',view.open);shell.querySelector('.cp-compact').hidden=view.open||!floating;shell.querySelector('.cp-expanded').hidden=!view.open;shell.querySelector('[data-action=open]').setAttribute('aria-expanded',String(view.open));
+shell.setAttribute('aria-label',mac?'CodexPulse 菜单栏面板':view.open?'CodexPulse 详情窗口':'CodexPulse 毛玻璃浮窗');
+scene.classList.toggle('cp-tray-mode',instance==='float'&&!state.windowsFloat);
+if(instance==='float'){scene.querySelector('[data-entry-label]').textContent=!windowsRunning?'Windows · CodexPulse 已退出':state.windowsFloat?'Windows · 浮窗与托盘共用详情':'Windows · 通过托盘打开详情';scene.querySelector('.cp-tray-menu').hidden=!trayMenuOpen||!windowsRunning;scene.querySelector('[data-launch=float]').hidden=!windowsRunning;scene.querySelector('[data-action=restart]').hidden=windowsRunning;}
+if(mac){const launcher=scene.querySelector('[data-launch=mac]');launcher.setAttribute('aria-expanded',String(view.open));launcher.setAttribute('aria-label',view.open?'关闭 CodexPulse 菜单栏面板':'打开 CodexPulse 菜单栏面板');}
+for(const el of shell.querySelectorAll('[data-windows-only]'))el.hidden=mac;
+shell.querySelector('[data-setting=pinned]').disabled=!state.windowsFloat;
+const closeLabel=floating?'收起详情':'关闭面板';for(const button of shell.querySelectorAll('[data-action=close]')){button.setAttribute('aria-label',closeLabel);button.innerHTML=(button.closest('.cp-footer')?closeLabel+' ':'')+'<i data-lucide="'+(floating?'chevron-up':'x')+'" aria-hidden="true"></i>';}
+for(const el of shell.querySelectorAll('[data-speed]')) el.innerHTML=speed(sessions[0])==='—'?'—':el.closest('.cp-compact')?'48.6 tok/s':'48.6 <small>tok/s</small>';
+shell.querySelector('[data-live]').textContent=!state.cli?'未连接':state.generating?'生成中':'空闲';
+shell.querySelector('[data-current-source]').textContent=mac?'· CLI':'· WSL';shell.querySelector('[data-current-model]').textContent=(mac?'CLI':'WSL')+' · GPT-5.4';
+const sources=[];if(state.app)sources.push(mac?'macOS App':'Windows App');if(state.cli)sources.push(mac?'CLI':'WSL');shell.querySelector('[data-source]').textContent=sources.length?sources.join(' + ')+' · 同一账号':'尚未连接采集来源';
+for(const panel of shell.querySelectorAll('[data-page]'))panel.hidden=panel.dataset.page!==view.page;
+for(const tab of shell.querySelectorAll('[data-tab]'))tab.setAttribute('aria-pressed',String(tab.dataset.tab===view.page));
+shell.querySelector('[data-action=pin]').setAttribute('aria-pressed',String(state.pinned));shell.querySelector('[data-action=pin]').hidden=!floating;
+for(const input of shell.querySelectorAll('[data-setting]')) {const key=input.dataset.setting;if(input.type==='checkbox')input.checked=state[key];else input.value=state[key];}
+shell.querySelector('[data-app-label]').textContent=mac?'macOS Codex App':'Windows Codex App';shell.querySelector('[data-cli-label]').textContent=mac?'本机 Codex CLI':'WSL Codex CLI';
+shell.querySelector('[data-model-list]').innerHTML=modelData.map(m=>{const selected=view.model===m.id;return `<button class="cp-modelrow cursor-interaction" data-model="${m.id}" aria-expanded="${selected}"><span><strong>${m.name}</strong><small>${m.sessions} sessions</small></span><span><span><b>${compact(m.input+m.output)}</b><br><small>${money(cost(m,m))}</small></span><i data-lucide="${selected?'chevron-up':'chevron-down'}" aria-hidden="true"></i></span></button>${selected?`<div class="cp-model-detail"><div class="cp-metrics"><div><span>输入</span><strong>${compact(m.input)}</strong></div><div><span>其中缓存</span><strong>${compact(m.cached)}</strong></div><div><span>输出</span><strong>${compact(m.output)}</strong></div></div><div class="cp-sectionhead" style="margin-top:12px"><small>当前输出速度 · ${m.id==='gpt-5.4'?speed(sessions[0]):'—'}${m.id==='gpt-5.4'&&speed(sessions[0])!=='—'?' tok/s':''}</small><button class="cp-textbutton cursor-interaction" data-model-sessions="${m.id}">相关 sessions <i data-lucide="arrow-right" aria-hidden="true"></i></button></div></div>`:''}`}).join('');
+const visible=sessions.filter(s=>(!view.scope||s.model===view.scope)&&state[s.source]);
+if(!visible.some(s=>s.id===view.session))view.session=visible[0]?.id||null;
+shell.querySelector('[data-session-scope]').textContent=view.scope?getModel(view.scope).name:'全部模型';shell.querySelector('[data-scope]').hidden=!view.scope;
+shell.querySelector('[data-session-list]').innerHTML=visible.length?visible.map(s=>`<button class="cp-sessionrow cursor-interaction" data-session="${s.id}" aria-pressed="${view.session===s.id}"><span><span>${s.title}</span><small>${s.time}</small></span><span><span>${getModel(s.model).name} · ${s.source==='cli'?(mac?'CLI':'WSL'):'App'}</span><span>${s.active&&state.generating?'生成中':'已完成'} · ${compact(s.input+s.output)}</span></span></button>`).join(''):'<p class="cp-note">尚未连接采集来源；连接后显示最近的工作 sessions。</p>';
+const session=sessions.find(s=>s.id===view.session),m=session&&getModel(session.model);
+shell.querySelector('[data-session-detail]').innerHTML=session?`<div class="cp-detail"><div class="cp-sectionhead"><span>Session 用量</span><small>${m.name}</small></div><div class="cp-metrics"><div><span>总 tokens</span><strong>${number(session.input+session.output)}</strong></div><div><span>美元估算</span><strong>${money(cost(session,m),4)}</strong></div><div><span>当前输出速度</span><strong>${speed(session)}${speed(session)!=='—'?'<small> tok/s</small>':''}</strong></div><div><span>输入</span><strong>${number(session.input)}</strong></div><div><span>其中缓存</span><strong>${number(session.cached)}</strong></div><div><span>输出</span><strong>${number(session.output)}</strong></div></div><button class="cp-textbutton cursor-interaction" data-action="method" aria-expanded="${view.method}">估算口径 <i data-lucide="${view.method?'chevron-up':'chevron-down'}" aria-hidden="true"></i></button><div class="cp-method" ${view.method?'':'hidden'}>非缓存输入 × $${m.rates[0]} + 缓存输入 × $${m.rates[1]} + 输出 × $${m.rates[2]}，单价按每百万 tokens。<br>API 等价估算，不代表订阅账单。<br><a href="https://developers.openai.com/api/docs/models/${m.id}" target="_blank" rel="noopener">模型价格参考</a></div></div>`:'';
+shell.querySelector('[data-original]').hidden=!view.original;
+}
+globalThis.lucide?.createIcons({attrs:{width:16,height:16}});
+}
+root.addEventListener('contextmenu',event=>{if(!event.target.closest('[data-launch=float]'))return;event.preventDefault();trayMenuOpen=true;render();});
+root.addEventListener('keydown',event=>{if(event.target.closest('[data-launch=float]')&&(event.key==='ContextMenu'||(event.shiftKey&&event.key==='F10'))){event.preventDefault();trayMenuOpen=true;render();}if(event.key==='Escape'&&trayMenuOpen){trayMenuOpen=false;render();}});
+root.addEventListener('pointerdown',event=>{if(trayMenuOpen&&!event.target.closest('.cp-tray-menu')&&!event.target.closest('[data-launch=float]')){trayMenuOpen=false;root.querySelector('.cp-tray-menu').hidden=true;}});
+root.addEventListener('click',event=>{const launch=event.target.closest('[data-launch]');if(launch){const id=launch.dataset.launch;trayMenuOpen=false;state.views[id].open=id==='mac'?!state.views[id].open:true;render();save();return;}const el=event.target.closest('button');const scene=el?.closest('[data-instance]');if(!scene)return;const view=state.views[scene.dataset.instance];if(el.dataset.tab)view.page=el.dataset.tab;if(el.dataset.model)view.model=view.model===el.dataset.model?null:el.dataset.model;if(el.dataset.session){view.session=el.dataset.session;view.method=false;}if(el.dataset.modelSessions){view.scope=el.dataset.modelSessions;view.page='sessions';view.method=false;}switch(el.dataset.action){case'open':view.open=true;break;case'close':view.open=false;break;case'pin':state.pinned=!state.pinned;break;case'settings':view.page='settings';break;case'tray-settings':trayMenuOpen=false;view.open=true;view.page='settings';break;case'quit':trayMenuOpen=false;windowsRunning=false;view.open=false;break;case'restart':windowsRunning=true;view.page='overview';break;case'models':view.page='models';break;case'news':view.page='news';break;case'active-session':view.page='sessions';view.session='collector';view.scope=null;break;case'clear-scope':view.scope=null;break;case'method':view.method=!view.method;break;case'original':view.original=!view.original;break;}render();save();});
+root.addEventListener('change',event=>{const key=event.target.dataset.setting;if(!key)return;state[key]=event.target.type==='checkbox'?event.target.checked:event.target.value;render();save();});
+window.addEventListener('openai:set_globals',event=>{if(event.detail?.globals?.widgetState){state=restore(event.detail.globals.widgetState);render();}});
+render();
+if(globalThis.Tweak)for(const shell of root.querySelectorAll('.cp-shell')) {const tweak=new Tweak({container:shell,onChange:render});tweak.addSlider(state,'blur',{label:'毛玻璃模糊',min:10,max:40,unit:'px'});tweak.addSlider(state,'radius',{label:'圆角',min:14,max:30,unit:'px'});tweak.addToggle(state,'generating',{label:'演示生成中'});}
+})();
+</script>
