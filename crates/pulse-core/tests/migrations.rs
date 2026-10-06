@@ -33,7 +33,7 @@ fn legacy_schema_upgrades_and_newer_schema_is_rejected() {
             .query_row("SELECT MAX(version) FROM schema_version", [], |r| r
                 .get::<_, u32>(0))
             .unwrap(),
-        3
+        4
     );
     assert_eq!(
         connection
@@ -49,6 +49,37 @@ fn legacy_schema_upgrades_and_newer_schema_is_rejected() {
         .execute("INSERT INTO schema_version VALUES(999)", [])
         .unwrap();
     assert!(matches!(Store::open(&path), Err(StoreError::NewerSchema)));
+}
+
+#[test]
+fn schema_three_adds_independent_titles_without_rebuilding_usage() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("schema3.sqlite");
+    let connection = Connection::open(&path).unwrap();
+    for sql in [
+        include_str!("../migrations/001.sql"),
+        include_str!("../migrations/002-query-indexes.sql"),
+        include_str!("../migrations/003-session-integrity.sql"),
+    ] {
+        connection.execute_batch(sql).unwrap();
+    }
+    drop(connection);
+    drop(Store::open(&path).unwrap());
+    let connection = Connection::open(&path).unwrap();
+    assert_eq!(
+        connection
+            .query_row("SELECT MAX(version) FROM schema_version", [], |r| r
+                .get::<_, u32>(0))
+            .unwrap(),
+        4
+    );
+    assert_eq!(
+        connection
+            .query_row("SELECT COUNT(*) FROM session_titles", [], |r| r
+                .get::<_, u32>(0))
+            .unwrap(),
+        0
+    );
 }
 
 #[test]

@@ -537,13 +537,21 @@ impl Backend {
                         let Some(source) = sources.iter_mut().find(|s| s.health.id == id) else {
                             continue;
                         };
-                        match read_batch(
-                            &mut store,
-                            &id,
-                            &path,
-                            settings.timezone.parse().unwrap_or(chrono_tz::UTC),
-                            &prices,
-                        ) {
+                        let result = if path
+                            .file_name()
+                            .is_some_and(|name| name == "session_index.jsonl")
+                        {
+                            pulse_core::collectors::jsonl::read_titles(&mut store, &id, &path)
+                        } else {
+                            read_batch(
+                                &mut store,
+                                &id,
+                                &path,
+                                settings.timezone.parse().unwrap_or(chrono_tz::UTC),
+                                &prices,
+                            )
+                        };
+                        match result {
                             Ok(report) => {
                                 source.health.status = "connected".into();
                                 if !report.unchanged {
@@ -705,6 +713,10 @@ fn enqueue_source(
     queue: &mut VecDeque<(String, PathBuf)>,
     known: &mut HashSet<(String, PathBuf)>,
 ) {
+    let index = source.home.join("session_index.jsonl");
+    if index.is_file() {
+        enqueue(queue, known, (source.health.id.clone(), index));
+    }
     source.health.files = 0;
     for folder in ["sessions", "archived_sessions"] {
         for entry in walkdir::WalkDir::new(source.home.join(folder))

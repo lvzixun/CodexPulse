@@ -21,6 +21,10 @@ export function untilReset(window: QuotaWindow, now: number) {
       : `${minutes} 分钟后刷新`;
 }
 import type { RecentSession, Snapshot } from './types';
+export function sessionLabel(meta: RecentSession['meta'] | undefined): string {
+  if (!meta) return '暂无 session';
+  return meta.title?.trim() || `未命名会话 · ${meta.id.slice(0, 8)}`;
+}
 export function sessionActivity(data: Pick<Snapshot, 'recent' | 'sources'>, now: number) {
   const connected = (id: string) =>
     data.sources.some((s) => s.id === id && s.status === 'connected');

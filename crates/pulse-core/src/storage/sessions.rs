@@ -207,6 +207,18 @@ impl Store {
         let Some((json, total, cost, unpriced)) = row else {
             return Ok(None);
         };
+        let mut meta: crate::domain::SessionMeta = serde_json::from_str(&json)?;
+        let title: Option<Option<String>> = self
+            .connection
+            .query_row(
+                "SELECT title FROM session_titles WHERE session_id=?1",
+                [id],
+                |r| r.get(0),
+            )
+            .optional()?;
+        if let Some(title) = title {
+            meta.title = title;
+        }
         let (events, unknown_totals) = self.connection.query_row(
             "SELECT COUNT(*),COUNT(*)-COUNT(total) FROM usage_facts WHERE session_id=?1",
             [id],
@@ -217,7 +229,7 @@ impl Store {
             "SELECT source_id FROM source_sessions WHERE session_id=?1 ORDER BY source_id",
         )?;
         Ok(Some(RecentSession {
-            meta: serde_json::from_str(&json)?,
+            meta,
             models: model_query
                 .query_map([id], |r| r.get(0))?
                 .collect::<Result<_, _>>()?,

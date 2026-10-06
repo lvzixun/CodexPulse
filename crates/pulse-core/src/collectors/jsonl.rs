@@ -66,8 +66,32 @@ pub fn read_batch(
     timezone: Tz,
     prices: &PriceBook,
 ) -> Result<ReadReport, ReadError> {
+    read_inner(store, source, path, timezone, prices, false)
+}
+pub fn read_titles(store: &mut Store, source: &str, path: &Path) -> Result<ReadReport, ReadError> {
+    read_inner(
+        store,
+        source,
+        path,
+        chrono_tz::UTC,
+        &PriceBook::default(),
+        true,
+    )
+}
+fn read_inner(
+    store: &mut Store,
+    source: &str,
+    path: &Path,
+    timezone: Tz,
+    prices: &PriceBook,
+    titles_only: bool,
+) -> Result<ReadReport, ReadError> {
     let meta = path.metadata()?;
-    let key = path.to_string_lossy().into_owned();
+    let key = if titles_only {
+        format!("session-index:{}", path.to_string_lossy())
+    } else {
+        path.to_string_lossy().into_owned()
+    };
     let file_identity = identity(&meta);
     let modified_ns = modified(&meta);
     let prior = store.cursor(source, &key)?;
@@ -104,6 +128,7 @@ pub fn read_batch(
     let mut line_start = position;
     let mut sessions = BTreeMap::new();
     let mut facts = Vec::new();
+    let mut titles = Vec::new();
     let mut issues = Vec::new();
     let started = Instant::now();
     let mut eof = false;
@@ -140,16 +165,23 @@ pub fn read_batch(
             if cursor.state.discarding_line {
                 cursor.state.discarding_line = false;
             } else if !line.iter().all(u8::is_ascii_whitespace) {
-                let parsed = cursor.state.parse(&line);
-                if let Some(session) = parsed.session {
-                    sessions.insert(session.id.clone(), session);
-                }
-                if let Some(mut fact) = parsed.fact {
-                    prices.apply(&mut fact);
-                    facts.push(fact);
-                }
-                if let Some(issue) = parsed.issue {
-                    issues.push(issue.code);
+                if titles_only {
+                    match crate::storage::SessionTitle::parse(&line) {
+                        Ok(title) => titles.push(title),
+                        Err(code) => issues.push(code.into()),
+                    }
+                } else {
+                    let parsed = cursor.state.parse(&line);
+                    if let Some(session) = parsed.session {
+                        sessions.insert(session.id.clone(), session);
+                    }
+                    if let Some(mut fact) = parsed.fact {
+                        prices.apply(&mut fact);
+                        facts.push(fact);
+                    }
+                    if let Some(issue) = parsed.issue {
+                        issues.push(issue.code);
+                    }
                 }
             }
             line.clear();
@@ -171,12 +203,16 @@ pub fn read_batch(
     };
     cursor.state.observed_file_len = Some(meta.len());
     report.issues = issues.len();
-    report.inserted = store.commit_batch(
-        &cursor,
-        &sessions.into_values().collect::<Vec<_>>(),
-        &facts,
-        &issues,
-        timezone,
-    )?;
+    report.inserted = if titles_only {
+        store.commit_titles(&cursor, &titles, &issues)?
+    } else {
+        store.commit_batch(
+            &cursor,
+            &sessions.into_values().collect::<Vec<_>>(),
+            &facts,
+            &issues,
+            timezone,
+        )?
+    };
     Ok(report)
 }

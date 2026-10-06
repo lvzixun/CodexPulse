@@ -10,11 +10,13 @@ use serde::{Deserialize, Serialize};
 use std::{path::Path, time::Duration};
 mod queries;
 mod sessions;
+mod titles;
 pub use queries::{DayUsage, RecentSession, UsageSummary};
 pub use sessions::{
     PageDirection, PriceCoverage, SessionCursor, SessionDetail, SessionDetailRequest,
     SessionFilter, SessionModel, SessionPage, SessionPageRequest, TokenMeasure, UsageBreakdown,
 };
+pub use titles::SessionTitle;
 
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
@@ -74,7 +76,7 @@ impl Store {
             [],
             |row| row.get(0),
         )?;
-        if version > 3 {
+        if version > 4 {
             return Err(StoreError::NewerSchema);
         }
         if version < 3 {
@@ -117,6 +119,11 @@ impl Store {
                 }
                 after = rows.last().map(|r| r.0.clone());
             }
+            tx.commit()?;
+        }
+        if version < 4 {
+            let tx = connection.transaction()?;
+            tx.execute_batch(include_str!("../../migrations/004-session-titles.sql"))?;
             tx.commit()?;
         }
         Ok(Self { connection })

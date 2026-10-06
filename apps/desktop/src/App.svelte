@@ -20,7 +20,7 @@
   import ResetStatus from './components/ResetStatus.svelte';
   import ChallengePanel from './components/ChallengePanel.svelte';
   import SessionsPane from './components/SessionsPane.svelte';
-  import { windowLabel, sessionTokens, sessionActivity } from './lib/format';
+  import { windowLabel, sessionTokens, sessionActivity, sessionLabel } from './lib/format';
   import { openSource } from './lib/ipc';
   let data = $state(empty);
   let mode = $state<'compact' | 'details'>(native ? 'compact' : 'details');
@@ -402,10 +402,13 @@
             sessionQuery = defaultSessionQuery();
             void goPage('sessions');
           }}
-          ><span class="cp-truncate"
-            >{current?.meta.title ?? current?.meta.project ?? '暂无 session'}</span
+          ><span class="cp-truncate" title={sessionLabel(current?.meta)}
+            >{sessionLabel(current?.meta)}</span
           ><Icon name="arrow" /></button
         >
+        {#if current?.meta.project}<p class="cp-note cp-truncate" title={current.meta.project}>
+            项目：{current.meta.project}
+          </p>{/if}
         <div class="cp-metrics">
           <div>
             <span>本 session tokens</span><strong>{sessionTokens(current, number)}</strong>

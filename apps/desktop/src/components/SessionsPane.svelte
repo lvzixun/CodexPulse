@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { sessionTokens } from '../lib/format';
+  import { sessionTokens, sessionLabel } from '../lib/format';
   import { sessionPage, sessionDetail, defaultSessionQuery, openSource } from '../lib/ipc';
   import type {
     SessionPage,
@@ -139,12 +139,14 @@
       onclick={() => (selected = s.meta.id)}
     >
       <span
-        ><span class="cp-truncate">{s.meta.title ?? s.meta.project ?? s.meta.id.slice(0, 8)}</span
-        ><span>{sessionTokens(s, number)} tokens</span></span
+        ><span class="cp-truncate" title={sessionLabel(s.meta)}>{sessionLabel(s.meta)}</span><span
+          >{sessionTokens(s, number)} tokens</span
+        ></span
       >
       <span
-        ><span class="cp-truncate"
-          >{s.models.join(' · ') || '模型未知'} · {s.sources.join(' / ')}</span
+        ><span class="cp-truncate" title={s.meta.project ?? undefined}
+          >{s.meta.project ? `项目：${s.meta.project} · ` : ''}{s.models.join(' · ') || '模型未知'} ·
+          {s.sources.join(' / ')}</span
         ><span>{time(s.meta.last_activity)}</span></span
       >
     </button>{:else}{#if !loading && !listError}<p class="cp-note">
@@ -165,8 +167,8 @@
     {#if detail}
       {@const usage = detail.usage}
       <div class="cp-sectionhead">
-        <span class="cp-truncate"
-          >{detail.session.meta.title ?? detail.session.meta.project ?? 'Session 详情'}</span
+        <span class="cp-truncate" title={sessionLabel(detail.session.meta)}
+          >{sessionLabel(detail.session.meta)}</span
         ><small
           >{detail.session.meta.status === 'active'
             ? '运行中'
@@ -175,6 +177,9 @@
               : '状态未知'}</small
         >
       </div>
+      {#if detail.session.meta.project}<p class="cp-note">
+          项目：{detail.session.meta.project}
+        </p>{/if}
       <div class="cp-metrics">
         <div><span>Session tokens</span><strong>{measure(usage.total, usage.events)}</strong></div>
         <div><span>美元估算</span><strong>{money(usage)}</strong></div>
