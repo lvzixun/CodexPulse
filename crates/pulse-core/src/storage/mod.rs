@@ -21,6 +21,8 @@ pub enum StoreError {
     Invalid(#[from] crate::domain::DataError),
     #[error("invalid usage timestamp")]
     Time,
+    #[error("database schema is newer than this application supports")]
+    NewerSchema,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -52,12 +54,30 @@ pub struct Store {
 }
 impl Store {
     pub fn open(path: impl AsRef<Path>) -> Result<Self, StoreError> {
-        let connection = Connection::open(path)?;
+        let mut connection = Connection::open(path)?;
         connection.busy_timeout(Duration::from_secs(2))?;
         connection.pragma_update(None, "journal_mode", "WAL")?;
         connection.pragma_update(None, "synchronous", "NORMAL")?;
-        connection.execute_batch(include_str!("../../migrations/001.sql"))?;
-        connection.execute_batch(include_str!("../../migrations/002-query-indexes.sql"))?;
+        connection.pragma_update(None, "foreign_keys", true)?;
+        connection.execute_batch(
+            "CREATE TABLE IF NOT EXISTS schema_version (version INTEGER PRIMARY KEY)",
+        )?;
+        let version: u32 = connection.query_row(
+            "SELECT COALESCE(MAX(version),0) FROM schema_version",
+            [],
+            |row| row.get(0),
+        )?;
+        if version > 2 {
+            return Err(StoreError::NewerSchema);
+        }
+        if version < 2 {
+            let tx = connection.transaction()?;
+            if version < 1 {
+                tx.execute_batch(include_str!("../../migrations/001.sql"))?;
+            }
+            tx.execute_batch(include_str!("../../migrations/002-query-indexes.sql"))?;
+            tx.commit()?;
+        }
         Ok(Self { connection })
     }
     pub fn in_memory() -> Result<Self, StoreError> {
