@@ -21,6 +21,7 @@
   import ChallengePanel from './components/ChallengePanel.svelte';
   import SessionsPane from './components/SessionsPane.svelte';
   import SourceSettings from './components/SourceSettings.svelte';
+  import RefreshSettings from './components/RefreshSettings.svelte';
   import {
     windowLabel,
     sessionTokens,
@@ -43,6 +44,8 @@
     ...value,
     windows_sources: value.windows_sources.map((s) => ({ ...s })),
     wsl_sources: value.wsl_sources.map((s) => ({ ...s })),
+    quota_refresh: { ...value.quota_refresh },
+    news_refresh: { ...value.news_refresh },
   });
   let settings = $state<Settings>(copySettings(empty.settings));
   let path = $state('');
@@ -122,7 +125,8 @@
   );
   const compactStale = $derived(
     compactQuota != null &&
-      (now - new Date(compactQuota.captured_at).getTime() > 6 * 60 * 1000 ||
+      (now - new Date(compactQuota.captured_at).getTime() >
+        (data.settings.quota_refresh.interval_seconds + 60) * 1000 ||
         data.quota.sources[compactQuota.source_id]?.status !== 'connected'),
   );
   const highest = $derived(Math.max(1, ...data.usage.days.map((d) => d.total)));
@@ -186,7 +190,12 @@
     saving = true;
     error = '';
     try {
-      await saveSettings({ ...settings, windows_home: path.trim() || null });
+      await saveSettings({
+        ...settings,
+        windows_home: path.trim() || null,
+        quota_refresh: data.settings.quota_refresh,
+        news_refresh: data.settings.news_refresh,
+      });
       settingsDirty = false;
       saving = false;
       await refresh();
@@ -395,8 +404,11 @@
             {bucket}
             {now}
             status={data.quota.sources[bucket.source_id]?.status ?? 'unknown'}
+            maxAgeSeconds={data.settings.quota_refresh.interval_seconds + 60}
           />{:else}<p class="cp-note">
-            尚未获得有效额度快照。请确认来源环境的 Codex 已登录。
+            {data.settings.quota_refresh.mode === 'manual'
+              ? '暂无已验证额度缓存。手动模式可在设置中点击立即刷新。'
+              : '尚未获得有效额度快照，可在设置中查看来源状态。'}
           </p>{/each}
         <div class="cp-divider"></div>
         <div class="cp-sectionhead">
@@ -646,6 +658,7 @@
           >
           <SourceSettings bind:settings changed={() => (settingsDirty = true)} />
           <p class="cp-note">统计时区：{settings.timezone} · 不保存对话正文，不上传本地用量。</p>
+          <RefreshSettings {data} reload={refresh} />
           <div class="cp-divider"></div>
           <fieldset class="accent-picker">
             <legend>主题颜色</legend>

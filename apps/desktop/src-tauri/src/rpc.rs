@@ -16,8 +16,105 @@ use std::{
 
 pub type ActiveChild = Arc<Mutex<Option<Child>>>;
 #[cfg(test)]
+thread_local! {
+    static LIFECYCLE_MARKS: std::cell::RefCell<Vec<(&'static str, Instant)>> = const {
+        std::cell::RefCell::new(Vec::new())
+    };
+}
+#[cfg(test)]
+fn lifecycle_mark(phase: &'static str) {
+    LIFECYCLE_MARKS.with(|marks| marks.borrow_mut().push((phase, Instant::now())));
+}
+#[cfg(test)]
 mod command_tests {
     use super::*;
+    /// Explicit, opt-in live benchmark of the production refresh path. No auth files are read
+    /// by this test and no account response / quota values are written to its report.
+    #[test]
+    #[ignore = "live signed-in CLI query; run explicitly with PULSE_BENCH_REPORT"]
+    fn measure_live_refresh_lifecycle() {
+        let report = std::env::var_os("PULSE_BENCH_REPORT")
+            .expect("set PULSE_BENCH_REPORT to an ignored local output path");
+        let windows_home = std::env::var_os("CODEX_HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| {
+                PathBuf::from(std::env::var_os("USERPROFILE").expect("USERPROFILE")).join(".codex")
+            });
+        let mut scopes = vec![Scope {
+            source_id: "windows".into(),
+            home: windows_home,
+            wsl: None,
+        }];
+        if let Some(home) = std::env::var_os("PULSE_BENCH_WSL_HOME") {
+            scopes.push(Scope {
+                source_id: "wsl".into(),
+                home: PathBuf::from(home),
+                wsl: Some(crate::source_config::WslTarget {
+                    distro: std::env::var("PULSE_BENCH_WSL_DISTRO").expect("WSL distro"),
+                    user: std::env::var("PULSE_BENCH_WSL_USER").unwrap_or_default(),
+                }),
+            });
+        }
+        let stopping = AtomicBool::new(false);
+        let active = Arc::new(Mutex::new(None));
+        let mut samples = Vec::new();
+        // The network worker refreshes sources sequentially, just like this loop.
+        for round in 1..=3 {
+            let batch_start = Instant::now();
+            for scope in &scopes {
+                LIFECYCLE_MARKS.with(|marks| marks.borrow_mut().clear());
+                let started = Instant::now();
+                let result = read(scope, &stopping, &active);
+                let finished = Instant::now();
+                let elapsed_ms = finished.duration_since(started).as_secs_f64() * 1000.0;
+                let mut last = started;
+                let mut phases = serde_json::Map::new();
+                LIFECYCLE_MARKS.with(|marks| {
+                    for (phase, instant) in marks.borrow_mut().drain(..) {
+                        phases.insert(
+                            phase.into(),
+                            json!(instant.duration_since(last).as_secs_f64() * 1000.0),
+                        );
+                        last = instant;
+                    }
+                });
+                phases.insert(
+                    "cleanup".into(),
+                    json!(finished.duration_since(last).as_secs_f64() * 1000.0),
+                );
+                let status = match result {
+                    Ok(buckets) if !buckets.is_empty() => "success".to_owned(),
+                    Ok(_) => "empty_quota".to_owned(),
+                    Err(code) => code,
+                };
+                assert!(active.lock().unwrap().is_none(), "own child was not reaped");
+                println!(
+                    "{} round {round}: {elapsed_ms:.2} ms, {status}",
+                    scope.source_id
+                );
+                samples.push(json!({
+                    "source": scope.source_id,
+                    "round": round,
+                    "elapsed_ms": elapsed_ms,
+                    "status": status,
+                    "child_reaped": true,
+                    "phases_ms": phases,
+                }));
+            }
+            let elapsed_ms = batch_start.elapsed().as_secs_f64() * 1000.0;
+            println!("all sources round {round}: {elapsed_ms:.2} ms");
+            samples.push(json!({"source":"all", "round":round,"elapsed_ms":elapsed_ms}));
+            if round != 3 {
+                std::thread::sleep(Duration::from_secs(3));
+            }
+        }
+        fs::write(report, serde_json::to_vec_pretty(&json!({
+            "timestamp": chrono::Utc::now().to_rfc3339(),
+            "rounds": 3,
+            "includes": "source readiness, launch, initialize, account/read, rateLimits/read, normalize, kill/wait",
+            "samples": samples,
+        })).unwrap()).unwrap();
+    }
     #[test]
     fn configured_wsl_user_and_home_are_separate_arguments_in_the_expected_distro() {
         let target = crate::source_config::WslTarget {
@@ -41,16 +138,22 @@ mod command_tests {
                 "--user",
                 "dev",
                 "--exec",
-                "env",
-                "CODEX_HOME=/home/dev/codex data",
-                "codex",
-                "app-server"
+                "/bin/sh",
+                "-c",
+                WSL_START_SCRIPT,
+                "codexpulse",
+                "/home/dev/codex data"
             ]
         );
         assert!(wsl_command(&target, Path::new(r"\\wsl.localhost\UbuntuOther\home\dev")).is_err());
         assert!(wsl_command(&target, Path::new(r"\\wsl.localhost\Ubuntu\..\Other\home")).is_err());
     }
 }
+// WSL --exec does not load the user's shell environment. In particular, NVM installs
+// may exist only in the default shell's interactive PATH. Keep all user input in argv;
+// apply the selected CODEX_HOME after shell startup so profiles cannot change its scope.
+const WSL_START_SCRIPT: &str =
+    r#"exec "${SHELL:-/bin/sh}" -lic 'exec env CODEX_HOME="$1" codex app-server' codexpulse "$1""#;
 fn wsl_command(target: &crate::source_config::WslTarget, path: &Path) -> Result<Command, String> {
     let prefix = format!("\\\\wsl.localhost\\{}", target.distro);
     let home = path
@@ -68,25 +171,17 @@ fn wsl_command(target: &crate::source_config::WslTarget, path: &Path) -> Result<
     }
     cmd.args([
         "--exec",
-        "env",
-        &format!("CODEX_HOME={home}"),
-        "codex",
-        "app-server",
+        "/bin/sh",
+        "-c",
+        WSL_START_SCRIPT,
+        "codexpulse",
+        &home,
     ]);
     Ok(cmd)
 }
 #[derive(Clone)]
 pub struct Scope {
     pub source_id: String,
-    pub home: PathBuf,
-    pub wsl: Option<crate::source_config::WslTarget>,
-}
-pub struct Request {
-    pub scopes: Vec<Scope>,
-}
-pub struct ResultSet {
-    pub source_id: String,
-    pub result: Result<Vec<QuotaBucket>, String>,
     pub home: PathBuf,
     pub wsl: Option<crate::source_config::WslTarget>,
 }
@@ -111,12 +206,16 @@ pub fn read(
         use std::os::windows::process::CommandExt;
         cmd.creation_flags(0x08000000);
     }
+    #[cfg(test)]
+    lifecycle_mark("resolve_and_readiness");
     let mut child = cmd
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
         .map_err(|_| "codex_launch_failed")?;
+    #[cfg(test)]
+    lifecycle_mark("spawn");
     let mut stdin = child.stdin.take().ok_or("rpc_stdin")?;
     let stdout = child.stdout.take().ok_or("rpc_stdout")?;
     *active.lock().map_err(|_| "child_lock")? = Some(child);
@@ -196,8 +295,12 @@ pub fn read(
         json!({"clientInfo":{"name":"codexpulse","title":"CodexPulse","version":"0.1.0"},"capabilities":{"experimentalApi":false}}),
     )?;
     call(0, "initialized", Value::Null)?;
+    #[cfg(test)]
+    lifecycle_mark("initialize");
     // No turn or auth mutation is initiated; this process uses the source environment's existing sign-in.
     let account = call(2, "account/read", json!({"refreshToken":false}))?;
+    #[cfg(test)]
+    lifecycle_mark("account_read");
     if account["account"].is_null() {
         return Err("not_signed_in".into());
     }
@@ -206,12 +309,17 @@ pub fn read(
         "account/rateLimits/read",
         json!({"excludeResetCreditDetails":true,"supportsLunaReserve":false}),
     )?;
-    Ok(normalize(
+    #[cfg(test)]
+    lifecycle_mark("rate_limits_read");
+    let buckets = normalize(
         &scope.source_id,
         &account,
         &response,
         &chrono::Utc::now().to_rfc3339(),
-    ))
+    );
+    #[cfg(test)]
+    lifecycle_mark("normalize");
+    Ok(buckets)
 }
 struct ChildGuard(ActiveChild);
 impl Drop for ChildGuard {

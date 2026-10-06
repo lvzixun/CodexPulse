@@ -1,10 +1,15 @@
 <script lang="ts">
   import type { QuotaBucket } from '../lib/types';
   import { untilReset, windowLabel } from '../lib/format';
-  let { bucket, now, status }: { bucket: QuotaBucket; now: number; status: string } = $props();
+  let {
+    bucket,
+    now,
+    status,
+    maxAgeSeconds,
+  }: { bucket: QuotaBucket; now: number; status: string; maxAgeSeconds: number } = $props();
   const windows = $derived([bucket.primary, bucket.secondary].filter((w) => w !== null));
   const stale = $derived(
-    now - new Date(bucket.captured_at).getTime() > 6 * 60 * 1000 || status !== 'connected',
+    now - new Date(bucket.captured_at).getTime() > maxAgeSeconds * 1000 || status !== 'connected',
   );
 </script>
 

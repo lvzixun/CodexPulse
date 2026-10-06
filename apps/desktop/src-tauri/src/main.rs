@@ -1,10 +1,13 @@
 #![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
 mod backend;
 mod geometry;
+mod http_quota;
 mod inbox;
 mod material;
 mod news;
 mod platform;
+mod refresh;
+#[cfg(test)]
 mod rpc;
 mod source_config;
 
@@ -39,6 +42,29 @@ fn get_snapshot(state: State<'_, Backend>) -> Result<Snapshot, String> {
         .read()
         .map(|s| s.for_display())
         .map_err(|_| "snapshot unavailable".into())
+}
+#[tauri::command]
+async fn refresh_now(group: String, state: State<'_, Backend>) -> Result<(), String> {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    state
+        .sender
+        .try_send(backend::Message::Refresh(group, tx))
+        .map_err(|_| "采集器繁忙，请稍后重试".to_string())?;
+    rx.await.map_err(|_| "采集器已停止".to_string())?
+}
+#[tauri::command]
+async fn set_refresh(
+    group: String,
+    config: refresh::Config,
+    state: State<'_, Backend>,
+) -> Result<(), String> {
+    config.validate()?;
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    state
+        .sender
+        .try_send(backend::Message::RefreshSettings(group, config, tx))
+        .map_err(|_| "采集器繁忙，请稍后重试".to_string())?;
+    rx.await.map_err(|_| "采集器已停止".to_string())?
 }
 #[tauri::command]
 async fn translate_news(id: String, state: State<'_, Backend>) -> Result<String, String> {
@@ -143,6 +169,8 @@ fn main() {
         }))
         .invoke_handler(tauri::generate_handler![
             get_snapshot,
+            refresh_now,
+            set_refresh,
             translate_news,
             read_news,
             get_session_page,

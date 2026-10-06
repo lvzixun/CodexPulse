@@ -1,3 +1,7 @@
+export interface RefreshConfig {
+  mode: 'auto' | 'manual';
+  interval_seconds: number;
+}
 export interface Settings {
   theme: 'system' | 'light' | 'dark';
   accent: 'blue' | 'violet' | 'teal' | 'amber' | 'rose';
@@ -12,6 +16,8 @@ export interface Settings {
   wsl_auto_detect: boolean;
   hide_titles: boolean;
   hide_projects: boolean;
+  quota_refresh: RefreshConfig;
+  news_refresh: RefreshConfig;
   timezone: string;
   compact_position: [number, number] | null;
   compact_anchor: {
@@ -153,6 +159,8 @@ export interface SourceHealth {
 }
 export interface Snapshot {
   news: {
+    request_status: string;
+    next_attempt: number | null;
     unread_keys: string[];
     important_unread: number;
     items: NewsItem[];
@@ -166,6 +174,9 @@ export interface Snapshot {
     challenge_fetched_at: string | null;
   };
   quota: {
+    request_status: string;
+    last_success: string | null;
+    next_attempt: number | null;
     buckets: QuotaBucket[];
     sources: Record<
       string,
@@ -175,6 +186,10 @@ export interface Snapshot {
         last_attempt: string;
         failures: number;
         buckets: QuotaBucket[];
+        identity: string | null;
+        last_success: string | null;
+        retry_at: number;
+        proxy_source: string;
       }
     >;
   };

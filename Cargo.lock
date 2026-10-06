@@ -488,6 +488,7 @@ dependencies = [
 name = "codexpulse"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
  "chrono",
  "chrono-tz",
  "iana-time-zone",
@@ -500,7 +501,9 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-opener",
  "tauri-plugin-single-instance",
+ "tempfile",
  "tokio",
+ "toml 1.1.6+spec-1.1.0",
  "ureq",
  "url",
  "walkdir",
@@ -3435,6 +3438,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "socks"
+version = "0.3.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f0c3dbbd9ae980613c6dd8e28a9407b50509d3803b57624d5dfe8315218cd58b"
+dependencies = [
+ "byteorder",
+ "libc",
+ "winapi",
+]
+
+[[package]]
 name = "softbuffer"
 version = "0.4.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4323,6 +4337,7 @@ dependencies = [
  "percent-encoding",
  "rustls",
  "rustls-pki-types",
+ "socks",
  "ureq-proto",
  "utf8-zero",
  "webpki-roots",

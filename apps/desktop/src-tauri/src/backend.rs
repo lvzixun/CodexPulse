@@ -36,6 +36,8 @@ pub struct Settings {
     pub wsl_auto_detect: bool,
     pub hide_titles: bool,
     pub hide_projects: bool,
+    pub quota_refresh: crate::refresh::Config,
+    pub news_refresh: crate::refresh::Config,
     pub timezone: String,
     pub compact_position: Option<(i32, i32)>,
     pub compact_anchor: Option<crate::geometry::Anchor>,
@@ -56,6 +58,8 @@ impl Default for Settings {
             wsl_auto_detect: true,
             hide_titles: false,
             hide_projects: false,
+            quota_refresh: crate::refresh::Config::default(),
+            news_refresh: crate::refresh::Config::default(),
             timezone: iana_time_zone::get_timezone().unwrap_or_else(|_| "UTC".into()),
             compact_position: None,
             compact_anchor: None,
@@ -64,6 +68,8 @@ impl Default for Settings {
 }
 impl Settings {
     pub fn validate(&self) -> Result<(), String> {
+        self.quota_refresh.validate()?;
+        self.news_refresh.validate()?;
         if self.compact_anchor.as_ref().is_some_and(|a| !a.valid()) {
             return Err("浮窗位置无效".into());
         }
@@ -120,6 +126,12 @@ pub struct Snapshot {
 pub struct QuotaState {
     pub buckets: Vec<pulse_core::quota::QuotaBucket>,
     pub sources: BTreeMap<String, QuotaSource>,
+    #[serde(default)]
+    pub request_status: String,
+    #[serde(default)]
+    pub last_success: Option<String>,
+    #[serde(default)]
+    pub next_attempt: Option<i64>,
 }
 impl Snapshot {
     pub fn for_display(&self) -> Self {
@@ -130,18 +142,34 @@ impl Snapshot {
         snapshot
     }
 }
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct QuotaSource {
     pub home: String,
     pub status: String,
     pub last_attempt: String,
     pub failures: u32,
     pub buckets: Vec<pulse_core::quota::QuotaBucket>,
+    pub identity: Option<String>,
+    pub last_success: Option<String>,
+    pub retry_at: i64,
+    pub proxy_source: String,
 }
 pub enum Message {
     Settings(Settings, tokio::sync::oneshot::Sender<Result<(), String>>),
-    Quotas(Vec<crate::rpc::ResultSet>),
-    News(Box<crate::news::Feed>),
+    Quotas(u64, Vec<crate::http_quota::ResultSet>),
+    QuotaStarted(u64, crate::http_quota::Scope, crate::http_quota::Stamp),
+    Probes(
+        u64,
+        Vec<(crate::http_quota::Scope, crate::http_quota::Stamp)>,
+    ),
+    News(u64, Box<crate::news::Feed>),
+    Refresh(String, tokio::sync::oneshot::Sender<Result<(), String>>),
+    RefreshSettings(
+        String,
+        crate::refresh::Config,
+        tokio::sync::oneshot::Sender<Result<(), String>>,
+    ),
     ReadNews(
         Vec<String>,
         tokio::sync::oneshot::Sender<Result<(), String>>,
@@ -156,8 +184,9 @@ pub enum Message {
     ),
 }
 enum NetworkRequest {
-    Quotas(crate::rpc::Request),
-    News(Box<crate::news::Feed>),
+    Quotas(u64, Vec<crate::http_quota::Scope>),
+    Probes(u64, Vec<crate::http_quota::Scope>),
+    News(u64, Box<crate::news::Feed>, u64, bool),
     Translation(
         Vec<String>,
         tokio::sync::oneshot::Sender<Result<String, String>>,
@@ -168,7 +197,6 @@ pub struct Backend {
     pub sender: SyncSender<Message>,
     network_sender: SyncSender<NetworkRequest>,
     stopping: Arc<AtomicBool>,
-    active_child: crate::rpc::ActiveChild,
     pending_anchor: Arc<Mutex<Option<(crate::geometry::Anchor, Instant)>>>,
     database: PathBuf,
 }
@@ -217,7 +245,7 @@ impl Backend {
             .unwrap_or_default();
         let snapshot = Arc::new(RwLock::new(Snapshot {
             settings: settings.clone(),
-            quota: quota.clone(),
+            quota: QuotaState::default(),
             news: inbox.view(news.view()),
             usage: store.summary(
                 Utc::now()
@@ -233,10 +261,12 @@ impl Backend {
         let stopping = Arc::new(AtomicBool::new(false));
         let worker_stop = stopping.clone();
         let collector_stop = stopping.clone();
-        let active_child = Arc::new(Mutex::new(None));
+        let quota_epoch = Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let news_epoch = Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let worker_quota_epoch = quota_epoch.clone();
+        let worker_news_epoch = news_epoch.clone();
         let pending_anchor = Arc::new(Mutex::new(None::<(crate::geometry::Anchor, Instant)>));
         let collector_anchor = pending_anchor.clone();
-        let worker_child = active_child.clone();
         let (rpc_sender, rpc_receiver) = mpsc::sync_channel::<NetworkRequest>(1);
         let network_sender = rpc_sender.clone();
         let replies = sender.clone();
@@ -249,27 +279,71 @@ impl Backend {
                         Ok(NetworkRequest::Translation(keys, reply)) => {
                             let _ = reply.send(translator.translate(&keys));
                         }
-                        Ok(NetworkRequest::News(feed)) => {
-                            let feed = crate::news::fetch(*feed);
+                        Ok(NetworkRequest::News(generation, feed, interval, manual)) => {
+                            let cancelled = || {
+                                worker_stop.load(Ordering::Relaxed)
+                                    || worker_news_epoch.load(Ordering::Relaxed) != generation
+                            };
+                            let feed = if cancelled() {
+                                *feed
+                            } else {
+                                crate::news::fetch(*feed, interval, manual, &cancelled)
+                            };
                             if !worker_stop.load(Ordering::Relaxed) {
-                                let _ = replies.send(Message::News(Box::new(feed)));
+                                let _ = replies.send(Message::News(generation, Box::new(feed)));
                             }
                         }
-                        Ok(NetworkRequest::Quotas(request)) => {
+                        Ok(NetworkRequest::Probes(generation, scopes)) => {
                             let mut results = Vec::new();
-                            for scope in request.scopes {
-                                if worker_stop.load(Ordering::Relaxed) {
+                            for scope in scopes {
+                                if worker_stop.load(Ordering::Relaxed)
+                                    || worker_quota_epoch.load(Ordering::Relaxed) != generation
+                                {
                                     break;
                                 }
-                                results.push(crate::rpc::ResultSet {
-                                    source_id: scope.source_id.clone(),
-                                    home: scope.home.clone(),
-                                    wsl: scope.wsl.clone(),
-                                    result: crate::rpc::read(&scope, &worker_stop, &worker_child),
+                                let stamp = crate::http_quota::probe(&scope);
+                                results.push((scope, stamp));
+                            }
+                            if !worker_stop.load(Ordering::Relaxed) {
+                                let _ = replies.send(Message::Probes(generation, results));
+                            }
+                        }
+                        Ok(NetworkRequest::Quotas(generation, scopes)) => {
+                            let mut results = Vec::new();
+                            for scope in scopes {
+                                if worker_stop.load(Ordering::Relaxed)
+                                    || worker_quota_epoch.load(Ordering::Relaxed) != generation
+                                {
+                                    break;
+                                }
+                                let (stamp, result) = crate::http_quota::checked_fetch(
+                                    &scope,
+                                    |stamp| {
+                                        let _ = replies.send(Message::QuotaStarted(
+                                            generation,
+                                            scope.clone(),
+                                            stamp.clone(),
+                                        ));
+                                    },
+                                    |credentials| {
+                                        if worker_stop.load(Ordering::Relaxed)
+                                            || worker_quota_epoch.load(Ordering::Relaxed)
+                                                != generation
+                                        {
+                                            Err("cancelled".into())
+                                        } else {
+                                            crate::http_quota::fetch(&scope, credentials)
+                                        }
+                                    },
+                                );
+                                results.push(crate::http_quota::ResultSet {
+                                    scope,
+                                    stamp,
+                                    result,
                                 });
                             }
                             if !worker_stop.load(Ordering::Relaxed) {
-                                let _ = replies.send(Message::Quotas(results));
+                                let _ = replies.send(Message::Quotas(generation, results));
                             }
                         }
                         Err(mpsc::RecvTimeoutError::Disconnected) => break,
@@ -309,9 +383,12 @@ impl Backend {
                 let mut quota = quota;
                 let mut news = news;
                 let mut inbox = inbox;
-                let mut news_in_flight = false;
-                let mut quota_in_flight = false;
-                let mut last_quota = Instant::now() - Duration::from_secs(3600);
+                let mut news_schedule = crate::refresh::Schedule::new();
+                let mut quota_schedule = crate::refresh::Schedule::new();
+                let mut stamps = BTreeMap::<String, crate::http_quota::Stamp>::new();
+                let mut probe_in_flight = false;
+                let mut last_probe = Instant::now() - Duration::from_secs(60);
+                news_schedule.next = news.next_attempt.min(news.challenge_next_attempt);
                 let prices = PriceBook::bundled().unwrap_or_default();
                 loop {
                     let anchor = collector_anchor.lock().ok().and_then(|mut pending| {
@@ -383,68 +460,235 @@ impl Backend {
                                     .map_err(|_| "无法读取 session 详情".into()),
                             );
                         }
-                        Ok(Message::News(next)) => {
-                            news_in_flight = false;
-                            news = *next;
-                            inbox.update(&news);
-                            let _ = store.set_setting("news_inbox", &inbox);
-                            let _ = store.set_setting("news", &news.for_storage());
-                            dirty = true;
-                        }
-                        Ok(Message::Quotas(results)) => {
-                            quota_in_flight = false;
-                            for response in results {
-                                let Some(source) = sources.iter().find(|s| {
-                                    s.scope_matches(
-                                        &response.source_id,
-                                        &response.home,
-                                        response.wsl.as_ref(),
-                                    )
-                                }) else {
-                                    continue;
-                                };
-                                let home = source.home.to_string_lossy().into_owned();
-                                let state =
-                                    quota.sources.entry(response.source_id).or_insert_with(|| {
-                                        QuotaSource {
-                                            home: home.clone(),
-                                            status: "unknown".into(),
-                                            last_attempt: String::new(),
-                                            failures: 0,
-                                            buckets: Vec::new(),
-                                        }
-                                    });
-                                if state.home != home {
-                                    state.home = home;
-                                    state.buckets.clear();
+                        Ok(Message::Refresh(group, reply)) => {
+                            let result = match group.as_str() {
+                                "quota" => {
+                                    quota_schedule.request();
+                                    Ok(())
                                 }
-                                state.last_attempt = Utc::now().to_rfc3339();
-                                match response.result {
-                                    Ok(buckets) => {
-                                        state.status = "connected".into();
-                                        state.failures = 0;
-                                        state.buckets = buckets;
+                                "news" => {
+                                    news_schedule.request();
+                                    Ok(())
+                                }
+                                _ => Err("刷新组无效".into()),
+                            };
+                            dirty = true;
+                            let _ = reply.send(result);
+                        }
+                        Ok(Message::RefreshSettings(group, config, reply)) => {
+                            let result = config.validate().and_then(|()| {
+                                let mut next = settings.clone();
+                                let old = match group.as_str() {
+                                    "quota" => {
+                                        let old = next.quota_refresh.clone();
+                                        next.quota_refresh = config.clone();
+                                        old
                                     }
-                                    Err(code) => {
-                                        state.status = code;
-                                        state.failures = state.failures.saturating_add(1);
+                                    "news" => {
+                                        let old = next.news_refresh.clone();
+                                        next.news_refresh = config.clone();
+                                        old
                                     }
+                                    _ => return Err("刷新组无效".into()),
+                                };
+                                store
+                                    .set_setting("app", &next)
+                                    .map_err(|_| "无法保存刷新设置".to_string())?;
+                                if old != config {
+                                    let now = Utc::now().timestamp();
+                                    if group == "quota" {
+                                        let next_due =
+                                            if old.mode == "manual" && config.mode == "auto" {
+                                                now
+                                            } else {
+                                                last_attempt(&quota)
+                                                    .saturating_add(config.interval_seconds as i64)
+                                            };
+                                        quota_schedule.invalidate(next_due);
+                                        quota_epoch
+                                            .store(quota_schedule.generation, Ordering::Relaxed);
+                                    } else {
+                                        let attempt = news
+                                            .last_attempt
+                                            .as_deref()
+                                            .and_then(|s| {
+                                                chrono::DateTime::parse_from_rfc3339(s).ok()
+                                            })
+                                            .map_or(0, |d| d.timestamp());
+                                        news.next_attempt = attempt
+                                            .saturating_add(config.interval_seconds as i64)
+                                            .max(news.status_cache_until);
+                                        let challenge_attempt = news
+                                            .challenge_cache
+                                            .fetched_at
+                                            .as_deref()
+                                            .and_then(|s| {
+                                                chrono::DateTime::parse_from_rfc3339(s).ok()
+                                            })
+                                            .map_or(0, |d| d.timestamp());
+                                        news.challenge_next_attempt = challenge_attempt
+                                            .saturating_add(config.interval_seconds as i64)
+                                            .max(news.challenge_cache_until);
+                                        news_schedule.invalidate(
+                                            if old.mode == "manual" && config.mode == "auto" {
+                                                now
+                                            } else {
+                                                attempt
+                                                    .saturating_add(config.interval_seconds as i64)
+                                            },
+                                        );
+                                        news_epoch
+                                            .store(news_schedule.generation, Ordering::Relaxed);
+                                    }
+                                }
+                                settings = next;
+                                dirty = true;
+                                // IPC acknowledgement must observe the persisted config immediately.
+                                if let Ok(mut state) = shared.write() {
+                                    state.settings = settings.clone();
+                                }
+                                Ok(())
+                            });
+                            let _ = reply.send(result);
+                        }
+                        Ok(Message::Probes(generation, results)) => {
+                            probe_in_flight = false;
+                            if generation == quota_schedule.generation {
+                                let mut probes_changed = false;
+                                for (scope, stamp) in results {
+                                    if !sources.iter().any(|s| {
+                                        s.scope_matches(
+                                            &scope.source_id,
+                                            &scope.home,
+                                            scope.wsl.as_ref(),
+                                        ) && s.available()
+                                    }) {
+                                        continue;
+                                    }
+                                    let changed = stamps
+                                        .get(&scope.source_id)
+                                        .is_some_and(|old| old != &stamp);
+                                    if stamps.get(&scope.source_id) == Some(&stamp) {
+                                        continue;
+                                    }
+                                    probes_changed = true;
+                                    reconcile_identity(&mut quota, &scope, &stamp);
+                                    stamps.insert(scope.source_id.clone(), stamp);
+                                    if changed {
+                                        quota_schedule.invalidate(0);
+                                        quota_epoch
+                                            .store(quota_schedule.generation, Ordering::Relaxed);
+                                    }
+                                }
+                                if probes_changed {
+                                    let _ = persist_quota(&store, &mut quota);
+                                    dirty = true;
                                 }
                             }
-                            quota.buckets = pulse_core::quota::merged(
-                                quota
+                        }
+                        Ok(Message::QuotaStarted(generation, scope, stamp)) => {
+                            if generation == quota_schedule.generation
+                                && sources.iter().any(|s| {
+                                    s.scope_matches(
+                                        &scope.source_id,
+                                        &scope.home,
+                                        scope.wsl.as_ref(),
+                                    )
+                                })
+                            {
+                                reconcile_identity(&mut quota, &scope, &stamp);
+                                stamps.insert(scope.source_id.clone(), stamp);
+                                dirty = true;
+                            }
+                        }
+                        Ok(Message::News(generation, next)) => {
+                            let next_due = next
+                                .next_attempt
+                                .max(next.retry_until)
+                                .min(next.challenge_next_attempt.max(next.challenge_retry_until));
+                            if news_schedule.finish(generation, next_due) {
+                                news = *next;
+                                inbox.update(&news);
+                                let _ = store.set_setting("news_inbox", &inbox);
+                                let _ = store.set_setting("news", &news.for_storage());
+                            }
+                            dirty = true;
+                        }
+                        Ok(Message::Quotas(generation, results)) => {
+                            let now = Utc::now().timestamp();
+                            if quota_schedule.finish(
+                                generation,
+                                now.saturating_add(settings.quota_refresh.interval_seconds as i64),
+                            ) {
+                                for response in results {
+                                    let scope = response.scope;
+                                    if !sources.iter().any(|s| {
+                                        s.scope_matches(
+                                            &scope.source_id,
+                                            &scope.home,
+                                            scope.wsl.as_ref(),
+                                        ) && s.available()
+                                    }) {
+                                        continue;
+                                    }
+                                    reconcile_identity(&mut quota, &scope, &response.stamp);
+                                    stamps.insert(scope.source_id.clone(), response.stamp);
+                                    let state = quota
+                                        .sources
+                                        .get_mut(&scope.source_id)
+                                        .expect("reconciled source");
+                                    state.last_attempt = Utc::now().to_rfc3339();
+                                    match response.result {
+                                        Ok(readout) => {
+                                            state.status = "connected".into();
+                                            state.failures = 0;
+                                            state.retry_at = 0;
+                                            state.last_success = Some(state.last_attempt.clone());
+                                            state.buckets = readout.buckets;
+                                            state.proxy_source = readout.proxy_source;
+                                        }
+                                        Err(error) => {
+                                            state.status = error.code.clone();
+                                            if error.code == "credentials_changed" {
+                                                state.retry_at = 0;
+                                                quota_schedule.next = 0;
+                                            } else {
+                                                state.failures = state.failures.saturating_add(1);
+                                                let backoff = (30_i64
+                                                    * (1_i64 << state.failures.min(6)))
+                                                .min(1800);
+                                                state.retry_at = now
+                                                    .saturating_add(backoff.max(error.retry_after));
+                                            }
+                                            if [
+                                                "not_signed_in",
+                                                "account_mismatch",
+                                                "credentials_unreadable",
+                                                "credentials_invalid",
+                                            ]
+                                            .contains(&error.code.as_str())
+                                            {
+                                                state.buckets.clear();
+                                            }
+                                        }
+                                    }
+                                }
+                                quota.last_success = quota
                                     .sources
                                     .values()
-                                    .flat_map(|q| q.buckets.clone())
-                                    .collect(),
-                            );
-                            let _ = store.set_setting("quota", &quota);
+                                    .filter_map(|s| s.last_success.clone())
+                                    .max();
+                                let _ = persist_quota(&store, &mut quota);
+                            }
                             dirty = true;
                         }
                         Ok(Message::Settings(mut next, reply)) => {
                             // Location is host-owned and can change while a UI settings draft is open.
                             next.compact_anchor = settings.compact_anchor.clone();
                             next.compact_position = settings.compact_position;
+                            // Refresh controls are saved independently, even when this appearance draft is old.
+                            next.quota_refresh = settings.quota_refresh.clone();
+                            next.news_refresh = settings.news_refresh.clone();
                             // Changing timezone needs a bucket rebuild before enabling this setting.
                             // This restriction is removed by the migration implementation.
                             if next.timezone != settings.timezone {
@@ -473,7 +717,10 @@ impl Backend {
                                     queued.clear();
                                     last_repair = Instant::now() - Duration::from_secs(60);
                                     last_wsl = Instant::now() - Duration::from_secs(60);
-                                    last_quota = Instant::now() - Duration::from_secs(3600);
+                                    stamps.clear();
+                                    quota_schedule.invalidate(0);
+                                    quota_epoch.store(quota_schedule.generation, Ordering::Relaxed);
+                                    last_probe = Instant::now() - Duration::from_secs(60);
                                 }
                                 dirty = true;
                             }
@@ -600,6 +847,23 @@ impl Backend {
                     }
                     if let Ok(mut paths) = changed.lock() {
                         for path in paths.drain(..) {
+                            for source in sources.iter().filter(|s| {
+                                s.wsl.is_none()
+                                    && ["auth.json", "config.toml", ".env"]
+                                        .iter()
+                                        .any(|f| path == s.home.join(f))
+                            }) {
+                                if let Some(q) = quota.sources.get_mut(&source.health.id) {
+                                    q.buckets.clear();
+                                    q.identity = None;
+                                    q.status = "verifying_account".into();
+                                }
+                                stamps.remove(&source.health.id);
+                                quota_schedule.invalidate(0);
+                                quota_epoch.store(quota_schedule.generation, Ordering::Relaxed);
+                                last_probe = Instant::now() - Duration::from_secs(60);
+                                dirty = true;
+                            }
                             for source in sources
                                 .iter()
                                 .filter(|s| s.wsl.is_none() && s.owns_path(&path))
@@ -612,63 +876,84 @@ impl Backend {
                             }
                         }
                     }
-                    let quota_interval = if app
-                        .get_webview_window("pulse")
-                        .is_some_and(|w| w.is_visible().unwrap_or(false))
-                    {
-                        60
-                    } else {
-                        300
-                    };
-                    if !quota_in_flight
-                        && !sources.is_empty()
-                        && last_quota.elapsed() >= Duration::from_secs(quota_interval)
-                    {
+                    let now = Utc::now().timestamp();
+                    let quota_block = sources
+                        .iter()
+                        .filter(|s| s.available())
+                        .map(|s| quota.sources.get(&s.health.id).map_or(0, |q| q.retry_at))
+                        .min()
+                        .unwrap_or(0);
+                    if quota_schedule.due(&settings.quota_refresh, now, 0) {
                         let scopes = sources
                             .iter()
-                            .filter(|source| {
-                                if !source.available() {
-                                    return false;
-                                }
-                                let old = quota.sources.get(&source.health.id);
-                                old.is_none_or(|old| {
-                                    old.home != source.health.path
-                                        || old.failures == 0
-                                        || chrono::DateTime::parse_from_rfc3339(&old.last_attempt)
-                                            .is_ok_and(|last| {
-                                                (Utc::now() - last.with_timezone(&Utc))
-                                                    .num_seconds()
-                                                    >= ((60u64.saturating_mul(
-                                                        1u64 << old.failures.min(5),
-                                                    ))
-                                                    .min(1800)
-                                                        as i64)
-                                            })
-                                })
+                            .filter(|s| {
+                                s.available()
+                                    && quota
+                                        .sources
+                                        .get(&s.health.id)
+                                        .is_none_or(|q| q.retry_at <= now)
                             })
-                            .map(|s| crate::rpc::Scope {
-                                source_id: s.health.id.clone(),
-                                home: s.home.clone(),
-                                wsl: s.wsl.clone(),
-                            })
+                            .map(scope)
                             .collect::<Vec<_>>();
                         if !scopes.is_empty()
                             && rpc_sender
-                                .try_send(NetworkRequest::Quotas(crate::rpc::Request { scopes }))
+                                .try_send(NetworkRequest::Quotas(quota_schedule.generation, scopes))
                                 .is_ok()
                         {
-                            quota_in_flight = true;
+                            quota_schedule.begin();
+                            dirty = true;
                         }
-                        last_quota = Instant::now();
                     }
-                    if !news_in_flight
-                        && Utc::now().timestamp() >= news.next_attempt
-                        && rpc_sender
-                            .try_send(NetworkRequest::News(Box::new(news.clone())))
+                    let news_block = news.retry_until.min(news.challenge_retry_until);
+                    if news_schedule.due(&settings.news_refresh, now, news_block) {
+                        let manual = news_schedule.requested;
+                        if rpc_sender
+                            .try_send(NetworkRequest::News(
+                                news_schedule.generation,
+                                Box::new(news.clone()),
+                                settings.news_refresh.interval_seconds,
+                                manual,
+                            ))
                             .is_ok()
-                    {
-                        news_in_flight = true;
+                        {
+                            news_schedule.begin();
+                            dirty = true;
+                        }
                     }
+                    // Local-only account validation also runs in manual mode: no HTTP or CLI.
+                    if !probe_in_flight && last_probe.elapsed() >= Duration::from_secs(5) {
+                        let scopes = sources
+                            .iter()
+                            .filter(|s| s.available())
+                            .map(scope)
+                            .collect::<Vec<_>>();
+                        if !scopes.is_empty()
+                            && rpc_sender
+                                .try_send(NetworkRequest::Probes(quota_schedule.generation, scopes))
+                                .is_ok()
+                        {
+                            probe_in_flight = true;
+                            last_probe = Instant::now();
+                        }
+                    }
+                    let quota_status =
+                        quota_schedule.status(&settings.quota_refresh, now, quota_block);
+                    let news_status = news_schedule.status(&settings.news_refresh, now, news_block);
+                    if quota.request_status != quota_status || news.request_status != news_status {
+                        dirty = true;
+                    }
+                    quota.request_status = quota_status.into();
+                    quota.next_attempt = if settings.quota_refresh.mode == "auto" {
+                        Some(quota_schedule.next.max(quota_block))
+                    } else {
+                        None
+                    };
+                    news.request_status = news_status.into();
+                    news.display_next_attempt = if settings.news_refresh.mode == "auto" {
+                        Some(news_schedule.next.max(news_block))
+                    } else {
+                        None
+                    };
                     let batch_start = Instant::now();
                     while batch_start.elapsed() < Duration::from_millis(250) {
                         let Some((id, path)) = queue.pop_front() else {
@@ -733,13 +1018,27 @@ impl Backend {
                                             && s.available()
                                     })
                                 })
-                                .map(|(id, q)| (id.clone(), q.clone()))
+                                .map(|(id, q)| {
+                                    let mut q = q.clone();
+                                    if !stamps.get(id).is_some_and(|stamp| {
+                                        stamp.identity.is_some() && stamp.identity == q.identity
+                                    }) {
+                                        q.buckets.clear();
+                                        if !stamps.contains_key(id) {
+                                            q.status = "verifying_account".into();
+                                        }
+                                    }
+                                    (id.clone(), q)
+                                })
                                 .collect::<BTreeMap<_, _>>();
                             state.quota = QuotaState {
                                 buckets: pulse_core::quota::merged(
                                     live.values().flat_map(|q| q.buckets.clone()).collect(),
                                 ),
                                 sources: live,
+                                request_status: quota.request_status.clone(),
+                                last_success: quota.last_success.clone(),
+                                next_attempt: quota.next_attempt,
                             };
                             match (usage, recent) {
                                 (Ok(usage), Ok(recent)) => {
@@ -768,7 +1067,6 @@ impl Backend {
             sender,
             network_sender,
             stopping,
-            active_child,
             pending_anchor,
             database: db,
         })
@@ -813,7 +1111,6 @@ impl Backend {
     }
     pub fn shutdown(&self) {
         self.stopping.store(true, Ordering::Relaxed);
-        crate::rpc::stop_child(&self.active_child);
         let anchor = self
             .pending_anchor
             .lock()
@@ -830,6 +1127,64 @@ impl Backend {
             }
         }
     }
+}
+fn persist_quota(
+    store: &Store,
+    quota: &mut QuotaState,
+) -> Result<(), pulse_core::storage::StoreError> {
+    quota.buckets = pulse_core::quota::merged(
+        quota
+            .sources
+            .values()
+            .flat_map(|s| s.buckets.clone())
+            .collect(),
+    );
+    store.set_setting("quota", quota)
+}
+fn scope(source: &Source) -> crate::http_quota::Scope {
+    crate::http_quota::Scope {
+        source_id: source.health.id.clone(),
+        home: source.home.clone(),
+        wsl: source.wsl.clone(),
+    }
+}
+fn last_attempt(quota: &QuotaState) -> i64 {
+    quota
+        .sources
+        .values()
+        .filter_map(|s| {
+            chrono::DateTime::parse_from_rfc3339(&s.last_attempt)
+                .ok()
+                .map(|d| d.timestamp())
+        })
+        .max()
+        .unwrap_or(0)
+}
+fn reconcile_identity(
+    quota: &mut QuotaState,
+    scope: &crate::http_quota::Scope,
+    stamp: &crate::http_quota::Stamp,
+) {
+    let state = quota.sources.entry(scope.source_id.clone()).or_default();
+    let home = scope.home.to_string_lossy().into_owned();
+    if state.home != home || state.identity != stamp.identity || stamp.identity.is_none() {
+        state.home = home;
+        state.identity = stamp.identity.clone();
+        state.buckets.clear();
+        state.last_success = None;
+        state.failures = 0;
+        state.retry_at = 0;
+        state.status = "awaiting_refresh".into();
+    }
+    if stamp.status != "ready" {
+        state.status = stamp.status.clone();
+    }
+    state.proxy_source = stamp.proxy_source.clone();
+    quota.last_success = quota
+        .sources
+        .values()
+        .filter_map(|q| q.last_success.clone())
+        .max();
 }
 fn source(id: String, label: String, home: PathBuf) -> Source {
     Source {
@@ -900,6 +1255,77 @@ fn enqueue_source(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn refresh_configs_survive_restart_and_account_switch_clears_every_cache_view() {
+        let directory = tempfile::tempdir().unwrap();
+        let database = directory.path().join("pulse.sqlite");
+        let settings = Settings {
+            quota_refresh: crate::refresh::Config {
+                mode: "manual".into(),
+                interval_seconds: 61,
+            },
+            news_refresh: crate::refresh::Config {
+                mode: "auto".into(),
+                interval_seconds: 907,
+            },
+            ..Settings::default()
+        };
+        {
+            let store = Store::open(&database).unwrap();
+            store.set_setting("app", &settings).unwrap();
+        }
+        let store = Store::open(&database).unwrap();
+        let reloaded: Settings = store.setting("app").unwrap().unwrap();
+        assert_eq!(reloaded.quota_refresh, settings.quota_refresh);
+        assert_eq!(reloaded.news_refresh, settings.news_refresh);
+        let scope = crate::http_quota::Scope {
+            source_id: "windows".into(),
+            home: PathBuf::from("C:/test"),
+            wsl: None,
+        };
+        let stamp = crate::http_quota::Stamp {
+            identity: Some("account-a-hash".into()),
+            status: "ready".into(),
+            ..Default::default()
+        };
+        let mut quota = QuotaState::default();
+        reconcile_identity(&mut quota, &scope, &stamp);
+        let bucket = pulse_core::quota::QuotaBucket {
+            source_id: "windows".into(),
+            identity_key: "account-a-hash".into(),
+            identity_confirmed: true,
+            limit_id: "codex".into(),
+            name: "Codex".into(),
+            plan: None,
+            primary: None,
+            secondary: None,
+            captured_at: "2026-10-06T00:00:00Z".into(),
+        };
+        quota
+            .sources
+            .get_mut("windows")
+            .unwrap()
+            .buckets
+            .push(bucket);
+        quota.sources.get_mut("windows").unwrap().last_success = Some("old success".into());
+        persist_quota(&store, &mut quota).unwrap();
+        assert_eq!(quota.buckets.len(), 1);
+        let switched = crate::http_quota::Stamp {
+            identity: Some("account-b-hash".into()),
+            status: "ready".into(),
+            ..Default::default()
+        };
+        reconcile_identity(&mut quota, &scope, &switched);
+        persist_quota(&store, &mut quota).unwrap();
+        let saved: QuotaState = store.setting("quota").unwrap().unwrap();
+        assert!(saved.buckets.is_empty());
+        assert!(saved.sources["windows"].buckets.is_empty());
+        assert!(saved.sources["windows"].last_success.is_none());
+        assert_eq!(
+            saved.sources["windows"].identity.as_deref(),
+            Some("account-b-hash")
+        );
+    }
     #[test]
     fn legacy_settings_keep_defaults_and_source_drafts_roundtrip() {
         let mut settings: Settings =

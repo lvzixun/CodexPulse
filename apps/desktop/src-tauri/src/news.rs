@@ -24,6 +24,18 @@ pub struct Feed {
     pub challenge_next_attempt: i64,
     #[serde(default)]
     pub challenge_failures: u32,
+    #[serde(default)]
+    pub retry_until: i64,
+    #[serde(default)]
+    pub challenge_retry_until: i64,
+    #[serde(default)]
+    pub status_cache_until: i64,
+    #[serde(default)]
+    pub challenge_cache_until: i64,
+    #[serde(default)]
+    pub request_status: String,
+    #[serde(default)]
+    pub display_next_attempt: Option<i64>,
 }
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct Cache {
@@ -94,6 +106,8 @@ struct FeedUpdate {
 }
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct NewsSnapshot {
+    pub request_status: String,
+    pub next_attempt: Option<i64>,
     pub unread_keys: Vec<String>,
     pub important_unread: usize,
     pub items: Vec<NewsItem>,
@@ -126,11 +140,18 @@ impl Feed {
     }
     pub fn view(&self) -> NewsSnapshot {
         NewsSnapshot {
+            request_status: self.request_status.clone(),
+            next_attempt: self.display_next_attempt,
             unread_keys: Vec::new(),
             important_unread: 0,
             items: self.items.clone(),
             status: self.status.clone(),
-            last_success: self.last_success.clone(),
+            last_success: self
+                .last_success
+                .clone()
+                .into_iter()
+                .chain(self.challenge_cache.fetched_at.clone())
+                .max(),
             last_attempt: self.last_attempt.clone(),
             latest_reset: self.latest_reset.clone(),
             scheduled_reset: self.scheduled_reset.clone(),
@@ -144,7 +165,7 @@ impl Feed {
         }
     }
 }
-pub fn fetch(mut old: Feed) -> Feed {
+pub fn fetch(mut old: Feed, interval: u64, manual: bool, cancelled: &dyn Fn() -> bool) -> Feed {
     let now = chrono::Utc::now();
     old.last_attempt = Some(now.to_rfc3339());
     let agent: ureq::Agent = ureq::Agent::config_builder()
@@ -154,11 +175,17 @@ pub fn fetch(mut old: Feed) -> Feed {
         .build()
         .into();
     let run = || -> Result<FeedUpdate, FetchError> {
+        if cancelled() {
+            return Err(("cancelled".into(), 0));
+        }
         let (status, wait_a) = fetch_endpoint(
             &agent,
             "https://codex-resets.com/api/v1/status",
             &old.status_cache,
         )?;
+        if cancelled() {
+            return Err(("cancelled".into(), 0));
+        }
         let (history, wait_b) = fetch_endpoint(
             &agent,
             "https://codex-resets.com/api/v1/resets?limit=20&order=desc",
@@ -182,41 +209,51 @@ pub fn fetch(mut old: Feed) -> Feed {
             status,
             history,
             items: merge(status_items, history_items),
-            wait: wait_a.max(wait_b).max(300),
+            wait: wait_a.max(wait_b),
         })
     };
-    match run() {
-        Ok(update) => {
-            old.status_cache = update.status;
-            old.history_cache = update.history;
-            old.items = update.items;
-            let status = old
-                .status_cache
-                .body
-                .as_ref()
-                .expect("validated status cache");
-            let status_rows = status_items(status).expect("validated status items");
-            old.latest_reset = status_rows
-                .iter()
-                .find(|i| Some(i.id.as_str()) == status["data"]["latest_reset"]["id"].as_str())
-                .cloned();
-            old.scheduled_reset = status_rows
-                .into_iter()
-                .find(|i| i.kind == pulse_core::news::NewsKind::Scheduled);
-            old.status = "connected".into();
-            old.last_success = Some(chrono::Utc::now().to_rfc3339());
-            old.failures = 0;
-            old.next_attempt = now.timestamp().saturating_add(update.wait);
-        }
-        Err((code, wait)) => {
-            old.status = code;
-            old.failures = old.failures.saturating_add(1);
-            let backoff = (300u64.saturating_mul(1u64 << old.failures.min(5))).min(3600) as i64;
-            old.next_attempt = now.timestamp().saturating_add(wait.max(backoff));
+    if now.timestamp() >= old.retry_until && (manual || now.timestamp() >= old.next_attempt) {
+        match run() {
+            Ok(update) => {
+                old.status_cache = update.status;
+                old.history_cache = update.history;
+                old.items = update.items;
+                let status = old
+                    .status_cache
+                    .body
+                    .as_ref()
+                    .expect("validated status cache");
+                let status_rows = status_items(status).expect("validated status items");
+                old.latest_reset = status_rows
+                    .iter()
+                    .find(|i| Some(i.id.as_str()) == status["data"]["latest_reset"]["id"].as_str())
+                    .cloned();
+                old.scheduled_reset = status_rows
+                    .into_iter()
+                    .find(|i| i.kind == pulse_core::news::NewsKind::Scheduled);
+                old.status = "connected".into();
+                old.last_success = Some(chrono::Utc::now().to_rfc3339());
+                old.failures = 0;
+                old.retry_until = 0;
+                old.status_cache_until = now.timestamp().saturating_add(update.wait);
+                old.next_attempt = now
+                    .timestamp()
+                    .saturating_add(update.wait.max(interval as i64));
+            }
+            Err((code, wait)) => {
+                old.status = code;
+                old.failures = old.failures.saturating_add(1);
+                let backoff = (300u64.saturating_mul(1u64 << old.failures.min(5))).min(3600) as i64;
+                old.next_attempt = now.timestamp().saturating_add(wait.max(backoff));
+                old.retry_until = old.next_attempt;
+            }
         }
     }
     // A changed/failed challenge page must not discard working quota-reset data.
-    if now.timestamp() >= old.challenge_next_attempt {
+    if !cancelled()
+        && now.timestamp() >= old.challenge_retry_until
+        && (manual || now.timestamp() >= old.challenge_next_attempt)
+    {
         match fetch_resource(
             &agent,
             "https://codex-resets.com/zh-CN/tibo-28",
@@ -227,7 +264,10 @@ pub fn fetch(mut old: Feed) -> Feed {
                 old.challenge_cache = cache;
                 old.challenge_status = "connected".into();
                 old.challenge_failures = 0;
-                old.challenge_next_attempt = now.timestamp().saturating_add(wait.max(300));
+                old.challenge_retry_until = 0;
+                old.challenge_cache_until = now.timestamp().saturating_add(wait);
+                old.challenge_next_attempt =
+                    now.timestamp().saturating_add(wait.max(interval as i64));
             }
             Err((code, wait)) => {
                 old.challenge_status = code;
@@ -235,6 +275,7 @@ pub fn fetch(mut old: Feed) -> Feed {
                 let backoff =
                     (300u64.saturating_mul(1u64 << old.challenge_failures.min(5))).min(3600) as i64;
                 old.challenge_next_attempt = now.timestamp().saturating_add(wait.max(backoff));
+                old.challenge_retry_until = old.challenge_next_attempt;
             }
         }
     }
@@ -277,8 +318,7 @@ fn fetch_resource(
         .headers()
         .get("Retry-After")
         .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.parse::<i64>().ok())
-        .filter(|v| *v >= 0)
+        .map(|v| crate::refresh::retry_after(Some(v), chrono::Utc::now().timestamp()))
         .unwrap_or(300);
     let cache_control = response
         .headers()
@@ -442,6 +482,26 @@ mod tests {
         );
         assert_eq!(old.body.as_ref().unwrap()["days"], 28);
         server.join().unwrap();
+    }
+    #[test]
+    fn group_success_time_includes_independent_challenge_and_respects_no_store() {
+        let feed = Feed {
+            last_success: Some("2026-10-06T07:00:00Z".into()),
+            challenge_cache: Cache {
+                fetched_at: Some("2026-10-06T08:00:00Z".into()),
+                no_store: true,
+                ..Cache::default()
+            },
+            ..Feed::default()
+        };
+        assert_eq!(
+            feed.view().last_success.as_deref(),
+            Some("2026-10-06T08:00:00Z")
+        );
+        assert_eq!(
+            feed.for_storage().view().last_success.as_deref(),
+            Some("2026-10-06T07:00:00Z")
+        );
     }
 
     #[test]

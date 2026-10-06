@@ -607,6 +607,7 @@ pub fn running_wsl_sources(
     }
 }
 
+#[cfg(test)]
 pub fn wsl_is_running(name: &str) -> bool {
     let mut list = Command::new("wsl.exe");
     list.args(["--list", "--running", "--quiet"]);

@@ -3,6 +3,7 @@ import { listen } from '@tauri-apps/api/event';
 import type {
   Snapshot,
   Settings,
+  RefreshConfig,
   ViewState,
   SessionPageRequest,
   SessionPage,
@@ -12,6 +13,8 @@ import type {
 export const native = isTauri();
 export const empty: Snapshot = {
   news: {
+    request_status: '',
+    next_attempt: null,
     unread_keys: [],
     important_unread: 0,
     items: [],
@@ -24,7 +27,7 @@ export const empty: Snapshot = {
     challenge_status: '',
     challenge_fetched_at: null,
   },
-  quota: { buckets: [], sources: {} },
+  quota: { buckets: [], sources: {}, request_status: '', last_success: null, next_attempt: null },
   settings: {
     theme: 'system',
     accent: 'blue',
@@ -39,6 +42,8 @@ export const empty: Snapshot = {
     wsl_auto_detect: true,
     hide_titles: false,
     hide_projects: false,
+    quota_refresh: { mode: 'auto', interval_seconds: 300 },
+    news_refresh: { mode: 'auto', interval_seconds: 300 },
     timezone: 'UTC',
     compact_position: null,
     compact_anchor: null,
@@ -76,6 +81,14 @@ export const saveSettings = (settings: Settings) =>
   native
     ? invoke<void>('set_settings', { settings })
     : Promise.reject(new Error('设置仅在桌面应用中可用'));
+export const setRefresh = (group: 'quota' | 'news', config: RefreshConfig) =>
+  native
+    ? invoke<void>('set_refresh', { group, config })
+    : Promise.reject(new Error('刷新设置仅在桌面应用中可用'));
+export const refreshNow = (group: 'quota' | 'news') =>
+  native
+    ? invoke<void>('refresh_now', { group })
+    : Promise.reject(new Error('刷新仅在桌面应用中可用'));
 export const windowAction = (action: string) =>
   native ? invoke<void>('window_action', { action }) : Promise.resolve();
 export const onEvent = <T>(name: string, callback: (value: T) => void) =>
