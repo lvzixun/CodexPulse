@@ -92,8 +92,12 @@ pub fn system_language() -> &'static str {
     }
 }
 
-pub fn text(zh: &'static str, en: &'static str) -> &'static str {
-    if system_language() == "zh" { zh } else { en }
+pub fn effective(preference: &str) -> &'static str {
+    match preference {
+        "zh" => "zh",
+        "en" => "en",
+        _ => system_language(),
+    }
 }
 
 #[cfg(test)]

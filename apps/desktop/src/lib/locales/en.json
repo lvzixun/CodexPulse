@@ -478,5 +478,7 @@
   "最近到期：{date} · {count} 张": "Next expiration: {date} · {count} cards",
   "已到期：{date} · {count} 张，等待刷新": "Expired: {date} · {count} cards; waiting for refresh",
   "当前额度适用 {count} 张": "Applicable now: {count}",
-  "账本查询失败；请查看数据源状态": "Ledger query failed. Check data source status."
+  "账本查询失败；请查看数据源状态": "Ledger query failed. Check data source status.",
+  "语言": "Language",
+  "语言无效": "Invalid language"
 }

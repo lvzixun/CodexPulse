@@ -58,7 +58,7 @@ pub struct WindowHost {
     anchor: Mutex<Option<Anchor>>,
     hidden_since: Mutex<Option<Instant>>,
     creating: Mutex<()>,
-    material: Mutex<Option<bool>>,
+    material: Mutex<Option<(bool, String)>>,
     pub last_hidden: Mutex<Option<Instant>>,
     #[cfg(target_os = "macos")]
     pub badge: Mutex<bool>,
@@ -271,7 +271,7 @@ fn position_floating(app: &tauri::AppHandle, w: &tauri::WebviewWindow, compact: 
             if compact {
                 (184.0, 36.0)
             } else {
-                (460.0, 756.0)
+                (380.0, 800.0)
             },
         );
         // Restrict the configured minimum on small remote-desktop work areas.
@@ -405,6 +405,7 @@ pub fn release_hidden(app: &tauri::AppHandle) {
     }
 }
 pub fn setup(app: &tauri::App, settings: &Settings) -> Result<(), Box<dyn std::error::Error>> {
+    let language = crate::language::effective(&settings.language);
     *app.state::<WindowHost>()
         .anchor
         .lock()
@@ -412,7 +413,11 @@ pub fn setup(app: &tauri::App, settings: &Settings) -> Result<(), Box<dyn std::e
     let settings_item = MenuItem::with_id(
         app,
         "settings",
-        crate::language::text("设置", "Settings"),
+        if language == "zh" {
+            "设置"
+        } else {
+            "Settings"
+        },
         true,
         None::<&str>,
     )?;
@@ -420,7 +425,7 @@ pub fn setup(app: &tauri::App, settings: &Settings) -> Result<(), Box<dyn std::e
     let exit = MenuItem::with_id(
         app,
         "exit",
-        crate::language::text("退出", "Quit"),
+        if language == "zh" { "退出" } else { "Quit" },
         true,
         None::<&str>,
     )?;
@@ -485,6 +490,7 @@ pub fn setup(app: &tauri::App, settings: &Settings) -> Result<(), Box<dyn std::e
     Ok(())
 }
 pub fn apply_settings(app: &tauri::AppHandle, settings: &Settings) {
+    crate::language::refresh_tray(app, crate::language::effective(&settings.language));
     if let Some(w) = app.get_webview_window("pulse") {
         let _ = w.set_always_on_top(cfg!(target_os = "macos") || settings.always_on_top);
         let _ = w.set_theme(match settings.theme.as_str() {
@@ -492,6 +498,8 @@ pub fn apply_settings(app: &tauri::AppHandle, settings: &Settings) {
             "light" => Some(Theme::Light),
             _ => None,
         });
+        #[cfg(target_os = "macos")]
+        crate::macos::apply_appearance(&w, &settings.theme);
         refresh_material_with(app, settings);
         // A settings window remains open when the optional float is disabled.
         let _ = app.emit("settings-applied", settings);
@@ -507,7 +515,8 @@ fn refresh_material_with(app: &tauri::AppHandle, settings: &Settings) {
         let Ok(mut previous) = host.material.lock() else {
             return;
         };
-        if *previous == Some(allowed) {
+        let key = (allowed, settings.theme.clone());
+        if previous.as_ref() == Some(&key) {
             return;
         }
         let effects = if allowed {
@@ -531,7 +540,7 @@ fn refresh_material_with(app: &tauri::AppHandle, settings: &Settings) {
         if !supported {
             let _ = w.set_effects(None);
         }
-        *previous = Some(allowed);
+        *previous = Some(key);
         if let Ok(mut view) = host.view.lock() {
             view.glass_supported = supported;
         }

@@ -11,7 +11,7 @@ export function refreshLanguage(): Promise<void> {
     }
     if ('__TAURI_INTERNALS__' in window) {
       try {
-        language = await invoke<string>('get_system_language');
+        language = await invoke<string>('get_ui_language');
       } catch {
         language = 'en';
       }

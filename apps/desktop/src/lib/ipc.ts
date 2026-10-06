@@ -47,6 +47,7 @@ export const empty: Snapshot = {
   quota: { buckets: [], sources: {}, request_status: '', last_success: null, next_attempt: null },
   settings: {
     theme: 'system',
+    language: 'system',
     accent: 'blue',
     glass: true,
     floating: true,
@@ -109,6 +110,13 @@ export const snapshot = async (): Promise<Snapshot> => {
 export const saveSettings = (settings: Settings) =>
   native
     ? invoke<void>('set_settings', { settings })
+    : Promise.reject(new Error(t('设置仅在桌面应用中可用')));
+export const saveUiPreferences = (preferences: Partial<Pick<Settings, 'theme' | 'language'>>) =>
+  native
+    ? invoke<Settings>('set_ui_preferences', {
+        theme: preferences.theme ?? null,
+        language: preferences.language ?? null,
+      })
     : Promise.reject(new Error(t('设置仅在桌面应用中可用')));
 export const setRefresh = (group: 'quota' | 'news', config: RefreshConfig) =>
   native

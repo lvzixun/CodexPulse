@@ -1258,7 +1258,7 @@ main.menubar.opaque {
   background: var(--solid);
 }
 .menubar .cp-header {
-  padding: 16px 18px 10px;
+  padding: 12px 16px 8px;
   gap: 8px;
 }
 .menubar .cp-brand strong {
@@ -1283,10 +1283,10 @@ main.menubar.opaque {
   background: var(--card) !important;
 }
 .menubar .cp-source {
-  padding: 0 18px 12px !important;
+  padding: 0 16px 10px !important;
 }
 .menubar .cp-tabs {
-  margin: 0 18px;
+  margin: 0 16px;
   padding: 2px;
   gap: 2px;
   border-radius: 9px;
@@ -1302,10 +1302,10 @@ main.menubar.opaque {
   font-weight: 600;
 }
 .menubar .cp-body {
-  padding: 16px 18px;
+  padding: 12px 16px;
 }
 .menubar .cp-divider {
-  margin: 15px 0;
+  margin: 12px 0;
 }
 .menubar .cp-summary {
   border-radius: 12px;
@@ -1442,7 +1442,7 @@ main.menubar.opaque {
   height: 18px;
 }
 .menubar .cp-footer {
-  padding: 10px 18px;
+  padding: 8px 16px;
 }
 .menubar .cp-price-note,
 .menubar .cp-count,

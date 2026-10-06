@@ -24,8 +24,13 @@ use tauri::{Manager, State};
 use tauri_plugin_opener::OpenerExt;
 
 #[tauri::command]
-fn get_system_language(app: tauri::AppHandle) -> &'static str {
-    let language = language::system_language();
+fn get_ui_language(app: tauri::AppHandle, state: State<'_, Backend>) -> &'static str {
+    let preference = state
+        .snapshot
+        .read()
+        .map(|s| s.settings.language.clone())
+        .unwrap_or_default();
+    let language = language::effective(&preference);
     language::refresh_tray(&app, language);
     language
 }
@@ -180,6 +185,22 @@ async fn set_settings(
     Ok(())
 }
 #[tauri::command]
+async fn set_ui_preferences(
+    theme: Option<String>,
+    language: Option<String>,
+    app: tauri::AppHandle,
+    state: State<'_, Backend>,
+) -> Result<Settings, String> {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    state
+        .sender
+        .try_send(backend::Message::UiPreferences(theme, language, tx))
+        .map_err(|_| "采集器繁忙，请稍后重试".to_string())?;
+    let settings = rx.await.map_err(|_| "采集器已停止".to_string())??;
+    platform::apply_settings(&app, &settings);
+    Ok(settings)
+}
+#[tauri::command]
 async fn window_action(action: String, app: tauri::AppHandle) -> Result<(), String> {
     match action.as_str() {
         "expand" => platform::show_details(&app, None),
@@ -259,7 +280,8 @@ fn main() {
             platform::show_details(app, None)
         }))
         .invoke_handler(tauri::generate_handler![
-            get_system_language,
+            get_ui_language,
+            set_ui_preferences,
             get_snapshot,
             refresh_now,
             set_refresh,

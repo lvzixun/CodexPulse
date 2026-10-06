@@ -113,6 +113,25 @@ pub fn shutdown(app: &tauri::AppHandle) {
     }
 }
 
+pub fn apply_appearance(window: &tauri::WebviewWindow, theme: &str) {
+    let theme = theme.to_owned();
+    let native_window = window.clone();
+    let _ = window.run_on_main_thread(move || {
+        use objc2_app_kit::NSAppearanceCustomization;
+        if let Ok(pointer) = native_window.ns_window() {
+            // AppKit owns this window; restrict access to its main thread.
+            let window = unsafe { &*pointer.cast::<objc2_app_kit::NSWindow>() };
+            let name = match theme.as_str() {
+                "light" => Some(unsafe { objc2_app_kit::NSAppearanceNameAqua }),
+                "dark" => Some(unsafe { objc2_app_kit::NSAppearanceNameDarkAqua }),
+                _ => None,
+            };
+            let appearance = name.and_then(objc2_app_kit::NSAppearance::appearanceNamed);
+            window.setAppearance(appearance.as_deref());
+        }
+    });
+}
+
 pub fn prepare_window(window: &tauri::WebviewWindow) {
     let native_window = window.clone();
     let _ = window.run_on_main_thread(move || {
@@ -231,7 +250,7 @@ pub fn position(app: &tauri::AppHandle, window: &tauri::WebviewWindow, areas: &[
 }
 
 fn panel_placement(area: &Area, center_x: f64, icon_bottom: f64) -> crate::geometry::Placement {
-    let mut p = area.place(None, (400., 680.));
+    let mut p = area.place(None, (380., 800.));
     let max_x = area.x as f64 + area.width as f64 - p.width as f64;
     let max_y = area.y as f64 + area.height as f64 - p.height as f64;
     p.x = (center_x - p.width as f64 / 2.)
@@ -257,8 +276,8 @@ mod tests {
             scale: 2.,
         };
         let p = panel_placement(&area, -120., 48.);
-        assert_eq!(p.width, 800);
-        assert_eq!(p.x, -800);
+        assert_eq!((p.width, p.height), (760, 1600));
+        assert_eq!(p.x, -760);
         assert_eq!(p.y, 60);
         let area = Area {
             width: 600,

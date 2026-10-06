@@ -8,6 +8,7 @@
     native,
     onEvent,
     saveSettings,
+    saveUiPreferences,
     snapshot,
     windowAction,
     getViewState,
@@ -55,6 +56,7 @@
   let sessionQuery = $state<SessionPageRequest>(defaultSessionQuery());
   let error = $state('');
   let saving = $state(false);
+  let preferencesBusy = $state(false);
   let settingsDirty = $state(false);
   let now = $state(Date.now());
   const copySettings = (value: Settings): Settings => ({
@@ -281,6 +283,23 @@
       error = '无法连接后台采集器';
     }
   }
+  async function savePreference(preferences: Partial<Pick<Settings, 'theme' | 'language'>>) {
+    preferencesBusy = true;
+    error = '';
+    try {
+      const next = await saveUiPreferences(preferences);
+      data.settings = next;
+      settings.theme = next.theme;
+      settings.language = next.language;
+      await refreshLanguage();
+    } catch (e) {
+      settings.theme = data.settings.theme;
+      settings.language = data.settings.language;
+      error = String(e);
+    } finally {
+      preferencesBusy = false;
+    }
+  }
   async function save() {
     saving = true;
     error = '';
@@ -338,6 +357,10 @@
       () =>
         onEvent<Settings>('settings-applied', (next) => {
           if (disposed) return;
+          data.settings = next;
+          settings.theme = next.theme;
+          settings.language = next.language;
+          void refreshLanguage();
           if (!settingsDirty || saving) {
             settings = { ...next };
             path = next.windows_home ?? '';
@@ -414,7 +437,7 @@
   class:compact={mode === 'compact'}
   class:menubar={!floatingSupported}
   class:opaque={!settings.glass || !glassSupported}
-  data-theme={settings.theme}
+  data-theme={data.settings.theme}
   data-accent={settings.accent ?? 'blue'}
 >
   {#if mode === 'compact'}
@@ -737,7 +760,29 @@
         {#if !floatingSupported}<StartupSettings />{/if}
         <section oninput={() => (settingsDirty = true)} onchange={() => (settingsDirty = true)}>
           <label class="cp-setting"
-            >{$t('外观')}<select bind:value={settings.theme}
+            ><span>{$t('语言')}<small class="cp-setting-hint">{$t('自动保存')}</small></span>
+            <select
+              bind:value={settings.language}
+              disabled={preferencesBusy}
+              oninput={(e) => e.stopPropagation()}
+              onchange={(e) => {
+                e.stopPropagation();
+                void savePreference({ language: e.currentTarget.value as Settings['language'] });
+              }}
+            >
+              <option value="system">{$t('跟随系统')}</option>
+              <option value="zh">中文</option><option value="en">English</option>
+            </select>
+          </label>
+          <label class="cp-setting"
+            ><span>{$t('外观')}<small class="cp-setting-hint">{$t('自动保存')}</small></span><select
+              bind:value={settings.theme}
+              disabled={preferencesBusy}
+              oninput={(e) => e.stopPropagation()}
+              onchange={(e) => {
+                e.stopPropagation();
+                void savePreference({ theme: e.currentTarget.value as Settings['theme'] });
+              }}
               ><option value="system">{$t('跟随系统')}</option><option value="light"
                 >{$t('浅色')}</option
               ><option value="dark">{$t('深色')}</option></select

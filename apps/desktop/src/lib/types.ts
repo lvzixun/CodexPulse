@@ -4,6 +4,7 @@ export interface RefreshConfig {
 }
 export interface Settings {
   theme: 'system' | 'light' | 'dark';
+  language: 'system' | 'zh' | 'en';
   accent: 'blue' | 'violet' | 'teal' | 'amber' | 'rose';
   glass: boolean;
   floating: boolean;

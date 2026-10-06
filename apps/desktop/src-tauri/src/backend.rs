@@ -24,6 +24,7 @@ use tauri::{Emitter, Manager};
 #[serde(default)]
 pub struct Settings {
     pub theme: String,
+    pub language: String,
     pub accent: String,
     pub glass: bool,
     pub floating: bool,
@@ -48,6 +49,7 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             theme: "system".into(),
+            language: "system".into(),
             accent: "blue".into(),
             glass: true,
             floating: cfg!(windows),
@@ -77,6 +79,9 @@ impl Settings {
         }
         if !["system", "light", "dark"].contains(&self.theme.as_str()) {
             return Err("主题无效".into());
+        }
+        if !["system", "zh", "en"].contains(&self.language.as_str()) {
+            return Err("语言无效".into());
         }
         if !["blue", "violet", "teal", "amber", "rose"].contains(&self.accent.as_str()) {
             return Err("主题颜色无效".into());
@@ -165,6 +170,11 @@ pub struct QuotaSource {
 }
 pub enum Message {
     Settings(Settings, tokio::sync::oneshot::Sender<Result<(), String>>),
+    UiPreferences(
+        Option<String>,
+        Option<String>,
+        tokio::sync::oneshot::Sender<Result<Settings, String>>,
+    ),
     Quotas(u64, Vec<crate::http_quota::ResultSet>),
     QuotaStarted(u64, crate::http_quota::Scope, crate::http_quota::Stamp),
     Probes(
@@ -817,6 +827,19 @@ impl Backend {
                             }
                             dirty = true;
                         }
+                        Ok(Message::UiPreferences(theme, language, reply)) => {
+                            let result =
+                                update_ui_preferences(&mut store, &settings, theme, language);
+                            let result = result.map(|next| {
+                                settings = next;
+                                if let Ok(mut state) = shared.write() {
+                                    state.settings = settings.clone();
+                                }
+                                dirty = true;
+                                settings.clone()
+                            });
+                            let _ = reply.send(result);
+                        }
                         Ok(Message::Settings(mut next, reply)) => {
                             // Location is host-owned and can change while a UI settings draft is open.
                             next.compact_anchor = settings.compact_anchor.clone();
@@ -824,6 +847,9 @@ impl Backend {
                             // Refresh controls are saved independently, even when this appearance draft is old.
                             next.quota_refresh = settings.quota_refresh.clone();
                             next.news_refresh = settings.news_refresh.clone();
+                            // Language and appearance save independently of source/privacy drafts.
+                            next.language = settings.language.clone();
+                            next.theme = settings.theme.clone();
                             // Timezone has its own atomic rebuild path. An older appearance
                             // draft must never restore the pre-rebuild timezone.
                             next.timezone = settings.timezone.clone();
@@ -1475,6 +1501,24 @@ fn source(id: String, label: String, home: PathBuf) -> Source {
         wsl: None,
     }
 }
+fn update_ui_preferences(
+    store: &mut Store,
+    current: &Settings,
+    theme: Option<String>,
+    language: Option<String>,
+) -> Result<Settings, String> {
+    let mut next = current.clone();
+    if let Some(theme) = theme {
+        next.theme = theme;
+    }
+    if let Some(language) = language {
+        next.language = language;
+    }
+    next.validate()?;
+    persist_settings(store, &next, false).map_err(|_| "无法保存设置".to_string())?;
+    Ok(next)
+}
+
 fn persist_settings(
     store: &mut Store,
     next: &Settings,
@@ -1731,6 +1775,7 @@ mod tests {
         let mut settings: Settings =
             serde_json::from_str(r#"{"theme":"light","windows_home":null}"#).unwrap();
         assert!(settings.wsl_auto_detect);
+        assert_eq!(settings.language, "system");
         assert!(!settings.hide_titles);
         settings.wsl_sources.push(crate::source_config::WslSource {
             id: "manual".into(),
@@ -1743,6 +1788,13 @@ mod tests {
         let decoded: Settings =
             serde_json::from_value(serde_json::to_value(&settings).unwrap()).unwrap();
         assert_eq!(decoded.wsl_sources, settings.wsl_sources);
+        settings.language = "en".into();
+        let decoded: Settings =
+            serde_json::from_value(serde_json::to_value(&settings).unwrap()).unwrap();
+        assert_eq!(decoded.language, "en");
+        assert!(decoded.validate().is_ok());
+        settings.language = "fr".into();
+        assert!(settings.validate().is_err());
     }
     #[test]
     fn hiding_names_removes_ipc_values_without_changing_statistics_or_internal_titles() {
@@ -1807,6 +1859,49 @@ mod tests {
         source.health.status = "connected".into();
         assert!(source.available());
     }
+    #[test]
+    fn ui_preferences_persist_without_restoring_source_drafts_or_clearing_quota() {
+        let mut store = Store::in_memory().unwrap();
+        store
+            .set_setting("quota", &serde_json::json!({"test":"cached"}))
+            .unwrap();
+        let settings = Settings {
+            hide_titles: true,
+            windows_enabled: false,
+            ..Default::default()
+        };
+        let next = update_ui_preferences(
+            &mut store,
+            &settings,
+            Some("light".into()),
+            Some("en".into()),
+        )
+        .unwrap();
+        let saved = store.setting::<Settings>("app").unwrap().unwrap();
+        assert_eq!(saved.theme, "light");
+        assert_eq!(saved.language, "en");
+        assert!(saved.hide_titles);
+        assert!(!saved.windows_enabled);
+        assert_eq!(
+            store
+                .setting::<serde_json::Value>("quota")
+                .unwrap()
+                .unwrap()["test"],
+            "cached"
+        );
+        assert!(
+            update_ui_preferences(&mut store, &next, Some("invalid".into()), Some("zh".into()))
+                .is_err()
+        );
+        assert_eq!(
+            store.setting::<Settings>("app").unwrap().unwrap().language,
+            "en"
+        );
+        let next = update_ui_preferences(&mut store, &next, None, Some("system".into())).unwrap();
+        assert_eq!(next.theme, "light");
+        assert_eq!(next.language, "system");
+    }
+
     #[test]
     fn appearance_changes_keep_quota_while_source_switches_invalidate_the_persisted_cache() {
         let mut store = Store::in_memory().unwrap();
