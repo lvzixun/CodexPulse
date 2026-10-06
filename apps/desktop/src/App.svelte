@@ -22,7 +22,6 @@
   import SessionsPane from './components/SessionsPane.svelte';
   import SourceSettings from './components/SourceSettings.svelte';
   import RefreshSettings from './components/RefreshSettings.svelte';
-  import TimezoneStatus from './components/TimezoneStatus.svelte';
   import {
     windowLabel,
     sessionTokens,
@@ -405,7 +404,7 @@
         if (!restoreScroll && content) scroll[page] = content.scrollTop;
       }}
     >
-      {#if data.error || error}<p class="cp-method" role="status">{error || data.error}</p>{/if}
+      {#if data.error || error || data.timezone_error}<p class="cp-method" role="status">{error || data.error || data.timezone_error}</p>{/if}
       {#if page === 'overview'}
         {#each data.quota?.buckets ?? [] as bucket}{#if data.quota.buckets.length > 1}<div
               class="cp-sectionhead cp-bucket-label"
@@ -670,8 +669,6 @@
             /></label
           >
           <SourceSettings bind:settings changed={() => (settingsDirty = true)} />
-          <TimezoneStatus {data} />
-          <p class="cp-note">不保存对话正文，不上传本地用量。</p>
           <RefreshSettings {data} reload={refresh} />
           <div class="cp-divider"></div>
           <fieldset class="accent-picker">
