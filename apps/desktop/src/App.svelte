@@ -10,20 +10,24 @@
     windowAction,
     getViewState,
     rememberView,
+    defaultSessionQuery,
+    readNews,
   } from './lib/ipc';
-  import type { Settings } from './lib/types';
+  import type { Settings, SessionPageRequest } from './lib/types';
   import QuotaCard from './components/QuotaCard.svelte';
   import NewsCard from './components/NewsCard.svelte';
   import Icon from './components/Icon.svelte';
   import ResetStatus from './components/ResetStatus.svelte';
   import ChallengePanel from './components/ChallengePanel.svelte';
-  import { windowLabel } from './lib/format';
+  import SessionsPane from './components/SessionsPane.svelte';
+  import { windowLabel, sessionTokens, sessionActivity } from './lib/format';
   import { openSource } from './lib/ipc';
   let data = $state(empty);
   let mode = $state<'compact' | 'details'>(native ? 'compact' : 'details');
   let page = $state('overview');
   let selectedModel = $state<string | null>(null);
   let selectedSession = $state<string | null>(null);
+  let sessionQuery = $state<SessionPageRequest>(defaultSessionQuery());
   let error = $state('');
   let saving = $state(false);
   let settingsDirty = $state(false);
@@ -80,18 +84,46 @@
           minute: '2-digit',
         }).format(new Date(ts))
       : '尚未同步';
-  const current = $derived(data.recent.find((s) => s.meta.status === 'active') ?? data.recent[0]);
+  const activityInfo = $derived(sessionActivity(data, now));
+  const working = $derived(
+    activityInfo.sessions.find((s) => s.meta.id === selectedSession) ?? activityInfo.working,
+  );
+  const activity = $derived(activityInfo.state);
+  const activityLabel = $derived(
+    activity === 'busy'
+      ? `忙${activityInfo.sessions.length > 1 ? activityInfo.sessions.length : ''}`
+      : activity === 'idle'
+        ? '闲'
+        : '?',
+  );
+  const activityTitle = $derived(
+    activity === 'busy'
+      ? `${activityInfo.sessions.length} 个 session 工作中（最近 5 分钟有日志事件）`
+      : activity === 'idle'
+        ? '未检测到工作中的 session'
+        : '工作状态未知：日志过期或数据源未连接',
+  );
+  const current = $derived(working ?? data.recent[0]);
   const compactQuota = $derived(data.quota.buckets[0]);
   const compactWindows = $derived(
-    [compactQuota?.primary, compactQuota?.secondary].filter((w) => w != null),
+    [compactQuota?.secondary ?? compactQuota?.primary].filter((w) => w != null),
   );
   const compactStale = $derived(
     compactQuota != null &&
       (now - new Date(compactQuota.captured_at).getTime() > 6 * 60 * 1000 ||
         data.quota.sources[compactQuota.source_id]?.status !== 'connected'),
   );
-  const session = $derived(data.recent.find((s) => s.meta.id === selectedSession));
   const highest = $derived(Math.max(1, ...data.usage.days.map((d) => d.total)));
+  const unreadKeys = $derived(data.news.unread_keys ?? []);
+  const importantUnread = $derived(data.news.important_unread ?? 0);
+  async function acknowledgeNews() {
+    try {
+      await readNews([...unreadKeys]);
+      await refresh();
+    } catch (e) {
+      error = String(e);
+    }
+  }
   async function togglePin() {
     try {
       await saveSettings({ ...data.settings, always_on_top: !data.settings.always_on_top });
@@ -117,6 +149,7 @@
       page,
       selected_model: selectedModel,
       selected_session: selectedSession,
+      session_query: sessionQuery,
       scroll: { ...scroll },
       glass_supported: glassSupported,
       floating_supported: floatingSupported,
@@ -128,6 +161,7 @@
   async function refresh() {
     try {
       data = await snapshot();
+      now = Date.now();
       if (!saving && !settingsDirty) {
         settings = { ...data.settings };
         path = settings.windows_home ?? '';
@@ -198,6 +232,7 @@
           page = view.page;
           selectedModel = view.selected_model;
           selectedSession = view.selected_session;
+          sessionQuery = view.session_query ?? defaultSessionQuery();
           scroll = view.scroll;
           glassSupported = view.glass_supported;
           floatingSupported = view.floating_supported;
@@ -238,17 +273,22 @@
     <div class="cp-compact-line">
       <button
         class="cp-compact-drag"
-        class:cp-working={current?.meta.status === 'active'}
+        class:cp-working={activity === 'busy'}
+        class:cp-unknown={activity === 'unknown'}
         class:cp-indexing={data.collecting}
         onpointerdown={drag}
-        aria-label="拖动 CodexPulse 浮窗"
-        title={`CodexPulse · ${data.collecting ? '索引中' : current?.meta.status === 'active' ? '工作中' : '已同步'} · 拖动调整位置`}
-        ><Icon name="activity" /></button
+        aria-label={`${activityTitle} · 拖动 CodexPulse 浮窗`}
+        title={`CodexPulse · ${activityTitle}${data.collecting ? ' · 索引中' : ''} · 拖动调整位置`}
+        ><span class="cp-activity-dot"></span><b>{activityLabel}</b></button
       >
       <button
         class="cp-compact-info"
-        onclick={() => void windowAction('expand')}
-        aria-label="展开 CodexPulse 详情"
+        onclick={() => void windowAction(unreadKeys.length ? 'news' : 'expand')}
+        aria-label={importantUnread
+          ? '查看新的重要重置消息'
+          : unreadKeys.length
+            ? '查看新消息'
+            : '展开 CodexPulse 详情'}
       >
         {#each compactWindows as window}<span
             class:cp-stale={compactStale}
@@ -268,11 +308,18 @@
             ></span
           >{:else}<small class="cp-compact-wait">{data.collecting ? '索引中' : '等待额度'}</small
           >{/each}
-        <span
-          class="cp-compact-tokens"
-          title={`当前 session · ${current ? current.total.toLocaleString() + ' tokens' : '待采集'} · ${current?.models.join(' / ') || '模型未知'} · ${current ? money(current.cost_nanousd, current.unpriced_tokens) : '待计价'}`}
-          ><b>{current ? compactNumber(current.total) : '—'}</b><small>tok</small></span
-        >
+        {#if importantUnread}<span
+            class="cp-reset-alert"
+            title={`${importantUnread} 条新的重要重置消息 · 点击查看公告，实际额度以账户快照为准`}
+            >重置<span class="cp-news-indicator"></span></span
+          >{:else}<span
+            class="cp-compact-tokens"
+            title={`当前 session · ${current ? current.total.toLocaleString() + ' tokens' : '待采集'} · ${current?.models.join(' / ') || '模型未知'} · ${current ? money(current.cost_nanousd, current.unpriced_tokens) : '待计价'}`}
+            ><b>{sessionTokens(current, compactNumber)}</b><small>tok</small></span
+          >{#if unreadKeys.length}<span
+              class="cp-news-indicator"
+              title={`${unreadKeys.length} 条新动态`}
+            ></span>{/if}{/if}
         <Icon name="right" />
       </button>
     </div>
@@ -343,7 +390,7 @@
         <div class="cp-sectionhead">
           <span
             ><span class="cp-dot"></span>
-            {current?.meta.status === 'active' ? '当前工作 session' : '最近工作 session'}</span
+            {working ? '当前工作 session' : '最近工作 session'}</span
           ><span class="cp-label cp-truncate"
             >{current?.sources.join(' / ')} · {current?.models.join(' / ') || '模型未知'}</span
           >
@@ -352,6 +399,7 @@
           class="cp-session-title"
           onclick={() => {
             selectedSession = current?.meta.id ?? null;
+            sessionQuery = defaultSessionQuery();
             void goPage('sessions');
           }}
           ><span class="cp-truncate"
@@ -360,11 +408,13 @@
         >
         <div class="cp-metrics">
           <div>
-            <span>本 session tokens</span><strong>{current ? number(current.total) : '—'}</strong>
+            <span>本 session tokens</span><strong>{sessionTokens(current, number)}</strong>
           </div>
           <div>
             <span>美元估算</span><strong
-              >{current ? money(current.cost_nanousd, current.unpriced_tokens) : '—'}</strong
+              >{current?.events
+                ? money(current.cost_nanousd, current.unpriced_tokens || current.unknown_totals)
+                : '—'}</strong
             >
           </div>
           <div>
@@ -456,56 +506,33 @@
                   ? ` · ${m.incomplete_events} 条记录缺少拆分字段`
                   : ''}
               </p>
+              <button
+                class="cp-textbutton"
+                onclick={() => {
+                  sessionQuery = {
+                    filter: {
+                      model: m.model,
+                      from_day: data.usage.from_day,
+                      through_day: data.usage.through_day,
+                    },
+                    cursor: null,
+                    direction: 'older',
+                  };
+                  selectedSession = null;
+                  scroll.sessions = 0;
+                  void goPage('sessions');
+                }}>查看此模型最近 30 天的 sessions <Icon name="right" /></button
+              >
             </div>{/if}{:else}<p class="cp-note">尚无可归属的模型用量。</p>{/each}
         <p class="cp-note">
           {data.usage.sessions} 个独立 sessions；一个 session 可使用多个模型。缓存属于输入，汇总不重复计算。
         </p>
       {:else if page === 'sessions'}
-        <div class="cp-sectionhead">
-          <span>最近工作 sessions</span><small>最近 10 个 · 全部模型</small>
-        </div>
-        <div class="cp-session-list">
-          {#each data.recent as s}<button
-              class="cp-sessionrow"
-              aria-pressed={selectedSession === s.meta.id}
-              onclick={() => (selectedSession = s.meta.id)}
-              ><span
-                ><span class="cp-truncate"
-                  >{s.meta.title ?? s.meta.project ?? s.meta.id.slice(0, 8)}</span
-                ><span>{number(s.total)} tokens</span></span
-              ><span
-                ><span class="cp-truncate"
-                  >{s.models.join(' · ') || '模型未知'} · {s.sources.join(' / ')}</span
-                ><span>{time(s.meta.last_activity)}</span></span
-              ></button
-            >{:else}<p class="cp-note">还没有采集到 session 元数据。</p>{/each}
-        </div>
-        {#if session}<section class="cp-detail">
-            <div class="cp-sectionhead">
-              <span>{session.meta.title ?? session.meta.project ?? 'Session 详情'}</span><small
-                >{session.meta.status === 'active'
-                  ? '运行中'
-                  : session.meta.status === 'completed'
-                    ? '已完成'
-                    : '状态未知'}</small
-              >
-            </div>
-            <div class="cp-metrics">
-              <div><span>Session tokens</span><strong>{number(session.total)}</strong></div>
-              <div>
-                <span>美元估算</span><strong
-                  >{money(session.cost_nanousd, session.unpriced_tokens)}</strong
-                >
-              </div>
-              <div><span>输出速度</span><strong>— <small>tok/s</small></strong></div>
-            </div>
-            <p class="cp-note">
-              Session ID：{session.meta.id}{session.meta.parent_id
-                ? ` · 继承自 ${session.meta.parent_id}`
-                : ''}
-            </p>
-            <p class="cp-note">日志不提供连续输出 token 样本。</p>
-          </section>{/if}
+        <SessionsPane
+          bind:query={sessionQuery}
+          bind:selected={selectedSession}
+          revision={data.updated_at}
+        />
       {:else if page === 'news'}
         <div class="cp-sectionhead">
           <span>消息与额度恢复</span><small
@@ -515,7 +542,22 @@
         <ResetStatus news={data.news} {now} />
         <ChallengePanel news={data.news} {now} />
         <div class="cp-sectionhead"><span>重置公告与历史</span><small>公开消息</small></div>
-        {#each data.news?.items ?? [] as item}<NewsCard {item} {now} />{:else}<p class="cp-note">
+        {#if unreadKeys.length}<div class="cp-sectionhead">
+            <span
+              >{importantUnread
+                ? `${importantUnread} 条重要重置消息`
+                : `${unreadKeys.length} 条新动态`}</span
+            ><button class="cp-textbutton" onclick={() => void acknowledgeNews()}
+              >全部标为已读</button
+            >
+          </div>{/if}
+        {#each data.news?.items ?? [] as item (`${item.kind}:${item.id}`)}<NewsCard
+            {item}
+            {now}
+            unread={unreadKeys.includes(
+              `${item.kind[0].toUpperCase()}${item.kind.slice(1)}:${item.id}`,
+            )}
+          />{:else}<p class="cp-note">
             暂时没有消息。公共接口每 5 分钟同步，遇到限流等待服务器指定时间。
           </p>{/each}
         <p class="cp-note">消息出现不代表当前账户已恢复；账户恢复需要额度快照确认。</p>

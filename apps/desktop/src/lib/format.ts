@@ -20,3 +20,30 @@ export function untilReset(window: QuotaWindow, now: number) {
       ? `${hours} 小时 ${minutes % 60} 分钟后刷新`
       : `${minutes} 分钟后刷新`;
 }
+import type { RecentSession, Snapshot } from './types';
+export function sessionActivity(data: Pick<Snapshot, 'recent' | 'sources'>, now: number) {
+  const connected = (id: string) =>
+    data.sources.some((s) => s.id === id && s.status === 'connected');
+  const sessions = data.recent.filter(
+    (s) =>
+      s.meta.status === 'active' &&
+      now - Date.parse(s.meta.last_activity) >= 0 &&
+      now - Date.parse(s.meta.last_activity) <= 5 * 60 * 1000 &&
+      s.sources.some(connected),
+  );
+  const working = sessions[0];
+  const state = working
+    ? 'busy'
+    : data.recent.some((s) => s.meta.status === 'active') ||
+        !data.sources.some((s) => s.status === 'connected')
+      ? 'unknown'
+      : 'idle';
+  return { working, sessions, state };
+}
+export function sessionTokens(
+  session: RecentSession | undefined,
+  format: (n: number) => string,
+): string {
+  if (!session || session.events === 0 || session.events === session.unknown_totals) return '—';
+  return format(session.total) + (session.unknown_totals ? '*' : '');
+}

@@ -112,6 +112,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         100,
     );
     let database_bytes = std::fs::metadata(directory.path().join("benchmark.sqlite"))?.len();
+    let page = measure(
+        || {
+            black_box(store.session_page(&Default::default(), timezone).unwrap());
+        },
+        100,
+    );
+    let id = store.recent_sessions(None, 1)?[0].meta.id.clone();
+    let detail = measure(
+        || {
+            black_box(
+                store
+                    .session_detail(&pulse_core::storage::SessionDetailRequest {
+                        id: id.clone(),
+                        models_after: None,
+                        prices_after: None,
+                    })
+                    .unwrap()
+                    .unwrap(),
+            );
+        },
+        100,
+    );
     println!(
         "{}",
         serde_json::to_string_pretty(&serde_json::json!({
@@ -122,6 +144,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "timezone":timezone.name(), "generated_at":Utc::now().to_rfc3339(),
             "load_seconds":load_seconds, "database_bytes":database_bytes,
             "summary_30_days":summary, "recent_10_sessions":recent,
+            "session_page":page, "session_detail":detail,
             "correctness": "100k unique facts, 10k distinct sessions, cached input counted once, 30 calendar buckets verified"
         }))?
     );

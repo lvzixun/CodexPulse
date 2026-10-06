@@ -19,6 +19,8 @@ pub struct ViewState {
     pub page: String,
     pub selected_model: Option<String>,
     pub selected_session: Option<String>,
+    #[serde(default)]
+    pub session_query: pulse_core::storage::SessionPageRequest,
     pub scroll: std::collections::BTreeMap<String, f64>,
     pub glass_supported: bool,
     pub floating_supported: bool,
@@ -30,6 +32,7 @@ impl Default for ViewState {
             page: "overview".into(),
             selected_model: None,
             selected_session: None,
+            session_query: Default::default(),
             scroll: Default::default(),
             glass_supported: false,
             floating_supported: cfg!(windows),
@@ -74,11 +77,29 @@ impl WindowsWindowHost {
         {
             return Err("界面状态无效".into());
         }
+        let query = &next.session_query;
+        if query
+            .filter
+            .model
+            .as_ref()
+            .is_some_and(|s| s.is_empty() || s.len() > 256)
+            || [&query.filter.from_day, &query.filter.through_day]
+                .into_iter()
+                .flatten()
+                .any(|s| s.len() != 10 || chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").is_err())
+            || query
+                .cursor
+                .as_ref()
+                .is_some_and(|c| c.id.is_empty() || c.id.len() > 256 || c.activity.len() > 64)
+        {
+            return Err("Session 页面范围无效".into());
+        }
         let mut view = self.view.lock().map_err(|_| "界面状态不可用")?;
         // The host owns mode/material/platform capabilities; the renderer owns navigation.
         view.page = next.page;
         view.selected_model = next.selected_model;
         view.selected_session = next.selected_session;
+        view.session_query = next.session_query;
         view.scroll = next.scroll;
         Ok(())
     }

@@ -9,7 +9,12 @@ use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use std::{path::Path, time::Duration};
 mod queries;
+mod sessions;
 pub use queries::{DayUsage, RecentSession, UsageSummary};
+pub use sessions::{
+    PageDirection, PriceCoverage, SessionCursor, SessionDetail, SessionDetailRequest,
+    SessionFilter, SessionModel, SessionPage, SessionPageRequest, TokenMeasure, UsageBreakdown,
+};
 
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
@@ -23,6 +28,8 @@ pub enum StoreError {
     Time,
     #[error("database schema is newer than this application supports")]
     NewerSchema,
+    #[error("invalid query parameters")]
+    Query,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -67,15 +74,49 @@ impl Store {
             [],
             |row| row.get(0),
         )?;
-        if version > 2 {
+        if version > 3 {
             return Err(StoreError::NewerSchema);
         }
-        if version < 2 {
+        if version < 3 {
             let tx = connection.transaction()?;
             if version < 1 {
                 tx.execute_batch(include_str!("../../migrations/001.sql"))?;
             }
-            tx.execute_batch(include_str!("../../migrations/002-query-indexes.sql"))?;
+            if version < 2 {
+                tx.execute_batch(include_str!("../../migrations/002-query-indexes.sql"))?;
+            }
+            tx.execute_batch(include_str!("../../migrations/003-session-integrity.sql"))?;
+            // Normalize legacy sort keys in bounded batches, including metadata used by cursors.
+            let mut after: Option<String> = None;
+            loop {
+                let rows = {
+                    let mut query = tx.prepare("SELECT id,metadata,last_activity FROM sessions WHERE (?1 IS NULL OR id>?1) ORDER BY id LIMIT 128")?;
+                    query
+                        .query_map([&after], |row| {
+                            Ok((
+                                row.get::<_, String>(0)?,
+                                row.get::<_, String>(1)?,
+                                row.get::<_, String>(2)?,
+                            ))
+                        })?
+                        .collect::<Result<Vec<_>, _>>()?
+                };
+                if rows.is_empty() {
+                    break;
+                }
+                for (id, json, activity) in &rows {
+                    let mut meta: SessionMeta = serde_json::from_str(json)?;
+                    let canonical = canonical_activity(activity);
+                    if *activity != canonical || meta.last_activity != canonical {
+                        meta.last_activity = canonical.clone();
+                        tx.execute(
+                            "UPDATE sessions SET metadata=?2,last_activity=?3 WHERE id=?1",
+                            params![id, serde_json::to_string(&meta)?, canonical],
+                        )?;
+                    }
+                }
+                after = rows.last().map(|r| r.0.clone());
+            }
             tx.commit()?;
         }
         Ok(Self { connection })
@@ -119,7 +160,9 @@ impl Store {
             i64::try_from(cursor.offset).map_err(|_| crate::domain::DataError::Overflow)?;
         let tx = self.connection.transaction()?;
         for session in sessions {
-            tx.execute("INSERT INTO sessions(id,metadata,last_activity) VALUES (?1,?2,?3) ON CONFLICT(id) DO UPDATE SET metadata=excluded.metadata,last_activity=excluded.last_activity WHERE excluded.last_activity>=sessions.last_activity",params![session.id,serde_json::to_string(session)?,session.last_activity])?;
+            let mut session = session.clone();
+            session.last_activity = canonical_activity(&session.last_activity);
+            tx.execute("INSERT INTO sessions(id,metadata,last_activity) VALUES (?1,?2,?3) ON CONFLICT(id) DO UPDATE SET metadata=excluded.metadata,last_activity=excluded.last_activity WHERE excluded.last_activity>=sessions.last_activity",params![session.id,serde_json::to_string(&session)?,session.last_activity])?;
             tx.execute(
                 "INSERT OR IGNORE INTO source_sessions VALUES (?1,?2)",
                 params![cursor.source_id, session.id],
@@ -205,6 +248,15 @@ impl Store {
 fn unsigned(row: &rusqlite::Row<'_>, index: usize) -> rusqlite::Result<u64> {
     let value = row.get::<_, i64>(index)?;
     u64::try_from(value).map_err(|_| rusqlite::Error::IntegralValueOutOfRange(index, value))
+}
+
+fn canonical_activity(value: &str) -> String {
+    DateTime::parse_from_rfc3339(value)
+        .map(|dt| {
+            dt.with_timezone(&chrono::Utc)
+                .to_rfc3339_opts(chrono::SecondsFormat::Nanos, true)
+        })
+        .unwrap_or_default()
 }
 
 fn boundary(day: chrono::NaiveDate, timezone: Tz) -> Result<String, StoreError> {

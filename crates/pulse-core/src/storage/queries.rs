@@ -18,6 +18,8 @@ pub struct RecentSession {
     pub models: Vec<String>,
     pub sources: Vec<String>,
     pub total: u64,
+    pub events: u64,
+    pub unknown_totals: u64,
     pub cost_nanousd: i64,
     pub unpriced_tokens: u64,
 }
@@ -117,36 +119,14 @@ impl Store {
         limit: u32,
     ) -> Result<Vec<RecentSession>, StoreError> {
         let (time, id) = before.unwrap_or(("9999", "~"));
-        let mut query=self.connection.prepare("SELECT id,metadata,COALESCE((SELECT SUM(total) FROM session_model_usage m WHERE m.session_id=s.id),0),COALESCE((SELECT SUM(cost_nanousd) FROM session_model_usage m WHERE m.session_id=s.id),0),COALESCE((SELECT SUM(unpriced_tokens) FROM session_model_usage m WHERE m.session_id=s.id),0) FROM sessions s WHERE (last_activity,id)<(?1,?2) ORDER BY last_activity DESC,id DESC LIMIT ?3")?;
-        let rows = query.query_map(params![time, id, limit.clamp(1, 100)], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                unsigned(row, 2)?,
-                row.get::<_, i64>(3)?,
-                unsigned(row, 4)?,
-            ))
-        })?;
-        let mut result = Vec::new();
-        for row in rows {
-            let (id, json, total, cost, unpriced) = row?;
-            let mut models=self.connection.prepare("SELECT model FROM session_model_usage WHERE session_id=?1 ORDER BY total DESC,model")?;
-            let mut sources = self.connection.prepare(
-                "SELECT source_id FROM source_sessions WHERE session_id=?1 ORDER BY source_id",
-            )?;
-            result.push(RecentSession {
-                meta: serde_json::from_str(&json)?,
-                models: models
-                    .query_map([&id], |r| r.get(0))?
-                    .collect::<Result<_, _>>()?,
-                sources: sources
-                    .query_map([&id], |r| r.get(0))?
-                    .collect::<Result<_, _>>()?,
-                total,
-                cost_nanousd: cost,
-                unpriced_tokens: unpriced,
-            });
-        }
-        Ok(result)
+        let mut query=self.connection.prepare("SELECT id FROM sessions WHERE (last_activity,id)<(?1,?2) ORDER BY last_activity DESC,id DESC LIMIT ?3")?;
+        let ids = query
+            .query_map(params![time, id, limit.clamp(1, 100)], |r| {
+                r.get::<_, String>(0)
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        ids.iter()
+            .map(|id| self.session_by_id(id)?.ok_or(StoreError::Query))
+            .collect()
     }
 }

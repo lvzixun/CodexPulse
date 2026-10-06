@@ -762,9 +762,56 @@ body {
   color: var(--cp-accent) !important;
   cursor: grab;
   flex-shrink: 0;
-  width: 18px;
+  width: 23px;
   height: 26px;
   opacity: 0.65;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+}
+.cp-activity-dot {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.cp-compact-drag.cp-working {
+  color: var(--cp-accent) !important;
+}
+.cp-compact-drag.cp-unknown {
+  color: var(--cp-muted) !important;
+}
+.cp-news-indicator {
+  display: inline-block;
+  flex-shrink: 0;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--cp-accent);
+}
+.cp-reset-alert {
+  color: var(--cp-amber);
+  margin-left: auto;
+  font-weight: 700;
+}
+.cp-reset-alert .cp-news-indicator {
+  background: currentColor;
+  margin-left: 3px;
+}
+.cp-important-news .cp-tag {
+  color: var(--cp-amber);
+}
+.cp-unread-news {
+  border-left: 2px solid var(--cp-accent);
+  padding-left: 10px;
+}
+.cp-important-news.cp-unread-news {
+  border-left-color: var(--cp-amber);
+}
+.cp-translation-source {
+  display: block;
+  margin-bottom: 6px;
 }
 .cp-compact-drag.cp-working {
   opacity: 1;
@@ -901,6 +948,51 @@ body {
 .cp-modelrow:hover,
 .cp-sessionrow:hover {
   color: var(--accent);
+}
+.cp-pager {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 12px 0;
+}
+.cp-pager button {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  padding: 4px 0;
+  color: var(--cp-accent);
+}
+.cp-pager button:disabled {
+  cursor: default;
+  color: var(--cp-muted);
+  opacity: 0.5;
+}
+.cp-session-model {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--cp-line);
+}
+.cp-session-model .cp-sectionhead {
+  margin-bottom: 4px;
+}
+.cp-price {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--cp-line);
+}
+.cp-price summary {
+  cursor: pointer;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.cp-price summary small {
+  display: block;
+  margin-top: 4px;
+}
+.cp-price .cp-note {
+  margin-top: 7px;
+}
+.cp-id {
+  overflow-wrap: anywhere;
 }
 .cp-bucket-label {
   margin: 14px 0 9px;

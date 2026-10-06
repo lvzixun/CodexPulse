@@ -22,6 +22,7 @@ export interface ViewState {
   page: string;
   selected_model: string | null;
   selected_session: string | null;
+  session_query: SessionPageRequest;
   scroll: Record<string, number>;
   glass_supported: boolean;
   floating_supported: boolean;
@@ -58,8 +59,83 @@ export interface RecentSession {
   models: string[];
   sources: string[];
   total: number;
+  events: number;
+  unknown_totals: number;
   cost_nanousd: number;
   unpriced_tokens: number;
+}
+export interface SessionCursor {
+  activity: string;
+  id: string;
+}
+export interface SessionFilter {
+  model: string | null;
+  from_day: string | null;
+  through_day: string | null;
+}
+export interface SessionPageRequest {
+  filter: SessionFilter;
+  cursor: SessionCursor | null;
+  direction: 'older' | 'newer';
+}
+export interface SessionPage {
+  items: RecentSession[];
+  older: SessionCursor | null;
+  newer: SessionCursor | null;
+}
+export interface TokenMeasure {
+  known: number;
+  unknown_events: number;
+}
+export interface UsageBreakdown {
+  events: number;
+  total: TokenMeasure;
+  input: TokenMeasure;
+  cached: TokenMeasure;
+  output: TokenMeasure;
+  reasoning: TokenMeasure;
+  cache_write: TokenMeasure;
+  cost_nanousd: number;
+  unpriced_tokens: number;
+  unpriced_events: number;
+  started_at: string | null;
+  ended_at: string | null;
+}
+export interface SessionDetailRequest {
+  id: string;
+  models_after: string | null;
+  prices_after: string | null;
+}
+export interface SessionDetail {
+  session: RecentSession;
+  usage: UsageBreakdown;
+  models: { model: string; usage: UsageBreakdown }[];
+  models_next: string | null;
+  prices: {
+    version: string | null;
+    events: number;
+    tokens: number;
+    unknown_totals: number;
+    cost_nanousd: number;
+    reference: PriceReference | null;
+  }[];
+  prices_next: string | null;
+}
+export interface PriceReference {
+  version: string;
+  provider: string;
+  model: string;
+  service_tier: string;
+  effective_from: string;
+  effective_to: string | null;
+  min_input: number | null;
+  max_input: number | null;
+  input_microusd: number;
+  cached_microusd: number;
+  cache_write_microusd: number | null;
+  output_microusd: number;
+  source_url: string;
+  checked_at: string;
 }
 export interface SourceHealth {
   id: string;
@@ -72,6 +148,8 @@ export interface SourceHealth {
 }
 export interface Snapshot {
   news: {
+    unread_keys: string[];
+    important_unread: number;
     items: NewsItem[];
     status: string;
     last_success: string | null;

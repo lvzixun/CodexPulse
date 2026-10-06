@@ -115,14 +115,31 @@ pub enum Message {
     Settings(Settings, tokio::sync::oneshot::Sender<Result<(), String>>),
     Quotas(Vec<crate::rpc::ResultSet>),
     News(Box<crate::news::Feed>),
+    ReadNews(
+        Vec<String>,
+        tokio::sync::oneshot::Sender<Result<(), String>>,
+    ),
+    SessionPage(
+        pulse_core::storage::SessionPageRequest,
+        tokio::sync::oneshot::Sender<Result<pulse_core::storage::SessionPage, String>>,
+    ),
+    SessionDetail(
+        pulse_core::storage::SessionDetailRequest,
+        tokio::sync::oneshot::Sender<Result<Option<pulse_core::storage::SessionDetail>, String>>,
+    ),
 }
 enum NetworkRequest {
     Quotas(crate::rpc::Request),
     News(Box<crate::news::Feed>),
+    Translation(
+        Vec<String>,
+        tokio::sync::oneshot::Sender<Result<String, String>>,
+    ),
 }
 pub struct Backend {
     pub snapshot: Arc<RwLock<Snapshot>>,
     pub sender: SyncSender<Message>,
+    network_sender: SyncSender<NetworkRequest>,
     stopping: Arc<AtomicBool>,
     active_child: crate::rpc::ActiveChild,
     pending_anchor: Arc<Mutex<Option<(crate::geometry::Anchor, Instant)>>>,
@@ -145,10 +162,13 @@ impl Backend {
             // Refresh legacy caches once so the newly added challenge is available.
             news.next_attempt = 0;
         }
+        let inbox = store
+            .setting::<crate::inbox::Inbox>("news_inbox")?
+            .unwrap_or_default();
         let snapshot = Arc::new(RwLock::new(Snapshot {
             settings: settings.clone(),
             quota: quota.clone(),
-            news: news.view(),
+            news: inbox.view(news.view()),
             usage: store.summary(
                 Utc::now()
                     .with_timezone(&settings.timezone.parse::<Tz>().unwrap_or(chrono_tz::UTC))
@@ -168,12 +188,17 @@ impl Backend {
         let collector_anchor = pending_anchor.clone();
         let worker_child = active_child.clone();
         let (rpc_sender, rpc_receiver) = mpsc::sync_channel::<NetworkRequest>(1);
+        let network_sender = rpc_sender.clone();
         let replies = sender.clone();
         thread::Builder::new()
             .name("pulse-network".into())
             .spawn(move || {
+                let mut translator = crate::news::Translator::default();
                 while !worker_stop.load(Ordering::Relaxed) {
                     match rpc_receiver.recv_timeout(Duration::from_millis(300)) {
+                        Ok(NetworkRequest::Translation(keys, reply)) => {
+                            let _ = reply.send(translator.translate(&keys));
+                        }
                         Ok(NetworkRequest::News(feed)) => {
                             let feed = crate::news::fetch(*feed);
                             if !worker_stop.load(Ordering::Relaxed) {
@@ -230,6 +255,7 @@ impl Backend {
                 let mut dirty = true;
                 let mut quota = quota;
                 let mut news = news;
+                let mut inbox = inbox;
                 let mut news_in_flight = false;
                 let mut quota_in_flight = false;
                 let mut last_quota = Instant::now() - Duration::from_secs(3600);
@@ -261,9 +287,42 @@ impl Backend {
                     }
                     crate::platform::release_hidden(&app);
                     match receiver.recv_timeout(Duration::from_millis(300)) {
+                        Ok(Message::ReadNews(keys, reply)) => {
+                            let mut next = inbox.clone();
+                            next.acknowledge(&keys);
+                            let result = store
+                                .set_setting("news_inbox", &next)
+                                .map_err(|_| "无法保存已读状态".into());
+                            if result.is_ok() {
+                                inbox = next;
+                                dirty = true;
+                            }
+                            let _ = reply.send(result);
+                        }
+                        Ok(Message::SessionPage(request, reply)) => {
+                            let result = settings
+                                .timezone
+                                .parse::<chrono_tz::Tz>()
+                                .map_err(|_| "统计时区无效".into())
+                                .and_then(|tz| {
+                                    store
+                                        .session_page(&request, tz)
+                                        .map_err(|_| "无法读取 session 历史".into())
+                                });
+                            let _ = reply.send(result);
+                        }
+                        Ok(Message::SessionDetail(request, reply)) => {
+                            let _ = reply.send(
+                                store
+                                    .session_detail(&request)
+                                    .map_err(|_| "无法读取 session 详情".into()),
+                            );
+                        }
                         Ok(Message::News(next)) => {
                             news_in_flight = false;
                             news = *next;
+                            inbox.update(&news);
+                            let _ = store.set_setting("news_inbox", &inbox);
                             let _ = store.set_setting("news", &news.for_storage());
                             dirty = true;
                         }
@@ -509,7 +568,7 @@ impl Backend {
                         let recent = store.recent_sessions(None, 10);
                         if let Ok(mut state) = shared.write() {
                             state.settings = settings.clone();
-                            state.news = news.view();
+                            state.news = inbox.view(news.view());
                             state.collecting = !queue.is_empty();
                             state.sources = sources.iter().map(|s| s.health.clone()).collect();
                             let live = quota
@@ -553,11 +612,45 @@ impl Backend {
         Ok(Self {
             snapshot,
             sender,
+            network_sender,
             stopping,
             active_child,
             pending_anchor,
             database: db,
         })
+    }
+    pub async fn translate(&self, id: &str) -> Result<String, String> {
+        let keys = {
+            let state = self.snapshot.read().map_err(|_| "消息暂不可用")?;
+            let item = state
+                .news
+                .items
+                .iter()
+                .find(|item| item.id == id)
+                .ok_or("消息已更新，请刷新后重试")?;
+            let mut keys = vec![item.id.clone()];
+            if let Some(url) = item
+                .source_url
+                .as_deref()
+                .and_then(|u| url::Url::parse(u).ok())
+                && matches!(url.host_str(), Some("x.com" | "twitter.com"))
+                && let Some(post) = url.path().strip_prefix("/thsottiaux/status/")
+                && !post.is_empty()
+                && post.len() <= 32
+                && post.bytes().all(|b| b.is_ascii_digit())
+            {
+                keys.push(post.into());
+            }
+            keys
+        };
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        self.network_sender
+            .try_send(NetworkRequest::Translation(keys, tx))
+            .map_err(|_| "同步器繁忙，请稍后重试")?;
+        tokio::time::timeout(Duration::from_secs(45), rx)
+            .await
+            .map_err(|_| "翻译查询超时，请重试")?
+            .map_err(|_| "同步器已停止")?
     }
     pub fn remember_anchor(&self, anchor: crate::geometry::Anchor) {
         if let Ok(mut pending) = self.pending_anchor.lock() {

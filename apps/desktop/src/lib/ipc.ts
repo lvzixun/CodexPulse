@@ -1,9 +1,19 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import type { Snapshot, Settings, ViewState } from './types';
+import type {
+  Snapshot,
+  Settings,
+  ViewState,
+  SessionPageRequest,
+  SessionPage,
+  SessionDetailRequest,
+  SessionDetail,
+} from './types';
 export const native = isTauri();
 export const empty: Snapshot = {
   news: {
+    unread_keys: [],
+    important_unread: 0,
     items: [],
     status: '',
     last_success: null,
@@ -69,7 +79,24 @@ export const openSource = (url: string) =>
   native
     ? invoke<void>('open_source', { url })
     : Promise.reject(new Error('请在桌面应用中打开来源'));
+export const translateNews = (id: string) =>
+  native
+    ? invoke<string>('translate_news', { id })
+    : Promise.reject(new Error('翻译仅在桌面应用中可用'));
+export const readNews = (keys: string[]) =>
+  native ? invoke<void>('read_news', { keys }) : Promise.resolve();
 export const getViewState = () =>
   native ? invoke<ViewState>('get_view_state') : Promise.resolve(null);
 export const rememberView = (view: ViewState) =>
   native ? invoke<void>('remember_view', { view }) : Promise.resolve();
+export const sessionPage = (request: SessionPageRequest) =>
+  native
+    ? invoke<SessionPage>('get_session_page', { request })
+    : Promise.resolve({ items: [], older: null, newer: null });
+export const sessionDetail = (request: SessionDetailRequest) =>
+  native ? invoke<SessionDetail | null>('get_session_detail', { request }) : Promise.resolve(null);
+export const defaultSessionQuery = (): SessionPageRequest => ({
+  filter: { model: null, from_day: null, through_day: null },
+  cursor: null,
+  direction: 'older',
+});

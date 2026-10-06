@@ -1,9 +1,46 @@
 <script lang="ts">
   import type { NewsItem } from '../lib/types';
-  import { openSource } from '../lib/ipc';
+  import { openSource, translateNews } from '../lib/ipc';
   import Icon from './Icon.svelte';
-  let { item, now }: { item: NewsItem; now: number } = $props();
+  let { item, now, unread = false }: { item: NewsItem; now: number; unread?: boolean } = $props();
   let error = $state('');
+  let translated = $state('');
+  let showTranslation = $state(false);
+  let translating = $state(false);
+  const translationKey = $derived(`${item.id}|${item.text}`);
+  const important = $derived(
+    (item.kind === 'announcement' || item.kind === 'scheduled') &&
+      item.author === 'thsottiaux' &&
+      item.source_type === 'x_post' &&
+      (item.reset_type === 'regular' || item.reset_type === 'banked'),
+  );
+  $effect(() => {
+    translationKey;
+    translated = '';
+    showTranslation = false;
+    error = '';
+  });
+  async function translate() {
+    if (translated) {
+      showTranslation = !showTranslation;
+      return;
+    }
+    const id = item.id;
+    const original = item.text;
+    translating = true;
+    error = '';
+    try {
+      const text = await translateNews(id);
+      if (item.id === id && item.text === original) {
+        translated = text;
+        showTranslation = true;
+      }
+    } catch (e) {
+      if (item.id === id) error = String(e);
+    } finally {
+      translating = false;
+    }
+  }
   const label = {
     announcement: '公告',
     scheduled: '计划',
@@ -32,16 +69,25 @@
   }
 </script>
 
-<article class="cp-news-item">
-  <span class="cp-tag">{label[item.kind]}{expired ? ' · 已过期' : ''}</span>
+<article class="cp-news-item" class:cp-important-news={important} class:cp-unread-news={unread}>
+  <span class="cp-tag"
+    >{important
+      ? item.kind === 'scheduled'
+        ? '重要 · 重置计划'
+        : '重要 · 重置公告'
+      : label[item.kind]}{unread ? ' · 新' : ''}{expired ? ' · 已过期' : ''}</span
+  >
   <h3>
     {item.kind === 'forecast'
       ? '重置预测信号'
       : item.reset_type === 'banked'
         ? '备用重置额度'
-        : '额度重置消息'}
+        : important
+          ? '额度重置消息'
+          : 'Codex 动态'}
   </h3>
-  <p>{item.text}</p>
+  <p>{showTranslation ? translated : item.text}</p>
+  {#if showTranslation}<small class="cp-translation-source">中文译文 · Codex Resets</small>{/if}
   {#if item.kind === 'scheduled'}<p class="cp-note">
       {item.scheduled_for
         ? `计划时间：${time(item.scheduled_for)}`
@@ -60,5 +106,14 @@
   >{#if item.source_url}<button class="cp-textbutton" onclick={() => void source()}
       >查看原文 <Icon name="external" /></button
     >{/if}
+  <button class="cp-textbutton" disabled={translating} onclick={() => void translate()}
+    >{translating
+      ? '翻译中…'
+      : showTranslation
+        ? '显示原文'
+        : translated
+          ? '显示译文'
+          : '翻译'}</button
+  >
   {#if error}<p class="cp-note" role="status">{error}</p>{/if}
 </article>

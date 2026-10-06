@@ -1,6 +1,7 @@
-#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+#![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
 mod backend;
 mod geometry;
+mod inbox;
 mod material;
 mod news;
 mod platform;
@@ -18,8 +19,10 @@ fn open_source(url: String, app: tauri::AppHandle) -> Result<(), String> {
         || parsed.password().is_some()
         || !matches!(
             parsed.host_str(),
-            Some("codex-resets.com" | "x.com" | "twitter.com")
+            Some("codex-resets.com" | "x.com" | "twitter.com" | "developers.openai.com")
         )
+        || parsed.host_str() == Some("developers.openai.com")
+            && parsed.path() != "/api/docs/pricing"
     {
         return Err("来源地址不在允许的消息站点中".into());
     }
@@ -35,6 +38,55 @@ fn get_snapshot(state: State<'_, Backend>) -> Result<Snapshot, String> {
         .read()
         .map(|s| s.clone())
         .map_err(|_| "snapshot unavailable".into())
+}
+#[tauri::command]
+async fn translate_news(id: String, state: State<'_, Backend>) -> Result<String, String> {
+    state.translate(&id).await
+}
+#[tauri::command]
+async fn read_news(keys: Vec<String>, state: State<'_, Backend>) -> Result<(), String> {
+    if keys.len() > 256 || keys.iter().any(|key| key.len() > 512) {
+        return Err("消息列表无效".into());
+    }
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    state
+        .sender
+        .try_send(backend::Message::ReadNews(keys, tx))
+        .map_err(|_| "采集器繁忙，请稍后重试")?;
+    tokio::time::timeout(std::time::Duration::from_secs(15), rx)
+        .await
+        .map_err(|_| "保存超时，请稍后重试")?
+        .map_err(|_| "采集器已停止")?
+}
+#[tauri::command]
+async fn get_session_page(
+    request: pulse_core::storage::SessionPageRequest,
+    state: State<'_, Backend>,
+) -> Result<pulse_core::storage::SessionPage, String> {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    state
+        .sender
+        .try_send(backend::Message::SessionPage(request, tx))
+        .map_err(|_| "采集器繁忙，请稍后重试".to_string())?;
+    tokio::time::timeout(std::time::Duration::from_secs(15), rx)
+        .await
+        .map_err(|_| "查询超时，请稍后重试".to_string())?
+        .map_err(|_| "采集器已停止".to_string())?
+}
+#[tauri::command]
+async fn get_session_detail(
+    request: pulse_core::storage::SessionDetailRequest,
+    state: State<'_, Backend>,
+) -> Result<Option<pulse_core::storage::SessionDetail>, String> {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    state
+        .sender
+        .try_send(backend::Message::SessionDetail(request, tx))
+        .map_err(|_| "采集器繁忙，请稍后重试".to_string())?;
+    tokio::time::timeout(std::time::Duration::from_secs(15), rx)
+        .await
+        .map_err(|_| "查询超时，请稍后重试".to_string())?
+        .map_err(|_| "采集器已停止".to_string())?
 }
 #[tauri::command]
 fn get_view_state(
@@ -73,6 +125,7 @@ async fn set_settings(
 async fn window_action(action: String, app: tauri::AppHandle) -> Result<(), String> {
     match action.as_str() {
         "expand" => platform::show_details(&app, None),
+        "news" => platform::show_details(&app, Some("news")),
         "compact" => platform::compact_or_hide(&app),
         "settings" => platform::show_details(&app, Some("settings")),
         "exit" => app.exit(0),
@@ -89,6 +142,10 @@ fn main() {
         }))
         .invoke_handler(tauri::generate_handler![
             get_snapshot,
+            translate_news,
+            read_news,
+            get_session_page,
+            get_session_detail,
             set_settings,
             window_action,
             open_source,

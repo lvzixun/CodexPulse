@@ -33,7 +33,7 @@ fn legacy_schema_upgrades_and_newer_schema_is_rejected() {
             .query_row("SELECT MAX(version) FROM schema_version", [], |r| r
                 .get::<_, u32>(0))
             .unwrap(),
-        2
+        3
     );
     assert_eq!(
         connection
@@ -49,4 +49,44 @@ fn legacy_schema_upgrades_and_newer_schema_is_rejected() {
         .execute("INSERT INTO schema_version VALUES(999)", [])
         .unwrap();
     assert!(matches!(Store::open(&path), Err(StoreError::NewerSchema)));
+}
+
+#[test]
+fn legacy_activity_migration_normalizes_metadata_in_multiple_batches() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("activity.sqlite");
+    let connection = Connection::open(&path).unwrap();
+    connection
+        .execute_batch(include_str!("../migrations/001.sql"))
+        .unwrap();
+    connection
+        .execute_batch(include_str!("../migrations/002-query-indexes.sql"))
+        .unwrap();
+    for i in 0..260 {
+        let meta = pulse_core::domain::SessionMeta {
+            id: format!("s{i:03}"),
+            last_activity: "2026-10-01T08:00:00+08:00".into(),
+            ..Default::default()
+        };
+        connection
+            .execute(
+                "INSERT INTO sessions VALUES (?1,?2,?3)",
+                rusqlite::params![
+                    meta.id,
+                    serde_json::to_string(&meta).unwrap(),
+                    meta.last_activity
+                ],
+            )
+            .unwrap();
+    }
+    drop(connection);
+    let store = Store::open(&path).unwrap();
+    for id in ["s000", "s127", "s128", "s259"] {
+        assert_eq!(
+            store.session_by_id(id).unwrap().unwrap().meta.last_activity,
+            "2026-10-01T00:00:00.000000000Z"
+        );
+    }
+    let connection = Connection::open(&path).unwrap();
+    assert_eq!(connection.query_row("SELECT COUNT(*) FROM sessions WHERE last_activity='2026-10-01T00:00:00.000000000Z'",[],|r| r.get::<_,u32>(0)).unwrap(),260);
 }

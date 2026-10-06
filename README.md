@@ -6,6 +6,8 @@ Windows 首发，支持 Windows Codex App 与 WSL Codex CLI 的数据采集；�
 
 Windows 的浮窗和托盘共用一个详情窗口，浮窗可关闭，托盘右键只显示设置、退出等简洁操作。macOS 设计为菜单栏图标及其详情面板，属于后续阶段。界面跟随系统主题，默认蓝色，设置可选蓝色、紫色、青绿、琥珀或玫红，并提供原生毛玻璃材质及不透明回退。
 
+小浮窗显示工作状态、额度与当前 session tokens；有新的重要重置消息时优先显示重置提示。消息页提供站点中文译文 / 原文切换，session 页支持历史分页、模型分类和计价依据。
+
 ## 文档
 
 - [产品、UI 与技术设计案](docs/design/codexpulse-v1.md)
@@ -24,12 +26,13 @@ pnpm dev
 
 ```powershell
 pnpm check
-cargo test -p pulse-core
-cargo check -p codexpulse
+cargo test --workspace
+cargo clippy --workspace --all-targets -- -D warnings
+node --test apps/desktop/test/format.test.ts
 pnpm build
 ```
 
-`pnpm build` 构建 Windows NSIS 安装包。直接在浏览器运行前端时显示未连接状态；真实用量由桌面 Rust 采集器提供。
+`pnpm build` 构建 Windows NSIS 安装包，产物位于 `target/release/bundle/nsis`。从程序或快捷方式启动图形应用；`pnpm dev` 是终端中的开发命令。直接在浏览器运行前端时显示未连接状态；真实用量由桌面 Rust 采集器提供。
 
 ## 仓库布局
 
@@ -41,4 +44,4 @@ pnpm build
 - `scripts`：开发工具。
 - `work`：本机实验与临时数据，Git 忽略。
 
-当前是开发版本，尚未达到首版完整验收。已实现本地用量账本及桌面基础窗口；额度 RPC、消息服务、真实价格数据、通知、完整设置与性能验收仍在开发。具体进度见 [开发状态](docs/development/status.md)。设计中的性能数字是验收目标。
+当前是开发版本，尚未达到首版完整验收。已实现本地用量账本、共用桌面窗口、只读额度 RPC、公开消息 / Tibo 挑战、参考价格和 session 详情；通知、时区重建、完整来源设置、价格覆盖与性能验收仍在开发。具体进度见 [开发状态](docs/development/status.md)。设计中的性能数字是验收目标。

@@ -5,6 +5,15 @@ use sha2::{Digest, Sha256};
 
 mod challenge;
 pub use challenge::{Challenge, ChallengeDay, ChallengeEntry, challenge_page};
+mod translations;
+pub use translations::translations_page;
+
+pub fn important_reset(item: &NewsItem) -> bool {
+    matches!(item.kind, NewsKind::Announcement | NewsKind::Scheduled)
+        && item.source_type == "x_post"
+        && item.author.as_deref() == Some("thsottiaux")
+        && matches!(item.reset_type.as_deref(), Some("regular" | "banked"))
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]

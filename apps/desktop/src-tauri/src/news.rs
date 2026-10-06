@@ -34,6 +34,58 @@ pub struct Cache {
     pub no_store: bool,
 }
 type FetchError = (String, i64);
+#[derive(Default)]
+pub struct Translator {
+    cache: Cache,
+    next_attempt: i64,
+}
+impl Translator {
+    pub fn translate(&mut self, keys: &[String]) -> Result<String, String> {
+        let now = chrono::Utc::now().timestamp();
+        let mut failure = None;
+        if now >= self.next_attempt {
+            let agent: ureq::Agent = ureq::Agent::config_builder()
+                .timeout_global(Some(Duration::from_secs(10)))
+                .http_status_as_error(false)
+                .max_redirects(0)
+                .build()
+                .into();
+            match fetch_resource(
+                &agent,
+                "https://codex-resets.com/zh-CN",
+                &self.cache,
+                Resource::Translation,
+            ) {
+                Ok((cache, wait)) => {
+                    self.cache = cache;
+                    self.next_attempt = now.saturating_add(wait.max(300));
+                }
+                Err((_, wait)) => {
+                    failure = Some("中文译文暂时无法同步，请稍后重试");
+                    self.next_attempt = now.saturating_add(wait.max(300));
+                }
+            }
+        }
+        let text = keys
+            .iter()
+            .find_map(|key| self.cache.body.as_ref()?.get(key)?.as_str())
+            .map(str::to_owned);
+        // no-store permits use for this request only; do not serve it on a later click.
+        if self.cache.no_store {
+            self.cache = Cache::default();
+            self.next_attempt = 0;
+        }
+        text.ok_or_else(|| {
+            failure
+                .unwrap_or(if self.cache.body.is_none() {
+                    "中文译文暂时无法同步，请稍后重试"
+                } else {
+                    "这条消息暂未提供中文译文，可查看原文"
+                })
+                .into()
+        })
+    }
+}
 struct FeedUpdate {
     status: Cache,
     history: Cache,
@@ -42,6 +94,8 @@ struct FeedUpdate {
 }
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct NewsSnapshot {
+    pub unread_keys: Vec<String>,
+    pub important_unread: usize,
     pub items: Vec<NewsItem>,
     pub status: String,
     pub last_success: Option<String>,
@@ -72,6 +126,8 @@ impl Feed {
     }
     pub fn view(&self) -> NewsSnapshot {
         NewsSnapshot {
+            unread_keys: Vec::new(),
+            important_unread: 0,
             items: self.items.clone(),
             status: self.status.clone(),
             last_success: self.last_success.clone(),
@@ -165,7 +221,7 @@ pub fn fetch(mut old: Feed) -> Feed {
             &agent,
             "https://codex-resets.com/zh-CN/tibo-28",
             &old.challenge_cache,
-            true,
+            Resource::Challenge,
         ) {
             Ok((cache, wait)) => {
                 old.challenge_cache = cache;
@@ -185,20 +241,26 @@ pub fn fetch(mut old: Feed) -> Feed {
     old
 }
 fn fetch_endpoint(agent: &ureq::Agent, url: &str, old: &Cache) -> Result<(Cache, i64), FetchError> {
-    fetch_resource(agent, url, old, false)
+    fetch_resource(agent, url, old, Resource::Json)
+}
+#[derive(Clone, Copy)]
+enum Resource {
+    Json,
+    Challenge,
+    Translation,
 }
 fn fetch_resource(
     agent: &ureq::Agent,
     url: &str,
     old: &Cache,
-    challenge: bool,
+    resource: Resource,
 ) -> Result<(Cache, i64), FetchError> {
     let mut request = agent
         .get(url)
         .header("User-Agent", "CodexPulse/0.1.0 (+https://codex-resets.com)")
         .header(
             "Accept",
-            if challenge {
+            if !matches!(resource, Resource::Json) {
                 "text/html"
             } else {
                 "application/json"
@@ -258,11 +320,20 @@ fn fetch_resource(
             if bytes.len() > 512 * 1024 {
                 return Err(("body_too_large".into(), 300));
             }
-            let body = if challenge {
+            let body = if !matches!(resource, Resource::Json) {
                 let html = std::str::from_utf8(&bytes)
                     .map_err(|_| ("invalid_challenge_encoding".into(), 300))?;
-                let parsed = challenge_page(html).map_err(|code| (code.into(), 300))?;
-                serde_json::to_value(parsed).map_err(|_| ("invalid_challenge_data".into(), 300))?
+                match resource {
+                    Resource::Challenge => serde_json::to_value(
+                        challenge_page(html).map_err(|code| (code.into(), 300))?,
+                    ),
+                    Resource::Translation => serde_json::to_value(
+                        pulse_core::news::translations_page(html)
+                            .map_err(|code| (code.into(), 300))?,
+                    ),
+                    Resource::Json => unreachable!(),
+                }
+                .map_err(|_| ("invalid_page_data".into(), 300))?
             } else {
                 serde_json::from_slice(&bytes).map_err(|_| ("invalid_json".into(), 300))?
             };
@@ -329,7 +400,8 @@ mod tests {
             page.len(),
             page
         ));
-        let (cache, _) = fetch_resource(&agent(), &url, &Cache::default(), true).unwrap();
+        let (cache, _) =
+            fetch_resource(&agent(), &url, &Cache::default(), Resource::Challenge).unwrap();
         server.join().unwrap();
         assert!(cache.no_store);
         assert_eq!(cache.body.as_ref().unwrap()["days"], 28);
@@ -363,7 +435,9 @@ mod tests {
             ..Cache::default()
         };
         assert_eq!(
-            fetch_resource(&agent(), &url, &old, true).unwrap_err().0,
+            fetch_resource(&agent(), &url, &old, Resource::Challenge)
+                .unwrap_err()
+                .0,
             "unsupported_challenge_page"
         );
         assert_eq!(old.body.as_ref().unwrap()["days"], 28);
@@ -399,6 +473,31 @@ mod tests {
             ("http_429".into(), 1200)
         );
         server.join().unwrap();
+    }
+    #[test]
+    fn translation_http_cache_contains_only_text_and_revalidates() {
+        let page = r#"<li class='log-item' data-tweet-id='123'><p class='log-item-text' data-role='tweet-display-text'>中文</p></li><script>ignored</script>"#;
+        let (url, server) = serve(format!(
+            "HTTP/1.1 200 OK\r\nETag: \"zh-1\"\r\nCache-Control: max-age=900\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            page.len(),
+            page
+        ));
+        let (cache, ttl) =
+            fetch_resource(&agent(), &url, &Cache::default(), Resource::Translation).unwrap();
+        server.join().unwrap();
+        assert_eq!(ttl, 900);
+        assert_eq!(cache.body.as_ref().unwrap()["123"], "中文");
+        assert!(!cache.body.as_ref().unwrap().to_string().contains("ignored"));
+        let (url,server)=serve("HTTP/1.1 304 Not Modified\r\nCache-Control: max-age=900\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".into());
+        let (next, _) = fetch_resource(&agent(), &url, &cache, Resource::Translation).unwrap();
+        assert_eq!(next.body, cache.body);
+        assert!(
+            server
+                .join()
+                .unwrap()
+                .to_lowercase()
+                .contains("if-none-match: \"zh-1\"")
+        );
     }
 
     #[test]
