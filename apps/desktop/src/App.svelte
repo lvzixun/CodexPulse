@@ -13,12 +13,13 @@
     defaultSessionQuery,
     readNews,
   } from './lib/ipc';
-  import type { Settings, SessionPageRequest } from './lib/types';
+  import type { Settings, SessionPageRequest, ModelPageRequest } from './lib/types';
   import QuotaCard from './components/QuotaCard.svelte';
   import NewsCard from './components/NewsCard.svelte';
   import Icon from './components/Icon.svelte';
   import ResetStatus from './components/ResetStatus.svelte';
   import ChallengePanel from './components/ChallengePanel.svelte';
+  import ModelsPane from './components/ModelsPane.svelte';
   import SessionsPane from './components/SessionsPane.svelte';
   import SourceSettings from './components/SourceSettings.svelte';
   import RefreshSettings from './components/RefreshSettings.svelte';
@@ -35,6 +36,12 @@
   let page = $state('overview');
   let selectedModel = $state<string | null>(null);
   let selectedSession = $state<string | null>(null);
+  let modelQuery = $state<ModelPageRequest>({
+    from_day: '',
+    through_day: '',
+    cursor: null,
+    direction: 'next',
+  });
   let sessionQuery = $state<SessionPageRequest>(defaultSessionQuery());
   let error = $state('');
   let saving = $state(false);
@@ -149,14 +156,18 @@
     }
   }
   async function goPage(next: string) {
+    if (next === page) return;
     if (content) scroll[page] = content.scrollTop;
     page = next;
     await restorePageScroll();
   }
-  async function restorePageScroll() {
+  async function restorePageScroll(modelsReady = false) {
     restoreScroll = true;
     await tick();
+    // A paged model list has no height until its asynchronous read completes.
+    if (mode === 'details' && page === 'models' && !modelsReady) return;
     if (content) content.scrollTop = scroll[page] ?? 0;
+    await tick();
     restoreScroll = false;
   }
   $effect(() => {
@@ -166,6 +177,7 @@
       selected_model: selectedModel,
       selected_session: selectedSession,
       session_query: sessionQuery,
+      model_query: modelQuery,
       scroll: { ...scroll },
       glass_supported: glassSupported,
       floating_supported: floatingSupported,
@@ -183,8 +195,24 @@
           cursor: null,
           direction: 'older',
           filter: sessionQuery.filter.model
-            ? { ...sessionQuery.filter, from_day: next.usage.from_day, through_day: next.usage.through_day }
+            ? {
+                ...sessionQuery.filter,
+                from_day: next.usage.from_day,
+                through_day: next.usage.through_day,
+              }
             : { ...sessionQuery.filter },
+        };
+      }
+      if (
+        modelQuery.from_day !== next.usage.from_day ||
+        modelQuery.through_day !== next.usage.through_day ||
+        data.settings.timezone !== next.settings.timezone
+      ) {
+        modelQuery = {
+          from_day: next.usage.from_day,
+          through_day: next.usage.through_day,
+          cursor: null,
+          direction: 'next',
         };
       }
       data = next;
@@ -238,9 +266,10 @@
       }),
       onEvent<[string, string | null]>('window-mode', ([next, target]) => {
         if (content) scroll[page] = content.scrollTop;
+        const changed = mode !== next;
         mode = next as typeof mode;
-        if (target) void goPage(target);
-        else void restorePageScroll();
+        if (target && target !== page) void goPage(target);
+        else if (changed) void restorePageScroll();
         void refresh();
       }),
       onEvent<Settings>('settings-applied', (next) => {
@@ -266,6 +295,13 @@
           selectedModel = view.selected_model;
           selectedSession = view.selected_session;
           sessionQuery = view.session_query ?? defaultSessionQuery();
+          if (
+            view.model_query?.from_day === data.usage.from_day &&
+            view.model_query?.through_day === data.usage.through_day &&
+            (!view.model_query.cursor ||
+              view.model_query.cursor.timezone === data.settings.timezone)
+          )
+            modelQuery = view.model_query;
           scroll = view.scroll;
           glassSupported = view.glass_supported;
           floatingSupported = view.floating_supported;
@@ -404,7 +440,9 @@
         if (!restoreScroll && content) scroll[page] = content.scrollTop;
       }}
     >
-      {#if data.error || error || data.timezone_error}<p class="cp-method" role="status">{error || data.error || data.timezone_error}</p>{/if}
+      {#if data.error || error || data.timezone_error}<p class="cp-method" role="status">
+          {error || data.error || data.timezone_error}
+        </p>{/if}
       {#if page === 'overview'}
         {#each data.quota?.buckets ?? [] as bucket}{#if data.quota.buckets.length > 1}<div
               class="cp-sectionhead cp-bucket-label"
@@ -494,7 +532,7 @@
             >
           </div>
           <button class="cp-textbutton" onclick={() => void goPage('models')}
-            >{data.usage.sessions} 个 sessions · {data.usage.models.length} 个模型
+            >{data.usage.sessions} 个 sessions · {data.usage.model_count} 个模型
             <span>查看分类 <Icon name="right" /></span></button
           >
         </div>
@@ -528,45 +566,22 @@
         <div class="cp-sectionhead cp-modelheading">
           <span>按模型分类</span><small>Tokens / 估算 USD</small>
         </div>
-        {#each data.usage.models as m}<button
-            class="cp-modelrow"
-            aria-expanded={selectedModel === m.model}
-            onclick={() => (selectedModel = selectedModel === m.model ? null : m.model)}
-            ><span><strong>{m.model}</strong><small>{m.sessions} 个 sessions</small></span><span
-              ><span
-                ><b>{number(m.total)}</b><small>{money(m.cost_nanousd, m.unpriced_tokens)}</small
-                ></span
-              ><Icon name={selectedModel === m.model ? 'up' : 'right'} /></span
-            ></button
-          >{#if selectedModel === m.model}<div class="cp-model-detail">
-              <div class="cp-metrics">
-                <div><span>输入</span><strong>{number(m.input)}</strong></div>
-                <div><span>其中缓存</span><strong>{number(m.cached)}</strong></div>
-                <div><span>输出</span><strong>{number(m.output)}</strong></div>
-              </div>
-              <p class="cp-note">
-                {number(m.unpriced_tokens)} tokens 未计价{m.incomplete_events
-                  ? ` · ${m.incomplete_events} 条记录缺少拆分字段`
-                  : ''}
-              </p>
-              <button
-                class="cp-textbutton"
-                onclick={() => {
-                  sessionQuery = {
-                    filter: {
-                      model: m.model,
-                      from_day: data.usage.from_day,
-                      through_day: data.usage.through_day,
-                    },
-                    cursor: null,
-                    direction: 'older',
-                  };
-                  selectedSession = null;
-                  scroll.sessions = 0;
-                  void goPage('sessions');
-                }}>查看此模型最近 30 天的 sessions <Icon name="right" /></button
-              >
-            </div>{/if}{:else}<p class="cp-note">尚无可归属的模型用量。</p>{/each}
+        <ModelsPane
+          bind:query={modelQuery}
+          bind:selected={selectedModel}
+          revision={data.usage.fact_revision}
+          ready={() => void restorePageScroll(true)}
+          sessions={(model) => {
+            sessionQuery = {
+              filter: { model, from_day: data.usage.from_day, through_day: data.usage.through_day },
+              cursor: null,
+              direction: 'older',
+            };
+            selectedSession = null;
+            scroll.sessions = 0;
+            void goPage('sessions');
+          }}
+        />
         <p class="cp-note">
           {data.usage.sessions} 个独立 sessions；一个 session 可使用多个模型。缓存属于输入，汇总不重复计算。
         </p>

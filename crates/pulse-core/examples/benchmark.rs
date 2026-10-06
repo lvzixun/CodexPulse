@@ -29,6 +29,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut store = Store::open(directory.path().join("benchmark.sqlite"))?;
     let timezone = chrono_tz::Asia::Shanghai;
     let today = Utc::now().with_timezone(&timezone).date_naive();
+    let model_count = std::env::var("PULSE_BENCH_MODELS")
+        .ok()
+        .map(|value| value.parse::<usize>())
+        .transpose()?
+        .unwrap_or(3);
+    if !(1..=10_000).contains(&model_count) {
+        return Err("PULSE_BENCH_MODELS must be between 1 and 10000".into());
+    }
     let load_start = Instant::now();
     let mut loaded = 0usize;
     for batch in 0..100usize {
@@ -55,7 +63,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 id: format!("benchmark-fact-{i:06}"),
                 session_id,
                 turn_id: Some(format!("turn-{i}")),
-                model: format!("benchmark-model-{}", i % 3),
+                model: format!("benchmark-model-{:04}", i % model_count),
                 provider: "synthetic".into(),
                 timestamp,
                 tokens: TokenCounts {
@@ -99,6 +107,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     assert_eq!(expected.cached, 80_000_000);
     assert_eq!(expected.output, 20_000_000);
     assert_eq!(expected.days.len(), 30);
+    assert_eq!(expected.model_count, model_count as u64);
     let summary = measure(
         || {
             black_box(store.summary(today, timezone).unwrap());
@@ -111,6 +120,37 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
         100,
     );
+    let model_request = pulse_core::storage::ModelPageRequest {
+        from_day: expected.from_day.clone(),
+        through_day: expected.through_day.clone(),
+        ..Default::default()
+    };
+    let model_page = measure(
+        || {
+            black_box(store.model_page(&model_request, timezone).unwrap());
+        },
+        100,
+    );
+    let first_models = store.model_page(&model_request, timezone)?;
+    let first_model_page_bytes = serde_json::to_vec(&first_models)?.len();
+    let summary_bytes = serde_json::to_vec(&expected)?.len();
+    let mut model_request_next = model_request.clone();
+    let mut reached_models = 0usize;
+    let mut reached_tokens = 0u64;
+    let mut pages = 0usize;
+    loop {
+        let model_page = store.model_page(&model_request_next, timezone)?;
+        assert!(model_page.items.len() <= 20);
+        reached_models += model_page.items.len();
+        reached_tokens += model_page.items.iter().map(|m| m.usage.total).sum::<u64>();
+        pages += 1;
+        match model_page.next {
+            Some(cursor) => model_request_next.cursor = Some(cursor),
+            None => break,
+        }
+    }
+    assert_eq!(reached_models, model_count);
+    assert_eq!(reached_tokens, expected.total);
     let database_bytes = std::fs::metadata(directory.path().join("benchmark.sqlite"))?.len();
     let page = measure(
         || {
@@ -172,7 +212,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!(
         "{}",
         serde_json::to_string_pretty(&serde_json::json!({
-            "workload": { "sessions":10000, "facts":100000, "models":3, "batch_size":1000 },
+            "workload": { "sessions":10000, "facts":100000, "models":model_count, "batch_size":1000 },
             "profile": if cfg!(debug_assertions) { "debug" } else { "release" },
             "target_os": std::env::consts::OS,
             "logical_cpus":std::thread::available_parallelism()?.get(),
@@ -180,6 +220,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "load_seconds":load_seconds, "database_bytes":database_bytes,
             "summary_30_days":summary, "recent_10_sessions":recent,
             "session_page":page, "session_detail":detail,
+            "model_page":model_page,
+            "model_paging": { "pages":pages, "reached_models":reached_models, "page_limit":20, "summary_json_bytes":summary_bytes, "first_page_json_bytes":first_model_page_bytes },
             "timezone_rebuild":rebuild,
             "correctness": "100k unique facts, 10k distinct sessions, cached input counted once, 30 calendar buckets verified"
         }))?

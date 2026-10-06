@@ -21,6 +21,8 @@ pub struct ViewState {
     pub selected_session: Option<String>,
     #[serde(default)]
     pub session_query: pulse_core::storage::SessionPageRequest,
+    #[serde(default)]
+    pub model_query: pulse_core::storage::ModelPageRequest,
     pub scroll: std::collections::BTreeMap<String, f64>,
     pub glass_supported: bool,
     pub floating_supported: bool,
@@ -33,6 +35,7 @@ impl Default for ViewState {
             selected_model: None,
             selected_session: None,
             session_query: Default::default(),
+            model_query: Default::default(),
             scroll: Default::default(),
             glass_supported: false,
             floating_supported: cfg!(windows),
@@ -78,6 +81,17 @@ impl WindowsWindowHost {
             return Err("界面状态无效".into());
         }
         let query = &next.session_query;
+        if (!next.model_query.from_day.is_empty()
+            || !next.model_query.through_day.is_empty()
+            || next.model_query.cursor.is_some()
+            || matches!(
+                next.model_query.direction,
+                pulse_core::storage::ModelDirection::Previous
+            ))
+            && next.model_query.validate().is_err()
+        {
+            return Err("模型页面范围无效".into());
+        }
         if query
             .filter
             .model
@@ -100,6 +114,7 @@ impl WindowsWindowHost {
         view.selected_model = next.selected_model;
         view.selected_session = next.selected_session;
         view.session_query = next.session_query;
+        view.model_query = next.model_query;
         view.scroll = next.scroll;
         Ok(())
     }

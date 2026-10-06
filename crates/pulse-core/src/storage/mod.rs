@@ -8,10 +8,12 @@ use chrono_tz::Tz;
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use std::{path::Path, time::Duration};
+mod models;
 mod queries;
 mod sessions;
 mod timezone;
 mod titles;
+pub use models::{ModelCursor, ModelDirection, ModelPage, ModelPageRequest, ModelRow};
 pub use queries::{DayUsage, RecentSession, UsageSummary};
 pub use sessions::{
     PageDirection, PriceCoverage, SessionCursor, SessionDetail, SessionDetailRequest,
@@ -81,7 +83,7 @@ impl Store {
             [],
             |row| row.get(0),
         )?;
-        if version > 4 {
+        if version > 5 {
             return Err(StoreError::NewerSchema);
         }
         if version < 3 {
@@ -129,6 +131,11 @@ impl Store {
         if version < 4 {
             let tx = connection.transaction()?;
             tx.execute_batch(include_str!("../../migrations/004-session-titles.sql"))?;
+            tx.commit()?;
+        }
+        if version < 5 {
+            let tx = connection.transaction()?;
+            tx.execute_batch(include_str!("../../migrations/005-model-pages.sql"))?;
             tx.commit()?;
         }
         Ok(Self {

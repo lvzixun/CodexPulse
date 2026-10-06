@@ -9,6 +9,8 @@ import type {
   SessionPage,
   SessionDetailRequest,
   SessionDetail,
+  ModelPageRequest,
+  ModelPage,
 } from './types';
 export const native = isTauri();
 export const empty: Snapshot = {
@@ -62,7 +64,8 @@ export const empty: Snapshot = {
     unpriced_tokens: 0,
     incomplete_events: 0,
     sessions: 0,
-    models: [],
+    model_count: 0,
+    fact_revision: '0',
     days: [],
   },
   recent: [],
@@ -113,6 +116,10 @@ export const sessionPage = (request: SessionPageRequest) =>
   native
     ? invoke<SessionPage>('get_session_page', { request })
     : Promise.resolve({ items: [], older: null, newer: null });
+export const modelPage = (request: ModelPageRequest) =>
+  native
+    ? invoke<ModelPage>('get_model_page', { request })
+    : Promise.resolve({ items: [], next: null, previous: null, watermark: '0', total_models: 0 });
 export const sessionDetail = (request: SessionDetailRequest) =>
   native ? invoke<SessionDetail | null>('get_session_detail', { request }) : Promise.resolve(null);
 export const defaultSessionQuery = (): SessionPageRequest => ({

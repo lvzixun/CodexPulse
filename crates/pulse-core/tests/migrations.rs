@@ -33,7 +33,7 @@ fn legacy_schema_upgrades_and_newer_schema_is_rejected() {
             .query_row("SELECT MAX(version) FROM schema_version", [], |r| r
                 .get::<_, u32>(0))
             .unwrap(),
-        4
+        5
     );
     assert_eq!(
         connection
@@ -49,6 +49,53 @@ fn legacy_schema_upgrades_and_newer_schema_is_rejected() {
         .execute("INSERT INTO schema_version VALUES(999)", [])
         .unwrap();
     assert!(matches!(Store::open(&path), Err(StoreError::NewerSchema)));
+}
+#[test]
+fn schema_four_adds_covering_model_index_without_changing_ledger_or_settings() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("schema4.sqlite");
+    let connection = Connection::open(&path).unwrap();
+    for sql in [
+        include_str!("../migrations/001.sql"),
+        include_str!("../migrations/002-query-indexes.sql"),
+        include_str!("../migrations/003-session-integrity.sql"),
+        include_str!("../migrations/004-session-titles.sql"),
+    ] {
+        connection.execute_batch(sql).unwrap();
+    }
+    connection.execute_batch("INSERT INTO sessions VALUES('s','{}','2026-10-06T00:00:00Z');
+        INSERT INTO usage_facts VALUES('f','s','m','2026-10-06T00:00:00.000Z',12,10,3,2,NULL,'{\"retained\":true}');
+        INSERT INTO settings VALUES('app','{\"retained\":true}');
+        INSERT INTO file_cursors VALUES('test','file',123,'identity','1',1,'{}');").unwrap();
+    drop(connection);
+    let store = Store::open(&path).unwrap();
+    assert_eq!(store.fact_count().unwrap(), 1);
+    assert_eq!(
+        store.setting::<serde_json::Value>("app").unwrap().unwrap()["retained"],
+        true
+    );
+    let connection = Connection::open(&path).unwrap();
+    assert_eq!(
+        connection
+            .query_row("SELECT json FROM usage_facts WHERE id='f'", [], |r| r
+                .get::<_, String>(0))
+            .unwrap(),
+        "{\"retained\":true}"
+    );
+    assert_eq!(
+        connection
+            .query_row("SELECT offset FROM file_cursors", [], |r| r
+                .get::<_, i64>(0))
+            .unwrap(),
+        123
+    );
+    let plan = connection.prepare("EXPLAIN QUERY PLAN SELECT model,SUM(total),SUM(input),SUM(cached),SUM(output),SUM(cost_nanousd),COUNT(DISTINCT session_id) FROM usage_facts WHERE occurred_at>='2026-10-01' AND occurred_at<'2026-11-01' GROUP BY model").unwrap()
+        .query_map([], |r|r.get::<_,String>(3)).unwrap().collect::<Result<Vec<_>,_>>().unwrap();
+    assert!(
+        plan.iter()
+            .any(|s| s.contains("COVERING INDEX facts_time_model_counts")),
+        "{plan:?}"
+    );
 }
 
 #[test]
@@ -71,7 +118,7 @@ fn schema_three_adds_independent_titles_without_rebuilding_usage() {
             .query_row("SELECT MAX(version) FROM schema_version", [], |r| r
                 .get::<_, u32>(0))
             .unwrap(),
-        4
+        5
     );
     assert_eq!(
         connection

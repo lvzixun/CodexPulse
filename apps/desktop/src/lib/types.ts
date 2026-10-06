@@ -34,6 +34,7 @@ export interface ViewState {
   selected_model: string | null;
   selected_session: string | null;
   session_query: SessionPageRequest;
+  model_query: ModelPageRequest;
   scroll: Record<string, number>;
   glass_supported: boolean;
   floating_supported: boolean;
@@ -48,6 +49,35 @@ export interface ModelUsage {
   unpriced_tokens: number;
   incomplete_events: number;
   sessions: number;
+}
+export interface ModelCursor {
+  total: string;
+  model: string;
+  watermark: string;
+  from_day: string;
+  through_day: string;
+  timezone: string;
+}
+export interface ModelPageRequest {
+  from_day: string;
+  through_day: string;
+  cursor: ModelCursor | null;
+  direction: 'next' | 'previous';
+}
+export interface ModelPage {
+  items: ModelRow[];
+  next: ModelCursor | null;
+  previous: ModelCursor | null;
+  watermark: string;
+  total_models: number;
+}
+export interface ModelRow extends ModelUsage {
+  events: number;
+  unknown_totals: number;
+  unknown_input: number;
+  unknown_cached: number;
+  unknown_output: number;
+  unpriced_events: number;
 }
 export interface DayUsage {
   day: string;
@@ -208,7 +238,8 @@ export interface Snapshot {
     unpriced_tokens: number;
     incomplete_events: number;
     sessions: number;
-    models: ModelUsage[];
+    model_count: number;
+    fact_revision: string;
     days: DayUsage[];
   };
   recent: RecentSession[];

@@ -1,4 +1,4 @@
-use super::{ModelUsage, Store, StoreError, unsigned};
+use super::{Store, StoreError, unsigned};
 use crate::domain::SessionMeta;
 use chrono::{Days, NaiveDate};
 use chrono_tz::Tz;
@@ -36,7 +36,8 @@ pub struct UsageSummary {
     pub unpriced_tokens: u64,
     pub incomplete_events: u64,
     pub sessions: u64,
-    pub models: Vec<ModelUsage>,
+    pub model_count: u64,
+    pub fact_revision: String,
     pub days: Vec<DayUsage>,
 }
 impl Store {
@@ -76,25 +77,38 @@ impl Store {
             timezone: timezone.name().into(),
             ..Default::default()
         };
-        result.models = self.model_usage(&result.from_day, &result.through_day, timezone)?;
+        result.fact_revision = self.fact_revision()?;
+        let mut models = self.connection.prepare("SELECT SUM(total),SUM(input),SUM(cached),SUM(output),SUM(cost_nanousd),SUM(unpriced_tokens),SUM(incomplete_events) FROM daily_model_usage WHERE day>=?1 AND day<=?2 AND timezone=?3 GROUP BY model")?;
+        let mut rows = models.query(params![
+            result.from_day,
+            result.through_day,
+            timezone.name()
+        ])?;
         // SQLite aggregates are checked integers. Rust sums are checked too; overflow is a
         // surfaced data failure, never a wrapped or silently rounded display total.
-        for model in &result.models {
+        while let Some(model) = rows.next()? {
             macro_rules! add {
-                ($field:ident) => {
+                ($field:ident, $index:expr) => {
                     result.$field = result
                         .$field
-                        .checked_add(model.$field)
+                        .checked_add(unsigned(model, $index)?)
                         .ok_or(crate::domain::DataError::Overflow)?
                 };
             }
-            add!(total);
-            add!(input);
-            add!(cached);
-            add!(output);
-            add!(cost_nanousd);
-            add!(unpriced_tokens);
-            add!(incomplete_events);
+            add!(total, 0);
+            add!(input, 1);
+            add!(cached, 2);
+            add!(output, 3);
+            result.cost_nanousd = result
+                .cost_nanousd
+                .checked_add(model.get::<_, i64>(4)?)
+                .ok_or(crate::domain::DataError::Overflow)?;
+            add!(unpriced_tokens, 5);
+            add!(incomplete_events, 6);
+            result.model_count = result
+                .model_count
+                .checked_add(1)
+                .ok_or(crate::domain::DataError::Overflow)?;
         }
         result.sessions =
             self.independent_sessions(&result.from_day, &result.through_day, timezone)?;

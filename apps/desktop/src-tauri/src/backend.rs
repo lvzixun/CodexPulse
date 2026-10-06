@@ -180,6 +180,10 @@ pub enum Message {
         pulse_core::storage::SessionPageRequest,
         tokio::sync::oneshot::Sender<Result<pulse_core::storage::SessionPage, String>>,
     ),
+    ModelPage(
+        pulse_core::storage::ModelPageRequest,
+        tokio::sync::oneshot::Sender<Result<pulse_core::storage::ModelPage, String>>,
+    ),
     SessionDetail(
         pulse_core::storage::SessionDetailRequest,
         tokio::sync::oneshot::Sender<Result<Option<pulse_core::storage::SessionDetail>, String>>,
@@ -470,6 +474,18 @@ impl Backend {
                                 inbox = next;
                                 dirty = true;
                             }
+                            let _ = reply.send(result);
+                        }
+                        Ok(Message::ModelPage(request, reply)) => {
+                            let result = settings
+                                .timezone
+                                .parse::<Tz>()
+                                .map_err(|_| "统计时区无效".to_string())
+                                .and_then(|tz| {
+                                    store
+                                        .model_page(&request, tz)
+                                        .map_err(|_| "无法读取模型分类，请刷新列表".into())
+                                });
                             let _ = reply.send(result);
                         }
                         Ok(Message::SessionPage(request, reply)) => {
