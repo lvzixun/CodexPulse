@@ -72,7 +72,22 @@
       aria-expanded={selected === m.model}
       onclick={() => (selected = selected === m.model ? null : m.model)}
     >
-      <span><strong>{m.model}</strong><small>{m.sessions} 个 sessions</small></span>
+      <span class="cp-model-label"
+        ><strong class="cp-truncate" title={m.model}>{m.model}</strong><small
+          >{m.sessions} 个 sessions
+          {#if list && list.known_total > 0 && m.unknown_totals < m.events}
+            · {((m.total / list.known_total) * 100).toFixed(1)}%{m.unknown_totals
+              ? '*'
+              : ''}{/if}</small
+        >
+        {#if list && list.known_total > 0 && m.unknown_totals < m.events}<span
+            class="cp-model-bar"
+            role="img"
+            aria-label={`${m.model} 占周期已知 token 用量的 ${((m.total / list.known_total) * 100).toFixed(1)}%`}
+            ><span style:width={`${Math.min(100, (m.total / list.known_total) * 100)}%`}
+            ></span></span
+          >{/if}
+      </span>
       <span
         ><span
           ><b>{measure(m.total, m.unknown_totals, m.events)}</b><small
@@ -112,6 +127,9 @@
       </p>{/if}
   {/each}
 </div>
+{#if list?.unknown_total_events}<p class="cp-note">
+    图表按已知 tokens 计算；缺少总量的记录不按零处理。
+  </p>{/if}
 {#if list?.next || list?.previous}
   <div class="cp-pager">
     <button disabled={loading || !list?.previous} onclick={() => navigate('previous')}

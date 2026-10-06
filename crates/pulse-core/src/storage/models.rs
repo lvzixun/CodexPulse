@@ -87,6 +87,8 @@ pub struct ModelPage {
     pub previous: Option<ModelCursor>,
     pub watermark: String,
     pub total_models: u64,
+    pub known_total: u64,
+    pub unknown_total_events: u64,
 }
 impl Store {
     pub fn fact_revision(&self) -> Result<String, StoreError> {
@@ -140,8 +142,9 @@ impl Store {
                 COUNT(*)-COUNT(cached) AS unknown_cached,COUNT(*)-COUNT(output) AS unknown_output,COUNT(*)-COUNT(cost_nanousd) AS unpriced_events
             FROM usage_facts WHERE occurred_at>=?1 AND occurred_at<?2 AND rowid<=?3 GROUP BY model
         ), ranked AS (
-            SELECT *,ROW_NUMBER() OVER (ORDER BY total DESC,model ASC) AS position,COUNT(*) OVER () AS model_count FROM grouped
-        ) SELECT model,total,input,cached,output,cost,unpriced,incomplete,sessions,position,model_count,events,unknown_totals,unknown_input,unknown_cached,unknown_output,unpriced_events
+            SELECT *,ROW_NUMBER() OVER (ORDER BY total DESC,model ASC) AS position,COUNT(*) OVER () AS model_count,
+                SUM(total) OVER () AS known_total,SUM(unknown_totals) OVER () AS unknown_total_events FROM grouped
+        ) SELECT model,total,input,cached,output,cost,unpriced,incomplete,sessions,position,model_count,events,unknown_totals,unknown_input,unknown_cached,unknown_output,unpriced_events,known_total,unknown_total_events
             FROM ranked WHERE (?6 OR ({op})) ORDER BY {order} LIMIT ?7");
         let mut query = self.connection.prepare(&sql)?;
         let mut rows = query
@@ -178,6 +181,8 @@ impl Store {
                         },
                         unsigned(row, 9)?,
                         unsigned(row, 10)?,
+                        unsigned(row, 17)?,
+                        unsigned(row, 18)?,
                     ))
                 },
             )?
@@ -186,7 +191,7 @@ impl Store {
         if matches!(request.direction, ModelDirection::Previous) {
             rows.reverse();
         }
-        let cursor = |row: &(ModelRow, u64, u64)| ModelCursor {
+        let cursor = |row: &(ModelRow, u64, u64, u64, u64)| ModelCursor {
             total: row.0.usage.total.to_string(),
             model: row.0.usage.model.clone(),
             watermark: watermark.to_string(),
@@ -198,6 +203,8 @@ impl Store {
             next: rows.last().filter(|row| row.1 < row.2).map(cursor),
             previous: rows.first().filter(|row| row.1 > 1).map(cursor),
             total_models: rows.first().map_or(0, |row| row.2),
+            known_total: rows.first().map_or(0, |row| row.3),
+            unknown_total_events: rows.first().map_or(0, |row| row.4),
             items: rows.into_iter().map(|row| row.0).collect(),
             watermark: watermark.to_string(),
         })

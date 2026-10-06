@@ -185,6 +185,14 @@ fn tied_sort_keys_page_both_ways_and_freeze_live_appends_across_restart() {
         UTC,
     );
     assert_ne!(store.fact_revision().unwrap(), first.watermark);
+    let frozen_denominator = store.model_page(&second_request, UTC).unwrap();
+    assert_eq!(first.known_total, 63 * 12);
+    assert_eq!(frozen_denominator.known_total, first.known_total);
+    assert_eq!(frozen_denominator.unknown_total_events, 0);
+    assert_eq!(
+        store.model_page(&request(), UTC).unwrap().known_total,
+        63 * 12 + 2000
+    );
     drop(store);
     let store = Store::open(&database).unwrap();
     let mut frozen = first.items;
@@ -296,6 +304,8 @@ fn calendar_range_is_fact_time_and_unknown_events_do_not_disappear() {
     };
     let page = store.model_page(&scope, chrono_tz::Asia::Shanghai).unwrap();
     assert_eq!(page.total_models, 2);
+    assert_eq!(page.known_total, 12);
+    assert_eq!(page.unknown_total_events, 1);
     assert_eq!(page.items[0].usage.total, 12);
     assert_eq!(page.items[1].usage.total, 0);
     assert_eq!(page.items[1].unknown_totals, 1);

@@ -7,6 +7,10 @@ use serde::{Deserialize, Serialize};
 pub struct SessionCursor {
     pub activity: String,
     pub id: String,
+    #[serde(default)]
+    pub running: bool,
+    #[serde(default)]
+    pub as_of: Option<String>,
 }
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct SessionFilter {
@@ -120,15 +124,36 @@ impl Store {
         request: &SessionPageRequest,
         timezone: Tz,
     ) -> Result<SessionPage, StoreError> {
+        self.session_page_ordered(request, timezone, None)
+    }
+    /// Prioritize active sessions across the whole matching history, with bounded pages.
+    /// Only the indexed five-minute range needs its JSON status inspected.
+    pub fn session_page_with_activity(
+        &self,
+        request: &SessionPageRequest,
+        timezone: Tz,
+        now: chrono::DateTime<chrono::Utc>,
+        connected_sources: &[String],
+    ) -> Result<SessionPage, StoreError> {
+        self.session_page_ordered(request, timezone, Some((now, connected_sources)))
+    }
+    fn session_page_ordered(
+        &self,
+        request: &SessionPageRequest,
+        timezone: Tz,
+        activity_context: Option<(chrono::DateTime<chrono::Utc>, &[String])>,
+    ) -> Result<SessionPage, StoreError> {
         let filter = &request.filter;
         if filter
             .model
             .as_ref()
             .is_some_and(|m| m.is_empty() || m.len() > 256)
-            || request
-                .cursor
-                .as_ref()
-                .is_some_and(|c| c.id.is_empty() || c.id.len() > 256 || c.activity.len() > 64)
+            || request.cursor.as_ref().is_some_and(|c| {
+                c.id.is_empty()
+                    || c.id.len() > 256
+                    || c.activity.len() > 64
+                    || c.as_of.as_ref().is_some_and(|value| value.len() > 64)
+            })
             || [&filter.from_day, &filter.through_day]
                 .into_iter()
                 .flatten()
@@ -162,15 +187,73 @@ impl Store {
             .as_ref()
             .map(|c| (c.activity.as_str(), c.id.as_str()))
             .unwrap_or(("9999", "~"));
-        let sql = format!(
-            "SELECT s.id FROM sessions s WHERE (s.last_activity,s.id) {op} (?1,?2){scope} ORDER BY s.last_activity {order},s.id {order} LIMIT 11"
-        );
-        let mut query = self.connection.prepare(&sql)?;
-        let mut ids = query
-            .query_map(params![activity, id, filter.model, from, through], |r| {
-                r.get::<_, String>(0)
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
+        let mut as_of = None;
+        let mut running_ids = std::collections::HashSet::new();
+        let mut ids = if let Some((now, sources)) = activity_context {
+            let captured = match request.cursor.as_ref() {
+                Some(cursor) => chrono::DateTime::parse_from_rfc3339(
+                    cursor.as_of.as_deref().ok_or(StoreError::Query)?,
+                )
+                .map_err(|_| StoreError::Query)?
+                .with_timezone(&chrono::Utc),
+                None => now,
+            };
+            if captured > now + chrono::Duration::seconds(5) {
+                return Err(StoreError::Query);
+            }
+            let through_activity = super::canonical_activity(&captured.to_rfc3339());
+            let from_activity =
+                super::canonical_activity(&(captured - chrono::Duration::minutes(5)).to_rfc3339());
+            as_of = Some(through_activity.clone());
+            let rank = request
+                .cursor
+                .as_ref()
+                .map_or(2_i64, |c| i64::from(c.running));
+            let sql = format!(
+                "WITH running_sessions AS MATERIALIZED (
+                    SELECT s.id FROM sessions s WHERE s.last_activity>=?6 AND s.last_activity<=?7
+                    AND json_extract(s.metadata,'$.status')='active'
+                    AND EXISTS(SELECT 1 FROM source_sessions ss WHERE ss.session_id=s.id AND ss.source_id IN (SELECT value FROM json_each(?8)))
+                ), ordered AS (
+                    SELECT s.id,s.last_activity,s.id IN (SELECT id FROM running_sessions) AS running
+                    FROM sessions s WHERE 1=1{scope}
+                ) SELECT id,running FROM ordered WHERE (running,last_activity,id) {op} (?9,?1,?2)
+                ORDER BY running {order},last_activity {order},id {order} LIMIT 11"
+            );
+            let mut query = self.connection.prepare(&sql)?;
+            query
+                .query_map(
+                    params![
+                        activity,
+                        id,
+                        filter.model,
+                        from,
+                        through,
+                        from_activity,
+                        through_activity,
+                        serde_json::to_string(sources)?,
+                        rank
+                    ],
+                    |r| {
+                        let id = r.get::<_, String>(0)?;
+                        if r.get::<_, bool>(1)? {
+                            running_ids.insert(id.clone());
+                        }
+                        Ok(id)
+                    },
+                )?
+                .collect::<Result<Vec<_>, _>>()?
+        } else {
+            let sql = format!(
+                "SELECT s.id FROM sessions s WHERE (s.last_activity,s.id) {op} (?1,?2){scope} ORDER BY s.last_activity {order},s.id {order} LIMIT 11"
+            );
+            let mut query = self.connection.prepare(&sql)?;
+            query
+                .query_map(params![activity, id, filter.model, from, through], |r| {
+                    r.get::<_, String>(0)
+                })?
+                .collect::<Result<Vec<_>, _>>()?
+        };
         let extra = ids.len() > 10;
         ids.truncate(10);
         if matches!(request.direction, PageDirection::Newer) {
@@ -183,6 +266,8 @@ impl Store {
         let cursor = |session: &RecentSession| SessionCursor {
             activity: session.meta.last_activity.clone(),
             id: session.meta.id.clone(),
+            running: running_ids.contains(&session.meta.id),
+            as_of: as_of.clone(),
         };
         let mut result = SessionPage {
             items,

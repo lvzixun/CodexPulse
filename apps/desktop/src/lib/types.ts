@@ -70,6 +70,8 @@ export interface ModelPage {
   previous: ModelCursor | null;
   watermark: string;
   total_models: number;
+  known_total: number;
+  unknown_total_events: number;
 }
 export interface ModelRow extends ModelUsage {
   events: number;
@@ -108,6 +110,8 @@ export interface RecentSession {
 export interface SessionCursor {
   activity: string;
   id: string;
+  running?: boolean;
+  as_of?: string | null;
 }
 export interface SessionFilter {
   model: string | null;

@@ -42,15 +42,7 @@ export function sessionLabel(meta: RecentSession['meta'] | undefined, hideTitle 
   return meta.title?.trim() || `未命名会话 · ${meta.id.slice(0, 8)}`;
 }
 export function sessionActivity(data: Pick<Snapshot, 'recent' | 'sources'>, now: number) {
-  const connected = (id: string) =>
-    data.sources.some((s) => s.id === id && s.status === 'connected');
-  const sessions = data.recent.filter(
-    (s) =>
-      s.meta.status === 'active' &&
-      now - Date.parse(s.meta.last_activity) >= 0 &&
-      now - Date.parse(s.meta.last_activity) <= 5 * 60 * 1000 &&
-      s.sources.some(connected),
-  );
+  const sessions = data.recent.filter((s) => sessionRunState(s, data.sources, now) === 'running');
   const working = sessions[0];
   const state = working
     ? 'busy'
@@ -59,6 +51,19 @@ export function sessionActivity(data: Pick<Snapshot, 'recent' | 'sources'>, now:
       ? 'unknown'
       : 'idle';
   return { working, sessions, state };
+}
+export function sessionRunState(session: RecentSession, sources: SourceHealth[], now: number) {
+  const age = now - Date.parse(session.meta.last_activity);
+  if (session.meta.status === 'completed') return 'completed';
+  if (
+    session.meta.status === 'active' &&
+    age >= 0 &&
+    age <= 5 * 60 * 1000 &&
+    session.sources.some((id) => sources.some((s) => s.id === id && s.status === 'connected'))
+  ) {
+    return 'running';
+  }
+  return 'unknown';
 }
 export function sessionTokens(
   session: RecentSession | undefined,

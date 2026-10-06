@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { sessionActivity, sessionTokens } from '../src/lib/format.ts';
+import { sessionActivity, sessionTokens, sessionRunState } from '../src/lib/format.ts';
 import type { RecentSession, SourceHealth } from '../src/lib/types.ts';
 const now = Date.parse('2026-10-06T09:00:00Z');
 const source: SourceHealth = {
@@ -78,4 +78,23 @@ test('metadata-only and unknown totals are not shown as zero', () => {
   assert.equal(sessionTokens({ ...session, unknown_totals: 1, total: 0 }, String), '—');
   assert.equal(sessionTokens({ ...session, events: 2, unknown_totals: 1 }, String), '100*');
   assert.equal(sessionTokens(session, String), '100');
+});
+test('session rows distinguish ended sessions from stale or disconnected activity', () => {
+  const ended = {
+    ...session,
+    meta: {
+      ...session.meta,
+      id: 'ended',
+      status: 'completed',
+      last_activity: '2026-10-06T08:59:30Z',
+    },
+  };
+  const stale = {
+    ...session,
+    meta: { ...session.meta, id: 'stale', last_activity: '2026-10-06T08:00:00Z' },
+  };
+  assert.equal(sessionRunState(ended, [source], now), 'completed');
+  assert.equal(sessionRunState(stale, [source], now), 'unknown');
+  assert.equal(sessionRunState(session, [{ ...source, status: 'offline' }], now), 'unknown');
+  assert.equal(sessionRunState(session, [source], now + 6 * 60000), 'unknown');
 });

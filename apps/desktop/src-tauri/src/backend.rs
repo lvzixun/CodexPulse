@@ -495,7 +495,16 @@ impl Backend {
                                 .map_err(|_| "统计时区无效".into())
                                 .and_then(|tz| {
                                     store
-                                        .session_page(&request, tz)
+                                        .session_page_with_activity(
+                                            &request,
+                                            tz,
+                                            Utc::now(),
+                                            &sources
+                                                .iter()
+                                                .filter(|s| s.health.status == "connected")
+                                                .map(|s| s.health.id.clone())
+                                                .collect::<Vec<_>>(),
+                                        )
                                         .map(|mut page| {
                                             for session in &mut page.items {
                                                 settings.redact(&mut session.meta);

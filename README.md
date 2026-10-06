@@ -16,6 +16,8 @@ Windows 的浮窗和托盘共用一个详情窗口，浮窗可关闭，托盘右
 
 - [产品、UI 与技术设计案](docs/design/codexpulse-v1.md)
 - [设计文档索引](docs/design/README.md)
+- [开发状态与待完成项](docs/development/status.md)
+- [开发交接（2026-10-06）](docs/development/handoff-2026-10-06.md)
 
 ## 开发
 
@@ -48,4 +50,4 @@ pnpm build
 - `scripts`：开发工具。
 - `work`：本机实验与临时数据，Git 忽略。
 
-当前是开发版本，尚未达到首版完整验收。已实现本地用量账本、共用桌面窗口、只读额度 RPC、公开消息 / Tibo 挑战、参考价格和 session 详情；通知、时区重建、完整来源设置、价格覆盖与性能验收仍在开发。具体进度见 [开发状态](docs/development/status.md)。设计中的性能数字是验收目标。
+当前是开发版本，尚未达到首版完整验收。已实现本地用量账本、共用桌面窗口、HTTPS 额度查询、独立刷新设置、系统时区跟随、模型分页与占比图、公开消息 / Tibo 挑战、参考价格和行内 session 详情。系统通知和提醒功能已取消；完整来源验证、价格覆盖与性能验收仍在开发。具体进度见 [开发状态](docs/development/status.md)。设计中的性能数字是验收目标。

@@ -460,6 +460,7 @@
               ? '暂无已验证额度缓存。手动模式可在设置中点击立即刷新。'
               : '尚未获得有效额度快照，可在设置中查看来源状态。'}
           </p>{/each}
+        <ResetStatus news={data.news} {now} />
         <div class="cp-divider"></div>
         <div class="cp-sectionhead">
           <span
@@ -536,14 +537,6 @@
             <span>查看分类 <Icon name="right" /></span></button
           >
         </div>
-        <ResetStatus news={data.news} {now} />
-        {#if data.news?.items.length || data.news?.challenge}<button
-            class="cp-notice"
-            onclick={() => void goPage('news')}
-            ><Icon name="radio" /><span
-              >Tibo 的 28 天挑战与消息<small>产品改进、额度重置与每日记录</small></span
-            ><Icon name="right" /></button
-          >{/if}
       {:else if page === 'models'}
         <div class="cp-sectionhead">
           <span>最近 30 天 · 所有模型</span><small>{dateRange}</small>
@@ -564,7 +557,7 @@
           <div><span>输出</span><strong>{number(data.usage.output)}</strong></div>
         </div>
         <div class="cp-sectionhead cp-modelheading">
-          <span>按模型分类</span><small>Tokens / 估算 USD</small>
+          <span>按模型分类</span><small>Tokens 占比 / 估算 USD</small>
         </div>
         <ModelsPane
           bind:query={modelQuery}
@@ -593,6 +586,8 @@
           hideTitles={data.settings.hide_titles}
           hideProjects={data.settings.hide_projects}
           sources={data.sources}
+          {now}
+          ready={() => void restorePageScroll()}
         />
       {:else if page === 'news'}
         <div class="cp-sectionhead">

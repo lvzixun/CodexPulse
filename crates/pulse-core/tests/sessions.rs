@@ -57,6 +57,143 @@ fn ids(page: &SessionPage) -> Vec<String> {
 }
 
 #[test]
+fn running_sessions_lead_the_entire_history_and_both_cursor_directions() {
+    let now = chrono::DateTime::parse_from_rfc3339("2026-10-06T09:00:00Z")
+        .unwrap()
+        .with_timezone(&chrono::Utc);
+    let mut store = Store::in_memory().unwrap();
+    let mut sessions = (0..25)
+        .map(|i| meta(&format!("done{i:02}"), "2026-10-06T08:59:59Z"))
+        .collect::<Vec<_>>();
+    sessions.extend((0..12).map(|i| {
+        let mut s = meta(&format!("run{i:02}"), "2026-10-06T08:58:00Z");
+        s.status = "active".into();
+        s
+    }));
+    let mut stale = meta("stale", "2026-10-06T08:00:00Z");
+    stale.status = "active".into();
+    sessions.push(stale);
+    commit(&mut store, &sessions, &[], 1, UTC);
+    let connected = ["test".into()];
+    let first = store
+        .session_page_with_activity(&Default::default(), UTC, now, &connected)
+        .unwrap();
+    assert_eq!(
+        ids(&first),
+        (2..12)
+            .rev()
+            .map(|i| format!("run{i:02}"))
+            .collect::<Vec<_>>()
+    );
+    let mut all = ids(&first);
+    let mut cursor = first.older;
+    let second = store
+        .session_page_with_activity(
+            &SessionPageRequest {
+                cursor: cursor.clone(),
+                ..Default::default()
+            },
+            UTC,
+            now,
+            &connected,
+        )
+        .unwrap();
+    assert_eq!(&ids(&second)[..2], &["run01", "run00"]);
+    let back = store
+        .session_page_with_activity(
+            &SessionPageRequest {
+                cursor: second.newer.clone(),
+                direction: PageDirection::Newer,
+                ..Default::default()
+            },
+            UTC,
+            now,
+            &connected,
+        )
+        .unwrap();
+    assert_eq!(ids(&back), all);
+    while let Some(c) = cursor {
+        let page = store
+            .session_page_with_activity(
+                &SessionPageRequest {
+                    cursor: Some(c),
+                    ..Default::default()
+                },
+                UTC,
+                now + chrono::Duration::minutes(10),
+                &connected,
+            )
+            .unwrap();
+        all.extend(ids(&page));
+        cursor = page.older;
+    }
+    assert_eq!(all.len(), sessions.len());
+    assert_eq!(
+        all.iter().collect::<std::collections::HashSet<_>>().len(),
+        sessions.len()
+    );
+    assert_eq!(all.last().unwrap(), "stale");
+    let disconnected = store
+        .session_page_with_activity(&Default::default(), UTC, now, &[])
+        .unwrap();
+    assert!(ids(&disconnected).iter().all(|id| id.starts_with("done")));
+}
+
+#[test]
+fn prioritized_sessions_respect_model_scope_and_reject_invalid_clock_cursors() {
+    let now = chrono::DateTime::parse_from_rfc3339("2026-10-06T09:00:00Z")
+        .unwrap()
+        .with_timezone(&chrono::Utc);
+    let mut store = Store::in_memory().unwrap();
+    let mut running = meta("run", "2026-10-06T08:59:00Z");
+    running.status = "active".into();
+    let ended = meta("done", "2026-10-06T08:59:30Z");
+    commit(
+        &mut store,
+        &[running, ended],
+        &[fact("f", "done", "wanted", "2026-10-06T08:59:30Z")],
+        1,
+        UTC,
+    );
+    let page = store
+        .session_page_with_activity(
+            &SessionPageRequest {
+                filter: SessionFilter {
+                    model: Some("wanted".into()),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            UTC,
+            now,
+            &["test".into()],
+        )
+        .unwrap();
+    assert_eq!(ids(&page), ["done"]);
+    let mut cursor: SessionCursor = serde_json::from_value(serde_json::json!({"id":"run","activity":"2026-10-06T08:59:00Z","running":true,"as_of":"2026-10-07T09:00:00Z"})).unwrap();
+    for as_of in [
+        Some("2026-10-07T09:00:00Z".into()),
+        Some("bad".into()),
+        None,
+    ] {
+        cursor.as_of = as_of;
+        assert!(
+            store
+                .session_page_with_activity(
+                    &SessionPageRequest {
+                        cursor: Some(cursor.clone()),
+                        ..Default::default()
+                    },
+                    UTC,
+                    now,
+                    &["test".into()]
+                )
+                .is_err()
+        );
+    }
+}
+
+#[test]
 fn tied_session_cursors_page_in_both_directions_without_duplicates() {
     let mut store = Store::in_memory().unwrap();
     let sessions = (0..25)

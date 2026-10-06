@@ -17,7 +17,6 @@
       day: 'numeric',
       hour: '2-digit',
       minute: '2-digit',
-      timeZoneName: 'short',
     });
 </script>
 
@@ -40,8 +39,5 @@
               : '等待同步'}</strong
     >
   </div>
-  <small
-    >{news.status !== 'connected' && news.last_success ? '离线缓存 · ' : ''}本地时间 ·
-    公告时间不代表账户已到账</small
-  >
+  {#if news.status !== 'connected' && news.last_success}<small>离线缓存</small>{/if}
 </div>

@@ -159,6 +159,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         100,
     );
     let id = store.recent_sessions(None, 1)?[0].meta.id.clone();
+    let activity_page = measure(
+        || {
+            black_box(
+                store
+                    .session_page_with_activity(
+                        &Default::default(),
+                        timezone,
+                        Utc::now(),
+                        &["benchmark".into()],
+                    )
+                    .unwrap(),
+            );
+        },
+        100,
+    );
     let detail = measure(
         || {
             black_box(
@@ -219,7 +234,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "timezone":timezone.name(), "generated_at":Utc::now().to_rfc3339(),
             "load_seconds":load_seconds, "database_bytes":database_bytes,
             "summary_30_days":summary, "recent_10_sessions":recent,
-            "session_page":page, "session_detail":detail,
+            "session_page":page, "session_page_activity":activity_page, "session_detail":detail,
             "model_page":model_page,
             "model_paging": { "pages":pages, "reached_models":reached_models, "page_limit":20, "summary_json_bytes":summary_bytes, "first_page_json_bytes":first_model_page_bytes },
             "timezone_rebuild":rebuild,

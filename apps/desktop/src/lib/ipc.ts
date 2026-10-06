@@ -119,7 +119,15 @@ export const sessionPage = (request: SessionPageRequest) =>
 export const modelPage = (request: ModelPageRequest) =>
   native
     ? invoke<ModelPage>('get_model_page', { request })
-    : Promise.resolve({ items: [], next: null, previous: null, watermark: '0', total_models: 0 });
+    : Promise.resolve({
+        items: [],
+        next: null,
+        previous: null,
+        watermark: '0',
+        total_models: 0,
+        known_total: 0,
+        unknown_total_events: 0,
+      });
 export const sessionDetail = (request: SessionDetailRequest) =>
   native ? invoke<SessionDetail | null>('get_session_detail', { request }) : Promise.resolve(null);
 export const defaultSessionQuery = (): SessionPageRequest => ({
