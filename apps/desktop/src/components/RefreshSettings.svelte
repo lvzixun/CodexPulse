@@ -9,14 +9,7 @@
   let error = $state('');
   let custom = $state<Record<string, boolean>>({});
   const time = (value: string | null) =>
-    value ? new Date(value).toLocaleString() : '尚未成功刷新';
-  const stateNames: Record<string, string> = {
-    refreshing: '正在刷新',
-    queued: '等待刷新',
-    backoff: '等待退避后重试',
-    manual: '手动 · 无后台请求',
-    idle: '等待自动刷新',
-  };
+    value ? `上次更新 ${new Date(value).toLocaleString()}` : '尚未更新';
   const failures: Record<string, string> = {
     connected: '已连接',
     ready: '已就绪',
@@ -45,6 +38,8 @@
   };
   const label = (code: string) =>
     failures[code] ?? (code.startsWith('http_') ? `接口返回 ${code.slice(5)}` : code || '等待刷新');
+  const isFailure = (code: string) =>
+    !['', 'connected', 'ready', 'verifying_account', 'awaiting_refresh'].includes(code);
   async function change(group: 'quota' | 'news', config: RefreshConfig) {
     saving = group;
     error = '';
@@ -69,105 +64,83 @@
 </script>
 
 <div class="cp-divider"></div>
-<div class="cp-sectionhead"><span>网络刷新</span><small>修改后立即保存</small></div>
+<div class="cp-sectionhead"><span>网络刷新</span><small>自动保存</small></div>
 {#each groups as group}
   {@const config = group === 'quota' ? data.settings.quota_refresh : data.settings.news_refresh}
   {@const state = group === 'quota' ? data.quota : data.news}
+  {@const name = group === 'quota' ? '账号额度' : 'Resets 消息'}
+  {@const busy = state.request_status === 'refreshing' || state.request_status === 'queued'}
   <div class="refresh-group">
-    <div class="cp-sectionhead">
-      <span>{group === 'quota' ? 'Codex 账号额度刷新' : 'Codex Resets 消息刷新'}</span>
-    </div>
-    <label class="cp-setting"
-      >刷新方式
+    <div class="cp-setting refresh-row">
+      <span class="refresh-name">{name}</span>
       <select
+        aria-label={`${name}刷新频率`}
         oninput={(e) => e.stopPropagation()}
-        value={config.mode}
+        value={config.mode === 'manual'
+          ? 'manual'
+          : custom[group] || !presets.includes(config.interval_seconds)
+            ? 'custom'
+            : String(config.interval_seconds)}
         disabled={saving !== null}
-        onchange={(e) => {
-          e.stopPropagation();
-          void change(group, { ...config, mode: e.currentTarget.value as RefreshConfig['mode'] });
-        }}
-      >
-        <option value="auto">自动</option><option value="manual">手动</option>
-      </select>
-    </label>
-    <label class="cp-setting"
-      >自动刷新间隔
-      <select
-        oninput={(e) => e.stopPropagation()}
-        value={custom[group] || !presets.includes(config.interval_seconds)
-          ? 'custom'
-          : String(config.interval_seconds)}
-        disabled={saving !== null || config.mode === 'manual'}
         onchange={(e) => {
           e.stopPropagation();
           const value = e.currentTarget.value;
           custom[group] = value === 'custom';
-          if (value !== 'custom')
-            void change(group, { ...config, interval_seconds: Number(value) });
+          if (value === 'manual') void change(group, { ...config, mode: 'manual' });
+          else if (value !== 'custom')
+            void change(group, { mode: 'auto', interval_seconds: Number(value) });
+          else if (config.mode === 'manual') void change(group, { ...config, mode: 'auto' });
         }}
       >
         {#each presets as seconds}<option value={String(seconds)}
-            >{seconds < 60 ? `${seconds} 秒` : `${seconds / 60} 分钟`}</option
+            >每 {seconds < 60 ? `${seconds} 秒` : `${seconds / 60} 分钟`}</option
           >{/each}
-        <option value="custom">自定义</option>
+        <option value="custom">自定义间隔</option>
+        <option value="manual">手动</option>
       </select>
-    </label>
-    {#if custom[group] || !presets.includes(config.interval_seconds)}
-      <label class="cp-setting"
-        >自定义秒数
+      <button
+        class="cp-textbutton"
+        disabled={busy || saving !== null}
+        onclick={() => void refresh(group)}>{busy ? '刷新中…' : '刷新'}</button
+      >
+    </div>
+    {#if config.mode === 'auto' && (custom[group] || !presets.includes(config.interval_seconds))}
+      <label class="custom-interval"
+        >间隔（秒）
         <input
-          aria-label={`${group === 'quota' ? '额度' : '消息'}自定义刷新秒数`}
+          aria-label={`${name}自定义刷新秒数`}
           type="number"
-          oninput={(e) => e.stopPropagation()}
           min="30"
           max="86400"
           value={config.interval_seconds}
-          disabled={saving !== null || config.mode === 'manual'}
+          disabled={saving !== null}
+          oninput={(e) => e.stopPropagation()}
           onchange={(e) => {
             e.stopPropagation();
             if (e.currentTarget.checkValidity())
-              void change(group, { ...config, interval_seconds: Number(e.currentTarget.value) });
+              void change(group, { mode: 'auto', interval_seconds: Number(e.currentTarget.value) });
           }}
         />
       </label>
     {/if}
-    <div class="refresh-action">
-      <span>{stateNames[state.request_status] ?? '等待初始化'}</span>
-      <button
-        class="cp-textbutton"
-        disabled={state.request_status === 'refreshing' ||
-          state.request_status === 'queued' ||
-          saving !== null}
-        onclick={() => void refresh(group)}>立即刷新</button
-      >
-    </div>
-    <p class="cp-note">
-      最近成功：{time(state.last_success)}
-      {#if state.next_attempt && config.mode === 'auto'}<br />下次计划：{new Date(
-          state.next_attempt * 1000,
-        ).toLocaleString()}{/if}
+    <p class="cp-note refresh-meta" role="status">
+      {time(state.last_success)}
+      {#if state.request_status === 'backoff'}
+        · 稍后重试{/if}
     </p>
     {#if group === 'quota'}
       {#each Object.entries(data.quota.sources) as [id, source]}
-        <p class="cp-note">
-          {sourceNames([id], data.sources)} · {label(source.status)}
-          {#if source.proxy_source === 'codex_env'}
-            · Codex .env 代理{:else if source.proxy_source === 'process_env'}
-            · 进程代理{:else if source.proxy_source === 'no_proxy'}
-            · NO_PROXY 直连{:else if source.proxy_source === 'direct'}
-            · 直连{/if}
-        </p>
+        {#if isFailure(source.status)}<p class="cp-note" role="status">
+            {sourceNames([id], data.sources)} · {label(source.status)}
+          </p>{/if}
       {/each}
-      <p class="cp-note">
-        通过 HTTPS 读取当前登录账号，不启动 CLI。无法连接时保留同账号缓存并显示状态。
-      </p>
     {:else}
-      <p class="cp-note">
-        重置公告 / Tibo：{label(data.news.status)} · 28 天挑战：{label(
-          data.news.challenge_status,
-        )}<br />遵守服务端缓存与退避；翻译仍由点击触发。
-      </p>
+      {#if isFailure(data.news.status)}<p class="cp-note" role="status">
+          重置公告 / Tibo · {label(data.news.status)}
+        </p>{/if}
+      {#if isFailure(data.news.challenge_status)}<p class="cp-note" role="status">
+          28 天挑战 · {label(data.news.challenge_status)}
+        </p>{/if}
     {/if}
   </div>
 {/each}
@@ -176,14 +149,31 @@
 <style>
   .refresh-group {
     border-bottom: 1px solid var(--cp-line);
-    padding: 8px 0 12px;
+    padding: 8px 0;
   }
-  .refresh-action {
+  .refresh-row {
     display: flex;
-    justify-content: space-between;
     align-items: center;
+    gap: 10px;
+    font-size: 13px;
+    padding: 0;
+  }
+  .refresh-name {
+    flex: 1;
+  }
+  .refresh-row select {
+    max-width: 150px;
+  }
+  .refresh-meta {
+    margin: 5px 0 0;
+  }
+  .custom-interval {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 8px;
     font-size: 12px;
-    margin-top: 6px;
+    margin-top: 8px;
   }
   input {
     width: 110px;

@@ -12,6 +12,8 @@ import type {
 } from './types';
 export const native = isTauri();
 export const empty: Snapshot = {
+  timezone_rebuild: null,
+  timezone_error: null,
   news: {
     request_status: '',
     next_attempt: null,

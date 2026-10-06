@@ -134,6 +134,41 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
         100,
     );
+    let rebuild_start = Instant::now();
+    store.begin_timezone_rebuild(chrono_tz::UTC)?;
+    let mut rebuild_steps = Vec::new();
+    let mut query_during_rebuild_ms: f64 = 0.0;
+    loop {
+        let start = Instant::now();
+        let progress = store.step_timezone_rebuild(256)?;
+        rebuild_steps.push(start.elapsed().as_secs_f64() * 1000.0);
+        if rebuild_steps.len() % 64 == 0 {
+            let start = Instant::now();
+            assert_eq!(store.summary(today, timezone)?.total, expected.total);
+            query_during_rebuild_ms =
+                query_during_rebuild_ms.max(start.elapsed().as_secs_f64() * 1000.0);
+        }
+        if progress.ready {
+            break;
+        }
+    }
+    let publish_start = Instant::now();
+    store.commit_timezone_rebuild(&[("benchmark_timezone", serde_json::json!("UTC"))])?;
+    let publish_ms = publish_start.elapsed().as_secs_f64() * 1000.0;
+    let rebuild_ms = rebuild_start.elapsed().as_secs_f64() * 1000.0;
+    let rebuilt = store.summary(today, chrono_tz::UTC)?;
+    assert_eq!(rebuilt.total, expected.total);
+    assert_eq!(rebuilt.input, expected.input);
+    assert_eq!(rebuilt.cached, expected.cached);
+    assert_eq!(rebuilt.output, expected.output);
+    assert_eq!(rebuilt.sessions, expected.sessions);
+    assert_eq!(store.fact_count()?, 100_000);
+    rebuild_steps.sort_by(f64::total_cmp);
+    let step_count = rebuild_steps.len();
+    let rebuild = serde_json::json!({"from_timezone":timezone.name(),"to_timezone":"UTC","facts":100000,
+        "total_ms":rebuild_ms,"publish_ms":publish_ms,"step_limit":256,"steps":step_count,
+        "step_p50_ms":rebuild_steps[step_count/2],"step_p95_ms":rebuild_steps[(step_count*95).div_ceil(100)-1],
+        "step_max_ms":rebuild_steps[step_count-1],"old_summary_query_max_ms":query_during_rebuild_ms});
     println!(
         "{}",
         serde_json::to_string_pretty(&serde_json::json!({
@@ -145,6 +180,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "load_seconds":load_seconds, "database_bytes":database_bytes,
             "summary_30_days":summary, "recent_10_sessions":recent,
             "session_page":page, "session_detail":detail,
+            "timezone_rebuild":rebuild,
             "correctness": "100k unique facts, 10k distinct sessions, cached input counted once, 30 calendar buckets verified"
         }))?
     );

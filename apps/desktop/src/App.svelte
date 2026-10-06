@@ -22,6 +22,7 @@
   import SessionsPane from './components/SessionsPane.svelte';
   import SourceSettings from './components/SourceSettings.svelte';
   import RefreshSettings from './components/RefreshSettings.svelte';
+  import TimezoneStatus from './components/TimezoneStatus.svelte';
   import {
     windowLabel,
     sessionTokens,
@@ -176,7 +177,18 @@
   });
   async function refresh() {
     try {
-      data = await snapshot();
+      const next = await snapshot();
+      if (data.settings.timezone !== next.settings.timezone) {
+        sessionQuery = {
+          ...sessionQuery,
+          cursor: null,
+          direction: 'older',
+          filter: sessionQuery.filter.model
+            ? { ...sessionQuery.filter, from_day: next.usage.from_day, through_day: next.usage.through_day }
+            : { ...sessionQuery.filter },
+        };
+      }
+      data = next;
       now = Date.now();
       if (!saving && !settingsDirty) {
         settings = copySettings(data.settings);
@@ -195,6 +207,7 @@
         windows_home: path.trim() || null,
         quota_refresh: data.settings.quota_refresh,
         news_refresh: data.settings.news_refresh,
+        timezone: data.settings.timezone,
       });
       settingsDirty = false;
       saving = false;
@@ -657,7 +670,8 @@
             /></label
           >
           <SourceSettings bind:settings changed={() => (settingsDirty = true)} />
-          <p class="cp-note">统计时区：{settings.timezone} · 不保存对话正文，不上传本地用量。</p>
+          <TimezoneStatus {data} />
+          <p class="cp-note">不保存对话正文，不上传本地用量。</p>
           <RefreshSettings {data} reload={refresh} />
           <div class="cp-divider"></div>
           <fieldset class="accent-picker">

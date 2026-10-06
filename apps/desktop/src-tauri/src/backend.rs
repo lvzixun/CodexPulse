@@ -121,6 +121,8 @@ pub struct Snapshot {
     pub error: Option<String>,
     pub quota: QuotaState,
     pub news: crate::news::NewsSnapshot,
+    pub timezone_rebuild: Option<pulse_core::storage::TimezoneProgress>,
+    pub timezone_error: Option<String>,
 }
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct QuotaState {
@@ -230,8 +232,7 @@ impl Source {
 impl Backend {
     pub fn start(app: tauri::AppHandle, db: PathBuf) -> Result<Self, Box<dyn std::error::Error>> {
         let store = Store::open(&db)?;
-        let settings = store.setting::<Settings>("app")?.unwrap_or_default();
-        settings.validate().map_err(std::io::Error::other)?;
+        let settings = initial_settings(&store)?;
         let quota = store.setting::<QuotaState>("quota")?.unwrap_or_default();
         let mut news = store
             .setting::<crate::news::Feed>("news")?
@@ -390,6 +391,11 @@ impl Backend {
                 let mut last_probe = Instant::now() - Duration::from_secs(60);
                 news_schedule.next = news.next_attempt.min(news.challenge_next_attempt);
                 let prices = PriceBook::bundled().unwrap_or_default();
+                let mut timezone_error = None;
+                let mut last_timezone_check = Instant::now() - Duration::from_secs(60);
+                let mut summary_day = Utc::now()
+                    .with_timezone(&settings.timezone.parse::<Tz>().unwrap_or(chrono_tz::UTC))
+                    .date_naive();
                 loop {
                     let anchor = collector_anchor.lock().ok().and_then(|mut pending| {
                         if pending
@@ -416,7 +422,44 @@ impl Backend {
                         break;
                     }
                     crate::platform::release_hidden(&app);
-                    match receiver.recv_timeout(Duration::from_millis(300)) {
+                    if last_timezone_check.elapsed() >= Duration::from_secs(60) {
+                        last_timezone_check = Instant::now();
+                        let detected = iana_time_zone::get_timezone()
+                            .ok()
+                            .and_then(|zone| zone.parse::<Tz>().ok());
+                        let result = detected
+                            .ok_or_else(|| {
+                                "无法读取系统时区，继续使用已保存的统计时区；稍后自动重试。"
+                                    .to_string()
+                            })
+                            .and_then(|zone| {
+                                sync_system_timezone(&mut store, &settings.timezone, zone).map_err(
+                                    |_| {
+                                        "无法开始时区重建，已保留有效统计；稍后自动重试。"
+                                            .to_string()
+                                    },
+                                )
+                            });
+                        match result {
+                            Ok(changed) => {
+                                dirty |= changed || timezone_error.is_some();
+                                timezone_error = None;
+                            }
+                            Err(error) => {
+                                // Do not publish an unfinished stage when the current OS zone
+                                // cannot be confirmed. Keep the last committed calendar.
+                                let _ = store.cancel_timezone_rebuild();
+                                dirty |= timezone_error.as_ref() != Some(&error);
+                                timezone_error = Some(error);
+                            }
+                        }
+                    }
+                    let wait = if store.timezone_rebuild_status().is_some() {
+                        10
+                    } else {
+                        300
+                    };
+                    match receiver.recv_timeout(Duration::from_millis(wait)) {
                         Ok(Message::ReadNews(keys, reply)) => {
                             let mut next = inbox.clone();
                             next.acknowledge(&keys);
@@ -689,12 +732,9 @@ impl Backend {
                             // Refresh controls are saved independently, even when this appearance draft is old.
                             next.quota_refresh = settings.quota_refresh.clone();
                             next.news_refresh = settings.news_refresh.clone();
-                            // Changing timezone needs a bucket rebuild before enabling this setting.
-                            // This restriction is removed by the migration implementation.
-                            if next.timezone != settings.timezone {
-                                let _ = reply.send(Err("当前版本暂不支持切换统计时区".into()));
-                                continue;
-                            }
+                            // Timezone has its own atomic rebuild path. An older appearance
+                            // draft must never restore the pre-rebuild timezone.
+                            next.timezone = settings.timezone.clone();
                             let sources_changed = settings.windows_enabled != next.windows_enabled
                                 || settings.wsl_enabled != next.wsl_enabled
                                 || settings.windows_home != next.windows_home
@@ -998,6 +1038,41 @@ impl Backend {
                             }
                         }
                     }
+                    // Small transactions on the existing single writer keep local ingestion,
+                    // settings and queries responsive throughout historical rebuilding.
+                    let rebuild_start = Instant::now();
+                    while store.timezone_rebuild_status().is_some()
+                        && !collector_stop.load(Ordering::Relaxed)
+                        && rebuild_start.elapsed() < Duration::from_millis(8)
+                    {
+                        let result = store.step_timezone_rebuild(256).and_then(|progress| {
+                            if progress.ready && !collector_stop.load(Ordering::Relaxed) {
+                                let mut next = settings.clone();
+                                next.timezone = progress.target_timezone;
+                                store.commit_timezone_rebuild(&[(
+                                    "app",
+                                    serde_json::to_value(&next)?,
+                                )])?;
+                                settings = next;
+                                last_publish = Instant::now() - Duration::from_secs(1);
+                            }
+                            Ok(())
+                        });
+                        dirty = true;
+                        if result.is_err() {
+                            let _ = store.cancel_timezone_rebuild();
+                            timezone_error =
+                                Some("时区重建失败，已保留有效统计；稍后自动重试。".into());
+                            break;
+                        }
+                    }
+                    let day = Utc::now()
+                        .with_timezone(&settings.timezone.parse::<Tz>().unwrap_or(chrono_tz::UTC))
+                        .date_naive();
+                    if day != summary_day {
+                        summary_day = day;
+                        dirty = true;
+                    }
                     if dirty && last_publish.elapsed() >= Duration::from_secs(1) {
                         let timezone = settings.timezone.parse::<Tz>().unwrap_or(chrono_tz::UTC);
                         let usage = store
@@ -1005,6 +1080,8 @@ impl Backend {
                         let recent = store.recent_sessions(None, 10);
                         if let Ok(mut state) = shared.write() {
                             state.settings = settings.clone();
+                            state.timezone_rebuild = store.timezone_rebuild_status();
+                            state.timezone_error = timezone_error.clone();
                             state.news = inbox.view(news.view());
                             state.collecting = !queue.is_empty();
                             state.sources = sources.iter().map(|s| s.health.clone()).collect();
@@ -1128,6 +1205,47 @@ impl Backend {
         }
     }
 }
+fn sync_system_timezone(
+    store: &mut Store,
+    published: &str,
+    detected: Tz,
+) -> Result<bool, pulse_core::storage::StoreError> {
+    let stage = store.timezone_rebuild_status();
+    if stage
+        .as_ref()
+        .is_some_and(|stage| stage.target_timezone == detected.name())
+    {
+        return Ok(false);
+    }
+    let changed = stage.is_some();
+    if changed {
+        store.cancel_timezone_rebuild()?;
+    }
+    if detected.name() == published {
+        return Ok(changed);
+    }
+    store.begin_timezone_rebuild(detected)?;
+    Ok(true)
+}
+
+fn initial_settings(store: &Store) -> Result<Settings, Box<dyn std::error::Error>> {
+    let stored = store.setting::<serde_json::Value>("app")?;
+    let has_timezone = stored
+        .as_ref()
+        .is_some_and(|value| value.get("timezone").is_some());
+    let settings: Settings = stored
+        .map(serde_json::from_value)
+        .transpose()?
+        .unwrap_or_default();
+    settings.validate().map_err(std::io::Error::other)?;
+    // Persist the published calendar before collecting facts. Later OS changes
+    // rebuild the calendar instead of mixing old and new date buckets.
+    if !has_timezone {
+        store.set_setting("app", &settings)?;
+    }
+    Ok(settings)
+}
+
 fn persist_quota(
     store: &Store,
     quota: &mut QuotaState,
@@ -1255,6 +1373,76 @@ fn enqueue_source(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn system_timezone_changes_replace_stale_stages_and_publish_atomically() {
+        let mut store = Store::in_memory().unwrap();
+        let mut settings = Settings {
+            timezone: "Asia/Shanghai".into(),
+            quota_refresh: crate::refresh::Config {
+                mode: "manual".into(),
+                interval_seconds: 61,
+            },
+            news_refresh: crate::refresh::Config {
+                mode: "auto".into(),
+                interval_seconds: 907,
+            },
+            ..Settings::default()
+        };
+        store.set_setting("app", &settings).unwrap();
+        assert!(
+            !sync_system_timezone(&mut store, &settings.timezone, chrono_tz::Asia::Shanghai)
+                .unwrap()
+        );
+        assert!(sync_system_timezone(&mut store, &settings.timezone, chrono_tz::UTC).unwrap());
+        assert!(!sync_system_timezone(&mut store, &settings.timezone, chrono_tz::UTC).unwrap());
+        assert!(
+            sync_system_timezone(&mut store, &settings.timezone, chrono_tz::Asia::Tokyo).unwrap()
+        );
+        assert_eq!(
+            store.timezone_rebuild_status().unwrap().target_timezone,
+            "Asia/Tokyo"
+        );
+        assert_eq!(initial_settings(&store).unwrap().timezone, "Asia/Shanghai");
+        assert!(
+            sync_system_timezone(&mut store, &settings.timezone, chrono_tz::Asia::Shanghai)
+                .unwrap()
+        );
+        assert!(store.timezone_rebuild_status().is_none());
+        assert!(sync_system_timezone(&mut store, &settings.timezone, chrono_tz::UTC).unwrap());
+        let progress = store.step_timezone_rebuild(256).unwrap();
+        assert!(progress.ready);
+        settings.timezone = progress.target_timezone;
+        store
+            .commit_timezone_rebuild(&[("app", serde_json::to_value(&settings).unwrap())])
+            .unwrap();
+        let published = initial_settings(&store).unwrap();
+        assert_eq!(published.timezone, "UTC");
+        assert_eq!(published.quota_refresh, settings.quota_refresh);
+        assert_eq!(published.news_refresh, settings.news_refresh);
+        assert!(!sync_system_timezone(&mut store, &published.timezone, chrono_tz::UTC).unwrap());
+    }
+    #[test]
+    fn bootstrap_persists_calendar_and_restart_keeps_published_zone_until_rebuild() {
+        let directory = tempfile::tempdir().unwrap();
+        let database = directory.path().join("pulse.sqlite");
+        {
+            let store = Store::open(&database).unwrap();
+            store
+                .set_setting("app", &serde_json::json!({"theme":"light"}))
+                .unwrap();
+            let settings = initial_settings(&store).unwrap();
+            let saved: Settings = store.setting("app").unwrap().unwrap();
+            assert_eq!(saved.timezone, settings.timezone);
+            assert_eq!(saved.theme, "light");
+            let explicit = Settings {
+                timezone: "UTC".into(),
+                ..settings
+            };
+            store.set_setting("app", &explicit).unwrap();
+        }
+        let store = Store::open(&database).unwrap();
+        assert_eq!(initial_settings(&store).unwrap().timezone, "UTC");
+    }
     #[test]
     fn refresh_configs_survive_restart_and_account_switch_clears_every_cache_view() {
         let directory = tempfile::tempdir().unwrap();

@@ -10,12 +10,14 @@ use serde::{Deserialize, Serialize};
 use std::{path::Path, time::Duration};
 mod queries;
 mod sessions;
+mod timezone;
 mod titles;
 pub use queries::{DayUsage, RecentSession, UsageSummary};
 pub use sessions::{
     PageDirection, PriceCoverage, SessionCursor, SessionDetail, SessionDetailRequest,
     SessionFilter, SessionModel, SessionPage, SessionPageRequest, TokenMeasure, UsageBreakdown,
 };
+pub use timezone::TimezoneProgress;
 pub use titles::SessionTitle;
 
 #[derive(Debug, thiserror::Error)]
@@ -32,6 +34,8 @@ pub enum StoreError {
     NewerSchema,
     #[error("invalid query parameters")]
     Query,
+    #[error("timezone rebuild is not ready to publish")]
+    RebuildPending,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -60,6 +64,7 @@ pub struct ModelUsage {
 
 pub struct Store {
     connection: Connection,
+    timezone_rebuild: Option<timezone::TimezoneRebuild>,
 }
 impl Store {
     pub fn open(path: impl AsRef<Path>) -> Result<Self, StoreError> {
@@ -126,7 +131,10 @@ impl Store {
             tx.execute_batch(include_str!("../../migrations/004-session-titles.sql"))?;
             tx.commit()?;
         }
-        Ok(Self { connection })
+        Ok(Self {
+            connection,
+            timezone_rebuild: None,
+        })
     }
     pub fn in_memory() -> Result<Self, StoreError> {
         Self::open(":memory:")
@@ -268,10 +276,30 @@ fn canonical_activity(value: &str) -> String {
 
 fn boundary(day: chrono::NaiveDate, timezone: Tz) -> Result<String, StoreError> {
     use chrono::TimeZone;
-    let dt = timezone
-        .from_local_datetime(&day.and_hms_opt(0, 0, 0).ok_or(StoreError::Time)?)
-        .earliest()
-        .ok_or(StoreError::Time)?;
+    let midnight = day.and_hms_opt(0, 0, 0).ok_or(StoreError::Time)?;
+    // Some IANA zones advance at midnight or skip a calendar date entirely.
+    // Resolve the first existing local instant, choosing the earliest ambiguous
+    // instant. A skipped date gets the same boundary as its following date.
+    let mut found = None;
+    for minute in 0..=2880 {
+        let local = midnight
+            .checked_add_signed(chrono::Duration::minutes(minute))
+            .ok_or(StoreError::Time)?;
+        if let Some(dt) = timezone.from_local_datetime(&local).earliest() {
+            if minute == 0 {
+                found = Some(dt);
+            } else {
+                let previous = local - chrono::Duration::minutes(1);
+                found = (1..=60).find_map(|second| {
+                    timezone
+                        .from_local_datetime(&(previous + chrono::Duration::seconds(second)))
+                        .earliest()
+                });
+            }
+            break;
+        }
+    }
+    let dt = found.ok_or(StoreError::Time)?;
     Ok(dt
         .with_timezone(&chrono::Utc)
         .to_rfc3339_opts(chrono::SecondsFormat::Millis, true))

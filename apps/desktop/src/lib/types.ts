@@ -158,6 +158,8 @@ export interface SourceHealth {
   issues: number;
 }
 export interface Snapshot {
+  timezone_rebuild: { target_timezone: string; processed: number; ready: boolean } | null;
+  timezone_error: string | null;
   news: {
     request_status: string;
     next_attempt: number | null;
