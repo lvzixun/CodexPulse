@@ -64,7 +64,7 @@ fn get_snapshot(state: State<'_, Backend>) -> Result<Snapshot, String> {
         .map_err(|_| "snapshot unavailable".into())
 }
 #[tauri::command]
-async fn refresh_now(group: String, state: State<'_, Backend>) -> Result<(), String> {
+async fn refresh_now(group: String, state: State<'_, Backend>) -> Result<Option<i64>, String> {
     let (tx, rx) = tokio::sync::oneshot::channel();
     state
         .sender

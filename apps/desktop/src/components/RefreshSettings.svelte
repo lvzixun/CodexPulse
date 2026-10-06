@@ -8,6 +8,8 @@
   const presets = [30, 60, 300, 900, 1800, 3600];
   const groups = ['quota', 'news'] as const;
   let saving = $state<string | null>(null);
+  let requesting = $state<string | null>(null);
+  let notices = $state<Record<string, number | null | undefined>>({});
   let error = $state('');
   let custom = $state<Record<string, boolean>>({});
   const time = (value: string | null) =>
@@ -16,6 +18,14 @@
           _0: new Date(value).toLocaleString($locale === 'zh' ? 'zh-CN' : 'en-US'),
         })
       : $t('尚未更新');
+  const retryTime = (value: number) =>
+    new Date(value * 1000).toLocaleTimeString($locale === 'zh' ? 'zh-CN' : 'en-US');
+  $effect(() => {
+    for (const group of groups) {
+      const state = group === 'quota' ? data.quota : data.news;
+      if (state.request_status === 'refreshing') delete notices[group];
+    }
+  });
   const failures: Record<string, string> = $derived({
     connected: $t('已连接'),
     ready: $t('已就绪'),
@@ -71,12 +81,16 @@
     }
   }
   async function refresh(group: 'quota' | 'news') {
+    requesting = group;
+    delete notices[group];
     error = '';
     try {
-      await refreshNow(group);
+      notices[group] = await refreshNow(group);
       await reload();
     } catch (e) {
       error = String(e);
+    } finally {
+      requesting = null;
     }
   }
 </script>
@@ -120,8 +134,13 @@
       </select>
       <button
         class="cp-textbutton"
-        disabled={busy || saving !== null}
-        onclick={() => void refresh(group)}>{busy ? $t('刷新中…') : $t('刷新')}</button
+        disabled={busy || requesting !== null || saving !== null}
+        onclick={() => void refresh(group)}
+        >{busy || requesting === group
+          ? $t('刷新中…')
+          : state.request_status === 'backoff'
+            ? $t('重试')
+            : $t('刷新')}</button
       >
     </div>
     {#if config.mode === 'auto' && (custom[group] || !presets.includes(config.interval_seconds))}
@@ -145,8 +164,19 @@
     {/if}
     <p class="cp-note refresh-meta" role="status">
       {time(state.last_success)}
-      {#if state.request_status === 'backoff'}{$t('· 稍后重试')}{/if}
+      {#if state.request_status === 'backoff'}
+        {#if state.next_attempt}{$t('· 下次尝试 {_0}', {
+            _0: retryTime(state.next_attempt),
+          })}{:else}{$t('· 稍后重试')}{/if}
+      {/if}
     </p>
+    {#if notices[group] !== undefined && !busy}
+      <p class="cp-note refresh-meta" role="status">
+        {notices[group]
+          ? $t('已安排重试，预计 {_0} 再次尝试', { _0: retryTime(notices[group]!) })
+          : $t('已请求刷新')}
+      </p>
+    {/if}
     {#if group === 'quota'}
       {#each Object.entries(data.quota.sources) as [id, source]}
         {#if isFailure(source.status)}<p class="cp-note" role="status">
@@ -188,6 +218,13 @@
   }
   .refresh-row select {
     max-width: 150px;
+  }
+  .refresh-row button {
+    flex-shrink: 0;
+    min-width: 42px;
+    min-height: 28px;
+    padding: 4px 8px !important;
+    justify-content: center;
   }
   .refresh-meta {
     margin: 5px 0 0;

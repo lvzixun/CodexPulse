@@ -46,7 +46,7 @@ export const empty: Snapshot = {
   },
   quota: { buckets: [], sources: {}, request_status: '', last_success: null, next_attempt: null },
   settings: {
-    theme: 'system',
+    theme: 'dark',
     language: 'system',
     accent: 'blue',
     glass: true,
@@ -124,7 +124,7 @@ export const setRefresh = (group: 'quota' | 'news', config: RefreshConfig) =>
     : Promise.reject(new Error(t('刷新设置仅在桌面应用中可用')));
 export const refreshNow = (group: 'quota' | 'news') =>
   native
-    ? invoke<void>('refresh_now', { group })
+    ? invoke<number | null>('refresh_now', { group })
     : Promise.reject(new Error(t('刷新仅在桌面应用中可用')));
 export const windowAction = (action: string) =>
   native ? invoke<void>('window_action', { action }) : Promise.resolve();

@@ -12,7 +12,7 @@ A desktop status panel for Codex. Track account limits, session usage, and publi
 - **Models / Sessions:** model usage shares, paginated session history, inline details, and API-equivalent pricing coverage.
 - **Tibo:** the latest public reset, six months of reset history, and expandable daily entries from the 28-day challenge.
 
-macOS uses a menu bar icon and a native material panel. Windows supports a tray icon and an optional compact floating window. Current releases provide macOS packages only.
+Dark appearance is the default; change it in Settings. macOS uses a menu bar icon and a native material panel. Windows supports a tray icon and an optional compact floating window. Current releases provide macOS packages only.
 
 ## Preview
 

@@ -48,7 +48,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            theme: "system".into(),
+            theme: "dark".into(),
             language: "system".into(),
             accent: "blue".into(),
             glass: true,
@@ -182,7 +182,10 @@ pub enum Message {
         Vec<(crate::http_quota::Scope, crate::http_quota::Stamp)>,
     ),
     News(u64, Box<crate::news::Feed>),
-    Refresh(String, tokio::sync::oneshot::Sender<Result<(), String>>),
+    Refresh(
+        String,
+        tokio::sync::oneshot::Sender<Result<Option<i64>, String>>,
+    ),
     RefreshSettings(
         String,
         crate::refresh::Config,
@@ -570,11 +573,16 @@ impl Backend {
                                 "quota" => {
                                     request_quota_refresh(&mut quota_schedule, &mut quota);
 
-                                    Ok(())
+                                    Ok(None)
                                 }
                                 "news" => {
+                                    let waiting = if news_schedule.flight.is_none() {
+                                        news.prepare_manual_refresh(Utc::now().timestamp())
+                                    } else {
+                                        None
+                                    };
                                     news_schedule.request();
-                                    Ok(())
+                                    Ok(waiting)
                                 }
                                 _ => Err("刷新组无效".into()),
                             };
@@ -1134,8 +1142,12 @@ impl Backend {
                         None
                     };
                     news.request_status = news_status.into();
-                    news.display_next_attempt = if settings.news_refresh.mode == "auto" {
+                    news.display_next_attempt = if news_schedule.requested {
+                        Some(news_block.max(now))
+                    } else if settings.news_refresh.mode == "auto" {
                         Some(news_schedule.next.max(news_block))
+                    } else if news_block > now {
+                        Some(news_block)
                     } else {
                         None
                     };

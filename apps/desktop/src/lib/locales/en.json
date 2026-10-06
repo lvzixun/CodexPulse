@@ -480,5 +480,9 @@
   "当前额度适用 {count} 张": "Applicable now: {count}",
   "账本查询失败；请查看数据源状态": "Ledger query failed. Check data source status.",
   "语言": "Language",
-  "语言无效": "Invalid language"
+  "语言无效": "Invalid language",
+  "重试": "Retry",
+  "已请求刷新": "Refresh requested",
+  "· 下次尝试 {_0}": "· Next attempt at {_0}",
+  "已安排重试，预计 {_0} 再次尝试": "Retry scheduled for {_0}"
 }

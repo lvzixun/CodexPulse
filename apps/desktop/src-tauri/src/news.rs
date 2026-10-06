@@ -35,6 +35,12 @@ pub struct Feed {
     #[serde(default)]
     pub challenge_retry_until: i64,
     #[serde(default)]
+    pub server_retry_until: i64,
+    #[serde(default)]
+    pub challenge_server_retry_until: i64,
+    #[serde(default)]
+    pub manual_retry_until: i64,
+    #[serde(default)]
     pub status_cache_until: i64,
     #[serde(default)]
     pub challenge_cache_until: i64,
@@ -136,6 +142,36 @@ pub struct ResetDate {
     pub reset_type: String,
 }
 impl Feed {
+    pub fn prepare_manual_refresh(&mut self, now: i64) -> Option<i64> {
+        // A click may retry transient failures before automatic exponential backoff.
+        // Preserve explicit server waits, and conservatively retain old 429 records
+        // whose separate Retry-After metadata was not stored by earlier versions.
+        self.retry_until = self.server_retry_until.max(self.manual_retry_until).max(
+            if self.status == "http_429" && self.server_retry_until == 0 {
+                self.retry_until
+            } else {
+                0
+            },
+        );
+        self.challenge_retry_until = self
+            .challenge_server_retry_until
+            .max(self.manual_retry_until)
+            .max(
+                if self.challenge_status == "http_429" && self.challenge_server_retry_until == 0 {
+                    self.challenge_retry_until
+                } else {
+                    0
+                },
+            );
+        let next = self.retry_until.min(self.challenge_retry_until);
+        if next > now {
+            Some(next)
+        } else {
+            // Coalesce repeated clicks while retaining independent endpoint waits.
+            self.manual_retry_until = now.saturating_add(30);
+            None
+        }
+    }
     pub fn for_storage(&self) -> Self {
         let mut feed = self.clone();
         if feed.status_cache.no_store || feed.history_cache.no_store {
@@ -211,6 +247,11 @@ impl Feed {
 }
 pub fn fetch(mut old: Feed, interval: u64, manual: bool, cancelled: &dyn Fn() -> bool) -> Feed {
     let now = chrono::Utc::now();
+    if manual {
+        // A queued retry reserves the next slot when it actually starts, not at
+        // the earlier click; otherwise another click could immediately follow it.
+        old.manual_retry_until = now.timestamp().saturating_add(30);
+    }
     old.last_attempt = Some(now.to_rfc3339());
     let agent: ureq::Agent = ureq::Agent::config_builder()
         .tls_config(crate::http_quota::tls_config())
@@ -291,12 +332,14 @@ pub fn fetch(mut old: Feed, interval: u64, manual: bool, cancelled: &dyn Fn() ->
                 old.last_success = Some(chrono::Utc::now().to_rfc3339());
                 old.failures = 0;
                 old.retry_until = 0;
+                old.server_retry_until = 0;
                 old.status_cache_until = now.timestamp().saturating_add(update.wait);
                 old.next_attempt = now
                     .timestamp()
                     .saturating_add(update.wait.max(interval as i64));
             }
             Err((code, wait)) => {
+                old.server_retry_until = server_retry_until(&code, wait, now.timestamp());
                 old.status = code;
                 old.failures = old.failures.saturating_add(1);
                 let backoff = (300u64.saturating_mul(1u64 << old.failures.min(5))).min(3600) as i64;
@@ -321,11 +364,13 @@ pub fn fetch(mut old: Feed, interval: u64, manual: bool, cancelled: &dyn Fn() ->
                 old.challenge_status = "connected".into();
                 old.challenge_failures = 0;
                 old.challenge_retry_until = 0;
+                old.challenge_server_retry_until = 0;
                 old.challenge_cache_until = now.timestamp().saturating_add(wait);
                 old.challenge_next_attempt =
                     now.timestamp().saturating_add(wait.max(interval as i64));
             }
             Err((code, wait)) => {
+                old.challenge_server_retry_until = server_retry_until(&code, wait, now.timestamp());
                 old.challenge_status = code;
                 old.challenge_failures = old.challenge_failures.saturating_add(1);
                 let backoff =
@@ -336,6 +381,17 @@ pub fn fetch(mut old: Feed, interval: u64, manual: bool, cancelled: &dyn Fn() ->
         }
     }
     old
+}
+fn server_retry_until(code: &str, wait: i64, now: i64) -> i64 {
+    if code.starts_with("http_") && (wait > 0 || code == "http_429") {
+        now.saturating_add(if code == "http_429" {
+            wait.max(300)
+        } else {
+            wait
+        })
+    } else {
+        0
+    }
 }
 fn fetch_endpoint(agent: &ureq::Agent, url: &str, old: &Cache) -> Result<(Cache, i64), FetchError> {
     fetch_resource(agent, url, old, Resource::Json)
@@ -363,7 +419,14 @@ fn fetch_resource_until(
 ) -> Result<(Cache, i64), FetchError> {
     let mut request = agent
         .get(url)
-        .header("User-Agent", "CodexPulse/0.1.0 (+https://codex-resets.com)")
+        .header(
+            "User-Agent",
+            concat!(
+                "CodexPulse/",
+                env!("CARGO_PKG_VERSION"),
+                " (+https://codex-resets.com)"
+            ),
+        )
         .header(
             "Accept",
             if !matches!(resource, Resource::Json) {
@@ -387,7 +450,7 @@ fn fetch_resource_until(
         .get("Retry-After")
         .and_then(|v| v.to_str().ok())
         .map(|v| crate::refresh::retry_after(Some(v), chrono::Utc::now().timestamp()))
-        .unwrap_or(300);
+        .unwrap_or(0);
     let cache_control = response
         .headers()
         .get("Cache-Control")
@@ -677,6 +740,67 @@ mod tests {
             .timeout_global(Some(Duration::from_secs(3)))
             .build()
             .into()
+    }
+
+    #[test]
+    fn manual_refresh_retries_client_backoff_and_coalesces_repeated_clicks() {
+        let mut feed = Feed {
+            status: "http_403".into(),
+            challenge_status: "network_error".into(),
+            retry_until: 3600,
+            challenge_retry_until: 3600,
+            last_success: Some("2026-10-06T07:00:00Z".into()),
+            ..Feed::default()
+        };
+        assert_eq!(feed.prepare_manual_refresh(100), None);
+        assert_eq!((feed.retry_until, feed.challenge_retry_until), (0, 0));
+        assert_eq!(feed.prepare_manual_refresh(101), Some(130));
+        assert_eq!(feed.prepare_manual_refresh(130), None);
+        assert_eq!(feed.last_success.as_deref(), Some("2026-10-06T07:00:00Z"));
+    }
+
+    #[test]
+    fn manual_refresh_preserves_server_waits_and_legacy_rate_limits() {
+        let mut feed = Feed {
+            server_retry_until: 200,
+            challenge_server_retry_until: 300,
+            retry_until: 3600,
+            challenge_retry_until: 3600,
+            ..Feed::default()
+        };
+        assert_eq!(feed.prepare_manual_refresh(100), Some(200));
+        assert_eq!((feed.retry_until, feed.challenge_retry_until), (200, 300));
+        // The challenge may be retried while the reset endpoint is still waiting.
+        feed.challenge_server_retry_until = 0;
+        assert_eq!(feed.prepare_manual_refresh(100), None);
+        assert_eq!(feed.retry_until, 200);
+        let mut legacy = Feed {
+            status: "http_429".into(),
+            challenge_status: "http_429".into(),
+            retry_until: 500,
+            challenge_retry_until: 600,
+            ..Feed::default()
+        };
+        assert_eq!(legacy.prepare_manual_refresh(100), Some(500));
+    }
+
+    #[test]
+    fn refusal_without_retry_after_is_distinct_from_server_wait() {
+        for (header, expected) in [("", 0), ("Retry-After: 120\r\n", 120)] {
+            let (url, server) = serve(format!(
+                "HTTP/1.1 403 Forbidden\r\n{header}Content-Length: 0\r\nConnection: close\r\n\r\n"
+            ));
+            let (code, wait) =
+                fetch_resource(&agent(), &url, &Cache::default(), Resource::Json).unwrap_err();
+            server.join().unwrap();
+            assert_eq!(code, "http_403");
+            assert_eq!(wait, expected);
+            assert_eq!(
+                server_retry_until(&code, wait, 100),
+                if wait == 0 { 0 } else { 220 }
+            );
+        }
+        assert_eq!(server_retry_until("http_429", 0, 100), 400);
     }
 
     #[test]
