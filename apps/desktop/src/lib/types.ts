@@ -1,5 +1,6 @@
 export interface Settings {
   theme: 'system' | 'light' | 'dark';
+  accent: 'blue' | 'violet' | 'teal' | 'amber' | 'rose';
   glass: boolean;
   floating: boolean;
   always_on_top: boolean;
@@ -8,6 +9,22 @@ export interface Settings {
   windows_home: string | null;
   timezone: string;
   compact_position: [number, number] | null;
+  compact_anchor: {
+    monitor: string | null;
+    x: number;
+    y: number;
+    right: boolean;
+    bottom: boolean;
+  } | null;
+}
+export interface ViewState {
+  mode: 'compact' | 'details';
+  page: string;
+  selected_model: string | null;
+  selected_session: string | null;
+  scroll: Record<string, number>;
+  glass_supported: boolean;
+  floating_supported: boolean;
 }
 export interface ModelUsage {
   model: string;

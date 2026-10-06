@@ -57,6 +57,7 @@ impl Store {
         connection.pragma_update(None, "journal_mode", "WAL")?;
         connection.pragma_update(None, "synchronous", "NORMAL")?;
         connection.execute_batch(include_str!("../../migrations/001.sql"))?;
+        connection.execute_batch(include_str!("../../migrations/002-query-indexes.sql"))?;
         Ok(Self { connection })
     }
     pub fn in_memory() -> Result<Self, StoreError> {

@@ -1,15 +1,270 @@
 use crate::backend::{Backend, Settings};
+use crate::geometry::{Anchor, Area, Placement};
+use serde::{Deserialize, Serialize};
 use std::{
     path::PathBuf,
     process::{Command, Stdio},
+    sync::Mutex,
     time::{Duration, Instant},
 };
 use tauri::{
-    Emitter, LogicalSize, Manager, Theme,
+    Emitter, Manager, Theme,
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
 };
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ViewState {
+    pub mode: String,
+    pub page: String,
+    pub selected_model: Option<String>,
+    pub selected_session: Option<String>,
+    pub scroll: std::collections::BTreeMap<String, f64>,
+    pub glass_supported: bool,
+    pub floating_supported: bool,
+}
+impl Default for ViewState {
+    fn default() -> Self {
+        Self {
+            mode: "compact".into(),
+            page: "overview".into(),
+            selected_model: None,
+            selected_session: None,
+            scroll: Default::default(),
+            glass_supported: false,
+            floating_supported: cfg!(windows),
+        }
+    }
+}
+pub struct WindowsWindowHost {
+    pub view: Mutex<ViewState>,
+    anchor: Mutex<Option<Anchor>>,
+    hidden_since: Mutex<Option<Instant>>,
+    creating: Mutex<()>,
+    material: Mutex<Option<bool>>,
+    maintenance: Mutex<Instant>,
+    release_pending: std::sync::atomic::AtomicBool,
+}
+impl Default for WindowsWindowHost {
+    fn default() -> Self {
+        Self {
+            view: Mutex::new(ViewState::default()),
+            anchor: Mutex::new(None),
+            hidden_since: Mutex::new(None),
+            creating: Mutex::new(()),
+            material: Mutex::new(None),
+            maintenance: Mutex::new(Instant::now()),
+            release_pending: std::sync::atomic::AtomicBool::new(false),
+        }
+    }
+}
+impl WindowsWindowHost {
+    pub fn remember_view(&self, next: ViewState) -> Result<(), String> {
+        let pages = ["overview", "models", "sessions", "news", "settings"];
+        if !pages.contains(&next.page.as_str())
+            || next.selected_model.as_ref().is_some_and(|s| s.len() > 256)
+            || next
+                .selected_session
+                .as_ref()
+                .is_some_and(|s| s.len() > 256)
+            || next.scroll.len() > pages.len()
+            || next.scroll.iter().any(|(page, y)| {
+                !pages.contains(&page.as_str()) || !y.is_finite() || *y < 0.0 || *y > 10_000_000.0
+            })
+        {
+            return Err("界面状态无效".into());
+        }
+        let mut view = self.view.lock().map_err(|_| "界面状态不可用")?;
+        // The host owns mode/material/platform capabilities; the renderer owns navigation.
+        view.page = next.page;
+        view.selected_model = next.selected_model;
+        view.selected_session = next.selected_session;
+        view.scroll = next.scroll;
+        Ok(())
+    }
+}
+
+fn settings(app: &tauri::AppHandle) -> Settings {
+    app.state::<Backend>()
+        .snapshot
+        .read()
+        .map(|s| s.settings.clone())
+        .unwrap_or_default()
+}
+fn areas(app: &tauri::AppHandle) -> Vec<Area> {
+    let primary = app
+        .primary_monitor()
+        .ok()
+        .flatten()
+        .and_then(|m| m.name().cloned());
+    let mut areas = app
+        .available_monitors()
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|m| {
+            let work = m.work_area();
+            (work.size.width > 0 && work.size.height > 0 && m.scale_factor() > 0.0).then(|| Area {
+                monitor: m.name().cloned(),
+                x: work.position.x,
+                y: work.position.y,
+                width: work.size.width,
+                height: work.size.height,
+                scale: m.scale_factor(),
+            })
+        })
+        .collect::<Vec<_>>();
+    areas.sort_by_key(|a| a.monitor != primary);
+    areas
+}
+fn ensure_window(app: &tauri::AppHandle) -> tauri::Result<tauri::WebviewWindow> {
+    let host = app.state::<WindowsWindowHost>();
+    let _creation = host.creating.lock().expect("window creation state");
+    if let Some(window) = app.get_webview_window("pulse") {
+        return Ok(window);
+    }
+    let config = app
+        .config()
+        .app
+        .windows
+        .iter()
+        .find(|w| w.label == "pulse")
+        .expect("pulse window configuration");
+    let window = tauri::WebviewWindowBuilder::from_config(app, config)?.build()?;
+    apply_settings(app, &settings(app));
+    Ok(window)
+}
+fn position(app: &tauri::AppHandle, w: &tauri::WebviewWindow, compact: bool) {
+    let host = app.state::<WindowsWindowHost>();
+    let anchor = host
+        .anchor
+        .lock()
+        .ok()
+        .and_then(|a| a.clone())
+        .or_else(|| settings(app).compact_anchor);
+    let monitors = areas(app);
+    if let Some(area) = crate::geometry::choose(&monitors, anchor.as_ref()) {
+        let p = area.place(
+            anchor.as_ref(),
+            if compact {
+                (336.0, 268.0)
+            } else {
+                (496.0, 700.0)
+            },
+        );
+        // Restrict the configured minimum on small remote-desktop work areas.
+        let _ = w.set_min_size(Some(tauri::PhysicalSize::new(
+            p.width.min((320.0 * area.scale) as u32),
+            p.height.min((240.0 * area.scale) as u32),
+        )));
+        let _ = w.set_size(tauri::PhysicalSize::new(p.width, p.height));
+        let _ = w.set_position(tauri::PhysicalPosition::new(p.x, p.y));
+    }
+}
+pub fn moved(app: &tauri::AppHandle, position: tauri::PhysicalPosition<i32>) {
+    let host = app.state::<WindowsWindowHost>();
+    if !host.view.lock().is_ok_and(|v| v.mode == "compact") {
+        return;
+    }
+    let Some(window) = app.get_webview_window("pulse") else {
+        return;
+    };
+    let Ok(size) = window.outer_size() else {
+        return;
+    };
+    let monitors = areas(app);
+    let center = (
+        position.x as i64 + size.width as i64 / 2,
+        position.y as i64 + size.height as i64 / 2,
+    );
+    let area = monitors
+        .iter()
+        .find(|a| {
+            center.0 >= a.x as i64
+                && center.1 >= a.y as i64
+                && center.0 < a.x as i64 + a.width as i64
+                && center.1 < a.y as i64 + a.height as i64
+        })
+        .or_else(|| monitors.first());
+    if let Some(area) = area {
+        let anchor = area.capture(Placement {
+            x: position.x,
+            y: position.y,
+            width: size.width,
+            height: size.height,
+        });
+        if let Ok(mut old) = host.anchor.lock() {
+            *old = Some(anchor.clone());
+        }
+        app.state::<Backend>().remember_anchor(anchor);
+    }
+}
+pub fn hide(app: &tauri::AppHandle) {
+    if let Some(w) = app.get_webview_window("pulse") {
+        let _ = app.emit("window-visible", false);
+        let _ = w.hide();
+        if let Ok(mut hidden) = app.state::<WindowsWindowHost>().hidden_since.lock() {
+            *hidden = Some(Instant::now());
+        }
+    }
+}
+/// Called by the existing collector scheduler. No extra maintenance thread/WebView.
+pub fn release_hidden(app: &tauri::AppHandle) {
+    let Some(host) = app.try_state::<WindowsWindowHost>() else {
+        return;
+    };
+    let due = host
+        .hidden_since
+        .lock()
+        .is_ok_and(|s| s.is_some_and(|t| t.elapsed() >= Duration::from_secs(300)));
+    if !due {
+        if let Ok(mut last) = host.maintenance.lock()
+            && last.elapsed() >= Duration::from_secs(30)
+        {
+            *last = Instant::now();
+            let handle = app.clone();
+            let _ = app.run_on_main_thread(move || {
+                if handle
+                    .get_webview_window("pulse")
+                    .is_some_and(|w| w.is_visible().unwrap_or(false))
+                {
+                    refresh_material(&handle);
+                    correct_bounds(&handle);
+                }
+            });
+        }
+        return;
+    }
+    if host
+        .release_pending
+        .swap(true, std::sync::atomic::Ordering::Relaxed)
+    {
+        return;
+    }
+    let handle = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        let host = handle.state::<WindowsWindowHost>();
+        if let Ok(mut hidden) = host.hidden_since.lock()
+            && hidden.is_some_and(|t| t.elapsed() >= Duration::from_secs(300))
+            && let Some(w) = handle.get_webview_window("pulse")
+            && !w.is_visible().unwrap_or(true)
+        {
+            // destroy bypasses CloseRequested; ExitRequested is guarded in main.
+            if w.destroy().is_ok() {
+                *hidden = None;
+                if let Ok(mut material) = host.material.lock() {
+                    *material = None;
+                }
+            }
+        }
+        host.release_pending
+            .store(false, std::sync::atomic::Ordering::Relaxed);
+    });
+}
 pub fn setup(app: &tauri::App, settings: &Settings) -> Result<(), Box<dyn std::error::Error>> {
+    *app.state::<WindowsWindowHost>()
+        .anchor
+        .lock()
+        .map_err(|_| "anchor state")? = settings.compact_anchor.clone();
     let settings_item = MenuItem::with_id(app, "settings", "设置", true, None::<&str>)?;
     let separator = PredefinedMenuItem::separator(app)?;
     let exit = MenuItem::with_id(app, "exit", "退出", true, None::<&str>)?;
@@ -37,22 +292,16 @@ pub fn setup(app: &tauri::App, settings: &Settings) -> Result<(), Box<dyn std::e
             }
         })
         .build(app)?;
-    apply_settings(app.handle(), settings);
-    if let Some(w) = app.get_webview_window("pulse") {
-        if let Some((x, y)) = settings.compact_position {
+    if settings.floating {
+        let w = ensure_window(app.handle())?;
+        if settings.compact_anchor.is_none()
+            && let Some((x, y)) = settings.compact_position
+        {
             let _ = w.set_position(tauri::PhysicalPosition::new(x, y));
-        } else if let Ok(Some(m)) = w.primary_monitor() {
-            let scale = m.scale_factor();
-            let size = m.size();
-            let origin = m.position();
-            let _ = w.set_position(tauri::PhysicalPosition::new(
-                origin.x + size.width as i32 - (360.0 * scale) as i32,
-                origin.y + (64.0 * scale) as i32,
-            ));
+            moved(app.handle(), tauri::PhysicalPosition::new(x, y));
         }
-        if settings.floating {
-            let _ = w.show();
-        }
+        position(app.handle(), &w, true);
+        let _ = w.show();
     }
     Ok(())
 }
@@ -64,7 +313,25 @@ pub fn apply_settings(app: &tauri::AppHandle, settings: &Settings) {
             "light" => Some(Theme::Light),
             _ => None,
         });
-        let effects = if settings.glass {
+        refresh_material_with(app, settings);
+        // A settings window remains open when the optional float is disabled.
+        let _ = app.emit("settings-applied", settings);
+    }
+}
+pub fn refresh_material(app: &tauri::AppHandle) {
+    refresh_material_with(app, &settings(app));
+}
+fn refresh_material_with(app: &tauri::AppHandle, settings: &Settings) {
+    if let Some(w) = app.get_webview_window("pulse") {
+        let host = app.state::<WindowsWindowHost>();
+        let allowed = settings.glass && crate::material::transparency_allowed();
+        let Ok(mut previous) = host.material.lock() else {
+            return;
+        };
+        if *previous == Some(allowed) {
+            return;
+        }
+        let effects = if allowed {
             Some(tauri::utils::config::WindowEffectsConfig {
                 effects: vec![tauri::utils::WindowEffect::Acrylic],
                 ..Default::default()
@@ -72,16 +339,37 @@ pub fn apply_settings(app: &tauri::AppHandle, settings: &Settings) {
         } else {
             None
         };
-        let supported = w.set_effects(effects).is_ok();
+        let supported = w.set_effects(effects).is_ok() && allowed;
+        if !supported {
+            let _ = w.set_effects(None);
+        }
+        *previous = Some(allowed);
+        if let Ok(mut view) = host.view.lock() {
+            view.glass_supported = supported;
+        }
         let _ = app.emit("glass-supported", supported);
-        // A settings window remains open when the optional float is disabled.
-        let _ = app.emit("settings-applied", settings);
     }
 }
 pub fn show_details(app: &tauri::AppHandle, page: Option<&str>) {
-    if let Some(w) = app.get_webview_window("pulse") {
-        let _ = w.set_size(LogicalSize::new(496.0, 700.0));
-        let _ = w.center();
+    // Building a WebView in a synchronous native tray callback can deadlock on Windows.
+    let handle = app.clone();
+    let page = page.map(str::to_owned);
+    tauri::async_runtime::spawn_blocking(move || show_details_now(&handle, page.as_deref()));
+}
+fn show_details_now(app: &tauri::AppHandle, page: Option<&str>) {
+    let host = app.state::<WindowsWindowHost>();
+    if let Ok(mut view) = host.view.lock() {
+        view.mode = "details".into();
+        if let Some(page) = page {
+            view.page = page.into();
+        }
+    }
+    if let Ok(mut hidden) = host.hidden_since.lock() {
+        *hidden = None;
+    }
+    if let Ok(w) = ensure_window(app) {
+        position(app, &w, false);
+        apply_settings(app, &settings(app));
         let _ = w.show();
         let _ = app.emit("window-visible", true);
         let _ = w.set_focus();
@@ -89,25 +377,57 @@ pub fn show_details(app: &tauri::AppHandle, page: Option<&str>) {
         let _ = app.emit("snapshot-changed", ());
     }
 }
+pub fn correct_bounds(app: &tauri::AppHandle) {
+    if let Some(w) = app.get_webview_window("pulse") {
+        let compact = app
+            .state::<WindowsWindowHost>()
+            .view
+            .lock()
+            .is_ok_and(|v| v.mode == "compact");
+        // Only relocate when current bounds are out of a work area. Detail drag position
+        // remains valid while visible; compact restoration still uses its saved anchor.
+        if let (Ok(p), Ok(size)) = (w.outer_position(), w.outer_size()) {
+            let valid = areas(app).iter().any(|a| {
+                p.x >= a.x
+                    && p.y >= a.y
+                    && p.x as i64 + size.width as i64 <= a.x as i64 + a.width as i64
+                    && p.y as i64 + size.height as i64 <= a.y as i64 + a.height as i64
+            });
+            if !valid {
+                position(app, &w, compact);
+            }
+        }
+    }
+}
+pub fn scale_changed(app: &tauri::AppHandle) {
+    if let Some(w) = app.get_webview_window("pulse") {
+        let compact = app
+            .state::<WindowsWindowHost>()
+            .view
+            .lock()
+            .is_ok_and(|v| v.mode == "compact");
+        position(app, &w, compact);
+    }
+}
 pub fn compact_or_hide(app: &tauri::AppHandle) {
-    let settings = app
-        .state::<Backend>()
-        .snapshot
-        .read()
-        .ok()
-        .map(|s| s.settings.clone())
-        .unwrap_or_default();
+    let settings = settings(app);
+    let host = app.state::<WindowsWindowHost>();
     if let Some(w) = app.get_webview_window("pulse") {
         if settings.floating {
-            let _ = w.set_size(LogicalSize::new(336.0, 268.0));
-            if let Some((x, y)) = settings.compact_position {
-                let _ = w.set_position(tauri::PhysicalPosition::new(x, y));
+            // Keep detail moves separate from the compact anchor. Capture resize-generated
+            // move events only after both size and position have been restored.
+            position(app, &w, true);
+            if let Ok(mut view) = host.view.lock() {
+                view.mode = "compact".into();
+            }
+            if let Ok(mut hidden) = host.hidden_since.lock() {
+                *hidden = None;
             }
             let _ = app.emit("window-mode", ("compact", None::<String>));
+            let _ = app.emit("window-visible", true);
             let _ = w.show();
         } else {
-            let _ = app.emit("window-visible", false);
-            let _ = w.hide();
+            hide(app);
         }
     }
 }

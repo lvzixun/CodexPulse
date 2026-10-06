@@ -1,11 +1,13 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod backend;
+mod geometry;
+mod material;
 mod news;
 mod platform;
 mod rpc;
 
 use backend::{Backend, Settings, Snapshot};
-use tauri::{Emitter, Manager, State};
+use tauri::{Manager, State};
 use tauri_plugin_opener::OpenerExt;
 
 #[tauri::command]
@@ -35,6 +37,23 @@ fn get_snapshot(state: State<'_, Backend>) -> Result<Snapshot, String> {
         .map_err(|_| "snapshot unavailable".into())
 }
 #[tauri::command]
+fn get_view_state(
+    state: State<'_, platform::WindowsWindowHost>,
+) -> Result<platform::ViewState, String> {
+    state
+        .view
+        .lock()
+        .map(|v| v.clone())
+        .map_err(|_| "界面状态不可用".into())
+}
+#[tauri::command]
+fn remember_view(
+    view: platform::ViewState,
+    state: State<'_, platform::WindowsWindowHost>,
+) -> Result<(), String> {
+    state.remember_view(view)
+}
+#[tauri::command]
 async fn set_settings(
     settings: Settings,
     app: tauri::AppHandle,
@@ -51,17 +70,13 @@ async fn set_settings(
     Ok(())
 }
 #[tauri::command]
-fn window_action(action: String, app: tauri::AppHandle) -> Result<(), String> {
+async fn window_action(action: String, app: tauri::AppHandle) -> Result<(), String> {
     match action.as_str() {
         "expand" => platform::show_details(&app, None),
         "compact" => platform::compact_or_hide(&app),
         "settings" => platform::show_details(&app, Some("settings")),
         "exit" => app.exit(0),
-        "hide" => {
-            if let Some(w) = app.get_webview_window("pulse") {
-                w.hide().map_err(|e| e.to_string())?;
-            }
-        }
+        "hide" => platform::hide(&app),
         _ => return Err("unknown window action".into()),
     };
     Ok(())
@@ -76,9 +91,12 @@ fn main() {
             get_snapshot,
             set_settings,
             window_action,
-            open_source
+            open_source,
+            get_view_state,
+            remember_view
         ])
         .setup(|app| {
+            app.manage(platform::WindowsWindowHost::default());
             let directory = app.path().app_local_data_dir()?;
             std::fs::create_dir_all(&directory)?;
             let backend = Backend::start(app.handle().clone(), directory.join("pulse.sqlite"))?;
@@ -98,13 +116,25 @@ fn main() {
                 platform::compact_or_hide(window.app_handle());
             }
             tauri::WindowEvent::Moved(position) => {
-                let _ = window.app_handle().emit("window-position", position);
+                platform::moved(window.app_handle(), *position);
             }
+            tauri::WindowEvent::ScaleFactorChanged { .. } => {
+                platform::scale_changed(window.app_handle())
+            }
+            tauri::WindowEvent::ThemeChanged(_) => platform::refresh_material(window.app_handle()),
             _ => {}
         })
         .build(tauri::generate_context!())
         .expect("CodexPulse failed to start")
         .run(|app, event| {
+            if let tauri::RunEvent::ExitRequested {
+                code: None, api, ..
+            } = &event
+            {
+                // Destroying the last hidden WebView leaves the native tray and collectors alive.
+                api.prevent_exit();
+                return;
+            }
             if matches!(
                 event,
                 tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit

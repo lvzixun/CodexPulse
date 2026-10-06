@@ -13,6 +13,7 @@
     "windows": [
       {
         "label": "pulse",
+        "create": false,
         "title": "CodexPulse",
         "width": 336,
         "height": 268,

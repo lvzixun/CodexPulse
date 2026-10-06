@@ -1,7 +1,16 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import { getCurrentWindow } from '@tauri-apps/api/window';
-  import { empty, native, onEvent, saveSettings, snapshot, windowAction } from './lib/ipc';
+  import {
+    empty,
+    native,
+    onEvent,
+    saveSettings,
+    snapshot,
+    windowAction,
+    getViewState,
+    rememberView,
+  } from './lib/ipc';
   import type { Settings } from './lib/types';
   import QuotaCard from './components/QuotaCard.svelte';
   import NewsCard from './components/NewsCard.svelte';
@@ -18,12 +27,25 @@
   let now = $state(Date.now());
   let settings = $state<Settings>({ ...empty.settings });
   let path = $state('');
+  let viewReady = $state(false);
+  let glassSupported = $state(!native);
+  let floatingSupported = $state(true);
+  let scroll = $state<Record<string, number>>({});
+  let content: HTMLDivElement | undefined = $state();
+  let restoreScroll = false;
   const tabs = [
     ['overview', '总览'],
     ['models', '模型'],
     ['sessions', 'Sessions'],
     ['news', '消息'],
     ['settings', '设置'],
+  ];
+  const accents: [Settings['accent'], string, string, string][] = [
+    ['blue', '蓝色', '#8bbbff', '#2261d6'],
+    ['violet', '紫色', '#b5b4ff', '#5148bf'],
+    ['teal', '青绿', '#6cdbc7', '#0b7564'],
+    ['amber', '琥珀', '#f2c675', '#915600'],
+    ['rose', '玫红', '#ffa7c4', '#aa3462'],
   ];
   const number = (n: number) =>
     new Intl.NumberFormat('zh-CN', { notation: 'compact', maximumFractionDigits: 2 }).format(n);
@@ -50,6 +72,31 @@
   const model = $derived(data.usage.models.find((m) => m.model === selectedModel));
   const highest = $derived(Math.max(1, ...data.usage.days.map((d) => d.total)));
   const primaryQuota = $derived(data.quota?.buckets[0]?.primary);
+  async function goPage(next: string) {
+    if (content) scroll[page] = content.scrollTop;
+    page = next;
+    await restorePageScroll();
+  }
+  async function restorePageScroll() {
+    restoreScroll = true;
+    await tick();
+    if (content) content.scrollTop = scroll[page] ?? 0;
+    restoreScroll = false;
+  }
+  $effect(() => {
+    const view = {
+      mode,
+      page,
+      selected_model: selectedModel,
+      selected_session: selectedSession,
+      scroll: { ...scroll },
+      glass_supported: glassSupported,
+      floating_supported: floatingSupported,
+    };
+    if (!viewReady) return;
+    const timer = setTimeout(() => void rememberView(view).catch(() => {}), 200);
+    return () => clearTimeout(timer);
+  });
   async function refresh() {
     try {
       data = await snapshot();
@@ -90,14 +137,15 @@
     };
     clockVisible(!document.hidden);
     const cleanups: (() => void)[] = [];
-    void refresh();
     const events = [
       onEvent('snapshot-changed', () => {
         if (!document.hidden) void refresh();
       }),
       onEvent<[string, string | null]>('window-mode', ([next, target]) => {
+        if (content) scroll[page] = content.scrollTop;
         mode = next as typeof mode;
-        if (target) page = target;
+        if (target) void goPage(target);
+        else void restorePageScroll();
         void refresh();
       }),
       onEvent<Settings>('settings-applied', (next) => {
@@ -108,10 +156,27 @@
         void refresh();
       }),
       onEvent<boolean>('window-visible', clockVisible),
+      onEvent<boolean>('glass-supported', (supported) => (glassSupported = supported)),
     ];
-    void Promise.all(events).then((list) => {
+    void Promise.all(events).then(async (list) => {
       if (disposed) list.forEach((fn) => fn());
-      else cleanups.push(...list);
+      else {
+        cleanups.push(...list);
+        await refresh();
+        const view = await getViewState();
+        if (disposed) return;
+        if (view) {
+          mode = view.mode;
+          page = view.page;
+          selectedModel = view.selected_model;
+          selectedSession = view.selected_session;
+          scroll = view.scroll;
+          glassSupported = view.glass_supported;
+          floatingSupported = view.floating_supported;
+        }
+        viewReady = true;
+        await restorePageScroll();
+      }
     });
     const visible = () => {
       clockVisible(!document.hidden);
@@ -133,7 +198,12 @@
   });
 </script>
 
-<main class:compact={mode === 'compact'} class:opaque={!settings.glass} data-theme={settings.theme}>
+<main
+  class:compact={mode === 'compact'}
+  class:opaque={!settings.glass || !glassSupported}
+  data-theme={settings.theme}
+  data-accent={settings.accent ?? 'blue'}
+>
   <header>
     <button class="brand" onpointerdown={drag} aria-label="拖动 CodexPulse 窗口"
       ><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M3 17h7l4-9 5 17 4-8h6" /></svg><span
@@ -145,7 +215,7 @@
         class="icon"
         aria-label="打开设置"
         onclick={() => {
-          page = 'settings';
+          void goPage('settings');
           void windowAction('settings');
         }}>⚙</button
       ><button class="icon" aria-label="收起窗口" onclick={() => void windowAction('compact')}
@@ -183,11 +253,18 @@
     </button>
   {:else}
     <nav aria-label="详情页面">
-      {#each tabs as [key, label]}<button class:active={page === key} onclick={() => (page = key)}
-          >{label}</button
+      {#each tabs as [key, label]}<button
+          class:active={page === key}
+          onclick={() => void goPage(key)}>{label}</button
         >{/each}
     </nav>
-    <div class="content">
+    <div
+      class="content"
+      bind:this={content}
+      onscroll={() => {
+        if (!restoreScroll && content) scroll[page] = content.scrollTop;
+      }}
+    >
       {#if data.error || error}<div class="notice" role="status">{error || data.error}</div>{/if}
       {#if page === 'overview'}
         <div class="section-heading">
@@ -242,7 +319,7 @@
         <section class="card">
           <div class="card-heading">
             <h2>最近 30 天 · 所有模型</h2>
-            <button class="text-button" onclick={() => (page = 'models')}>模型明细 →</button>
+            <button class="text-button" onclick={() => void goPage('models')}>模型明细 →</button>
           </div>
           <div class="metrics three">
             <div><strong>{number(data.usage.total)}</strong><small>总 tokens</small></div>
@@ -419,25 +496,46 @@
                 value="dark">深色</option
               ></select
             ></label
-          ><label class="setting-row"
+          >
+          <fieldset class="accent-picker">
+            <legend>主题颜色</legend>
+            <div class="accent-options">
+              {#each accents as [key, label, dark, light]}
+                <label
+                  class:chosen={settings.accent === key}
+                  style={`--swatch-dark: ${dark}; --swatch-light: ${light}`}
+                >
+                  <input
+                    type="radio"
+                    name="accent"
+                    value={key}
+                    bind:group={settings.accent}
+                    aria-label={`${label}${key === 'blue' ? '（默认）' : ''}`}
+                  />
+                  <span class="accent-swatch" aria-hidden="true"></span><span>{label}</span>
+                </label>
+              {/each}
+            </div>
+          </fieldset>
+          <label class="setting-row"
             ><span>毛玻璃效果<small>关闭后使用不透明背景</small></span><input
               type="checkbox"
               role="switch"
               bind:checked={settings.glass}
             /></label
-          ><label class="setting-row"
-            ><span>桌面浮窗<small>关闭后通过托盘打开同一个详情</small></span><input
-              type="checkbox"
-              role="switch"
-              bind:checked={settings.floating}
-            /></label
-          ><label class="setting-row"
-            ><span>窗口始终置顶</span><input
-              type="checkbox"
-              role="switch"
-              bind:checked={settings.always_on_top}
-            /></label
-          >
+          >{#if floatingSupported}<label class="setting-row"
+              ><span>桌面浮窗<small>关闭后通过托盘打开同一个详情</small></span><input
+                type="checkbox"
+                role="switch"
+                bind:checked={settings.floating}
+              /></label
+            ><label class="setting-row"
+              ><span>窗口始终置顶</span><input
+                type="checkbox"
+                role="switch"
+                bind:checked={settings.always_on_top}
+              /></label
+            >{/if}
         </section>
         <section
           class="card"

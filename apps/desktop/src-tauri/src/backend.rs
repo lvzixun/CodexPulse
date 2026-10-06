@@ -24,6 +24,7 @@ use tauri::{Emitter, Manager};
 #[serde(default)]
 pub struct Settings {
     pub theme: String,
+    pub accent: String,
     pub glass: bool,
     pub floating: bool,
     pub always_on_top: bool,
@@ -32,11 +33,13 @@ pub struct Settings {
     pub windows_home: Option<String>,
     pub timezone: String,
     pub compact_position: Option<(i32, i32)>,
+    pub compact_anchor: Option<crate::geometry::Anchor>,
 }
 impl Default for Settings {
     fn default() -> Self {
         Self {
             theme: "system".into(),
+            accent: "blue".into(),
             glass: true,
             floating: true,
             always_on_top: true,
@@ -45,13 +48,20 @@ impl Default for Settings {
             windows_home: None,
             timezone: iana_time_zone::get_timezone().unwrap_or_else(|_| "UTC".into()),
             compact_position: None,
+            compact_anchor: None,
         }
     }
 }
 impl Settings {
     pub fn validate(&self) -> Result<(), String> {
+        if self.compact_anchor.as_ref().is_some_and(|a| !a.valid()) {
+            return Err("浮窗位置无效".into());
+        }
         if !["system", "light", "dark"].contains(&self.theme.as_str()) {
             return Err("主题无效".into());
+        }
+        if !["blue", "violet", "teal", "amber", "rose"].contains(&self.accent.as_str()) {
+            return Err("主题颜色无效".into());
         }
         self.timezone
             .parse::<Tz>()
@@ -115,6 +125,8 @@ pub struct Backend {
     pub sender: SyncSender<Message>,
     stopping: Arc<AtomicBool>,
     active_child: crate::rpc::ActiveChild,
+    pending_anchor: Arc<Mutex<Option<(crate::geometry::Anchor, Instant)>>>,
+    database: PathBuf,
 }
 struct Source {
     health: SourceHealth,
@@ -122,7 +134,7 @@ struct Source {
 }
 impl Backend {
     pub fn start(app: tauri::AppHandle, db: PathBuf) -> Result<Self, Box<dyn std::error::Error>> {
-        let store = Store::open(db)?;
+        let store = Store::open(&db)?;
         let settings = store.setting::<Settings>("app")?.unwrap_or_default();
         settings.validate().map_err(std::io::Error::other)?;
         let quota = store.setting::<QuotaState>("quota")?.unwrap_or_default();
@@ -148,6 +160,8 @@ impl Backend {
         let worker_stop = stopping.clone();
         let collector_stop = stopping.clone();
         let active_child = Arc::new(Mutex::new(None));
+        let pending_anchor = Arc::new(Mutex::new(None::<(crate::geometry::Anchor, Instant)>));
+        let collector_anchor = pending_anchor.clone();
         let worker_child = active_child.clone();
         let (rpc_sender, rpc_receiver) = mpsc::sync_channel::<NetworkRequest>(1);
         let replies = sender.clone();
@@ -217,9 +231,31 @@ impl Backend {
                 let mut last_quota = Instant::now() - Duration::from_secs(3600);
                 let prices = PriceBook::default();
                 loop {
+                    let anchor = collector_anchor.lock().ok().and_then(|mut pending| {
+                        if pending
+                            .as_ref()
+                            .is_some_and(|(_, moved)| moved.elapsed() >= Duration::from_millis(500))
+                        {
+                            pending.take().map(|(anchor, _)| anchor)
+                        } else {
+                            None
+                        }
+                    });
+                    if let Some(anchor) = anchor {
+                        settings.compact_anchor = Some(anchor.clone());
+                        settings.compact_position = None;
+                        if store.set_setting("app", &settings).is_ok() {
+                            if let Ok(mut state) = shared.write() {
+                                state.settings = settings.clone();
+                            }
+                        } else if let Ok(mut pending) = collector_anchor.lock() {
+                            *pending = Some((anchor, Instant::now()));
+                        }
+                    }
                     if collector_stop.load(Ordering::Relaxed) {
                         break;
                     }
+                    crate::platform::release_hidden(&app);
                     match receiver.recv_timeout(Duration::from_millis(300)) {
                         Ok(Message::News(next)) => {
                             news_in_flight = false;
@@ -273,7 +309,10 @@ impl Backend {
                             let _ = store.set_setting("quota", &quota);
                             dirty = true;
                         }
-                        Ok(Message::Settings(next, reply)) => {
+                        Ok(Message::Settings(mut next, reply)) => {
+                            // Location is host-owned and can change while a UI settings draft is open.
+                            next.compact_anchor = settings.compact_anchor.clone();
+                            next.compact_position = settings.compact_position;
                             // Changing timezone needs a bucket rebuild before enabling this setting.
                             // This restriction is removed by the migration implementation.
                             if next.timezone != settings.timezone {
@@ -284,10 +323,19 @@ impl Backend {
                                 .set_setting("app", &next)
                                 .map_err(|_| "无法保存设置".to_string());
                             if result.is_ok() {
+                                let sources_changed = settings.windows_enabled
+                                    != next.windows_enabled
+                                    || settings.wsl_enabled != next.wsl_enabled
+                                    || settings.windows_home != next.windows_home;
                                 settings = next;
-                                last_repair = Instant::now() - Duration::from_secs(60);
-                                last_wsl = Instant::now() - Duration::from_secs(60);
-                                last_quota = Instant::now() - Duration::from_secs(3600);
+                                if let Ok(mut state) = shared.write() {
+                                    state.settings = settings.clone();
+                                }
+                                if sources_changed {
+                                    last_repair = Instant::now() - Duration::from_secs(60);
+                                    last_wsl = Instant::now() - Duration::from_secs(60);
+                                    last_quota = Instant::now() - Duration::from_secs(3600);
+                                }
                                 dirty = true;
                             }
                             let _ = reply.send(result);
@@ -503,11 +551,33 @@ impl Backend {
             sender,
             stopping,
             active_child,
+            pending_anchor,
+            database: db,
         })
+    }
+    pub fn remember_anchor(&self, anchor: crate::geometry::Anchor) {
+        if let Ok(mut pending) = self.pending_anchor.lock() {
+            *pending = Some((anchor, Instant::now()));
+        }
     }
     pub fn shutdown(&self) {
         self.stopping.store(true, Ordering::Relaxed);
         crate::rpc::stop_child(&self.active_child);
+        let anchor = self
+            .pending_anchor
+            .lock()
+            .ok()
+            .and_then(|mut p| p.take().map(|(anchor, _)| anchor));
+        if let Some(anchor) = anchor
+            && let Ok(mut settings) = self.snapshot.read().map(|s| s.settings.clone())
+        {
+            settings.compact_anchor = Some(anchor);
+            settings.compact_position = None;
+            // A bounded SQLite write flushes the last drag even if the collector is exiting.
+            if let Ok(store) = Store::open(&self.database) {
+                let _ = store.set_setting("app", &settings);
+            }
+        }
     }
 }
 fn source(id: String, label: String, home: PathBuf) -> Source {

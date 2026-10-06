@@ -1,12 +1,13 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import type { Snapshot, Settings } from './types';
+import type { Snapshot, Settings, ViewState } from './types';
 export const native = isTauri();
 export const empty: Snapshot = {
   news: { items: [], status: '', last_success: null, last_attempt: null },
   quota: { buckets: [], sources: {} },
   settings: {
     theme: 'system',
+    accent: 'blue',
     glass: true,
     floating: true,
     always_on_top: true,
@@ -15,6 +16,7 @@ export const empty: Snapshot = {
     windows_home: null,
     timezone: 'UTC',
     compact_position: null,
+    compact_anchor: null,
   },
   usage: {
     from_day: '',
@@ -57,3 +59,7 @@ export const openSource = (url: string) =>
   native
     ? invoke<void>('open_source', { url })
     : Promise.reject(new Error('请在桌面应用中打开来源'));
+export const getViewState = () =>
+  native ? invoke<ViewState>('get_view_state') : Promise.resolve(null);
+export const rememberView = (view: ViewState) =>
+  native ? invoke<void>('remember_view', { view }) : Promise.resolve();

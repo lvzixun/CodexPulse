@@ -47,8 +47,12 @@ main {
   --border: rgba(224, 227, 255, 0.12);
   --text: #f0f1fa;
   --muted: #a1a6bd;
-  --accent: #b5b4ff;
-  --accent-bg: rgba(181, 180, 255, 0.12);
+  --accent-dark: #8bbbff;
+  --accent-light: #2261d6;
+  --accent-bg-dark: rgba(139, 187, 255, 0.12);
+  --accent-bg-light: rgba(34, 97, 214, 0.09);
+  --accent: var(--accent-dark);
+  --accent-bg: var(--accent-bg-dark);
   height: 100%;
   display: flex;
   flex-direction: column;
@@ -65,8 +69,8 @@ main[data-theme='light'] {
   --border: rgba(42, 43, 76, 0.13);
   --text: #25263b;
   --muted: #61667e;
-  --accent: #5148bf;
-  --accent-bg: rgba(81, 72, 191, 0.09);
+  --accent: var(--accent-light);
+  --accent-bg: var(--accent-bg-light);
 }
 @media (prefers-color-scheme: light) {
   main[data-theme='system'] {
@@ -76,8 +80,89 @@ main[data-theme='light'] {
     --border: rgba(42, 43, 76, 0.13);
     --text: #25263b;
     --muted: #61667e;
-    --accent: #5148bf;
-    --accent-bg: rgba(81, 72, 191, 0.09);
+    --accent: var(--accent-light);
+    --accent-bg: var(--accent-bg-light);
+  }
+}
+main[data-accent='violet'] {
+  --accent-dark: #b5b4ff;
+  --accent-light: #5148bf;
+  --accent-bg-dark: rgba(181, 180, 255, 0.12);
+  --accent-bg-light: rgba(81, 72, 191, 0.09);
+}
+main[data-accent='teal'] {
+  --accent-dark: #6cdbc7;
+  --accent-light: #0b7564;
+  --accent-bg-dark: rgba(108, 219, 199, 0.12);
+  --accent-bg-light: rgba(11, 117, 100, 0.09);
+}
+main[data-accent='amber'] {
+  --accent-dark: #f2c675;
+  --accent-light: #915600;
+  --accent-bg-dark: rgba(242, 198, 117, 0.12);
+  --accent-bg-light: rgba(145, 86, 0, 0.09);
+}
+main[data-accent='rose'] {
+  --accent-dark: #ffa7c4;
+  --accent-light: #aa3462;
+  --accent-bg-dark: rgba(255, 167, 196, 0.12);
+  --accent-bg-light: rgba(170, 52, 98, 0.09);
+}
+.accent-picker {
+  border: 0;
+  padding: 8px 0 14px;
+  margin: 0;
+  min-width: 0;
+}
+.accent-picker legend {
+  padding: 0;
+}
+.accent-options {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 6px;
+  margin-top: 9px;
+}
+.accent-options label {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 5px;
+  padding: 8px 4px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  cursor: pointer;
+  font-size: 12px;
+}
+.accent-options label.chosen {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+}
+.accent-options label:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.accent-options input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  opacity: 0;
+}
+.accent-swatch {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--swatch-dark);
+}
+main[data-theme='light'] .accent-swatch {
+  background: var(--swatch-light);
+}
+@media (prefers-color-scheme: light) {
+  main[data-theme='system'] .accent-swatch {
+    background: var(--swatch-light);
   }
 }
 main.opaque {
@@ -556,7 +641,7 @@ footer {
   margin-top: 11px;
 }
 @media (forced-colors: active) {
-  main {
+  main[data-theme] {
     background: Canvas;
     color: CanvasText;
     --bg: Canvas;
@@ -565,6 +650,7 @@ footer {
     --text: CanvasText;
     --muted: CanvasText;
     --accent: LinkText;
+    --accent-bg: Canvas;
   }
   button,
   input,

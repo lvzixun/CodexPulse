@@ -299,7 +299,10 @@ mod tests {
         let (url, server) = serve(
             "HTTP/1.1 304 Not Modified\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".into(),
         );
-        assert_eq!(fetch_endpoint(&agent(), &url, &cache).unwrap_err().0, "http_304");
+        assert_eq!(
+            fetch_endpoint(&agent(), &url, &cache).unwrap_err().0,
+            "http_304"
+        );
         assert!(
             !server
                 .join()
