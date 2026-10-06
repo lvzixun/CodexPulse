@@ -72,6 +72,11 @@ main[data-theme='light'] {
   --accent: var(--accent-light);
   --accent-bg: var(--accent-bg-light);
 }
+/* DWM owns the native window outline. A second CSS curve exposes the acrylic behind it. */
+main.native-shell {
+  border: 0;
+  border-radius: 0;
+}
 @media (prefers-color-scheme: light) {
   main[data-theme='system'] {
     --bg: rgba(245, 245, 252, 0.92);
@@ -131,14 +136,18 @@ main[data-accent='rose'] {
   flex-direction: column;
   gap: 5px;
   padding: 8px 4px;
-  border: 1px solid var(--border);
-  border-radius: 9px;
+  border: 0;
+  border-radius: 0;
   cursor: pointer;
   font-size: 12px;
 }
 .accent-options label.chosen {
-  border-color: var(--accent);
-  background: var(--accent-bg);
+  color: var(--accent);
+  font-weight: 600;
+}
+.accent-options label.chosen .accent-swatch {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
 }
 .accent-options label:focus-within {
   outline: 2px solid var(--accent);
@@ -175,7 +184,6 @@ header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  border-bottom: 1px solid var(--border);
 }
 .brand {
   border: 0;
@@ -227,28 +235,30 @@ header {
 nav {
   display: flex;
   gap: 5px;
-  padding: 12px 18px 0;
+  padding: 0 20px;
+  border-bottom: 1px solid var(--border);
   flex: none;
 }
 nav button {
   flex: 1;
-  padding: 7px 5px;
+  padding: 10px 5px;
   background: none;
   border: 0;
-  border-radius: 8px;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
   color: var(--muted);
   font-size: 12px;
 }
 nav button.active {
-  background: var(--accent-bg);
+  border-bottom-color: var(--accent);
   color: var(--accent);
   font-weight: 650;
 }
 nav button:hover {
-  background: var(--card);
+  color: var(--text);
 }
 .content {
-  padding: 20px 18px;
+  padding: 16px 20px 20px;
   overflow-y: auto;
   scrollbar-width: thin;
   scrollbar-color: var(--border) transparent;
@@ -260,6 +270,16 @@ nav button:hover {
   justify-content: space-between;
   margin-bottom: 18px;
   gap: 10px;
+}
+.overview-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  padding-bottom: 4px;
+}
+.overview-heading p {
+  font-size: 11px;
 }
 h1,
 h2,
@@ -287,12 +307,30 @@ h3 {
   margin-bottom: 3px;
 }
 .card {
-  padding: 17px 16px;
-  border: 1px solid var(--border);
-  background: var(--card);
-  border-radius: 13px;
-  margin-bottom: 12px;
+  padding: 16px 0;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  background: none;
+  border-radius: 0;
+  margin: 0;
   min-width: 0;
+}
+.content > .card:last-child {
+  border-bottom: 0;
+}
+.card.usage-summary {
+  padding: 16px;
+  margin-top: 20px;
+  background: var(--card);
+  border: 0;
+  border-radius: 12px;
+}
+.usage-summary .metrics > div:first-child strong {
+  font-size: 30px;
+}
+.session-card {
+  border-bottom: 0;
+  padding-bottom: 0;
 }
 .card-heading {
   display: flex;
@@ -305,10 +343,10 @@ h3 {
   color: var(--muted);
   font-size: 10px;
   white-space: nowrap;
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 3px 7px;
+  background: none;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
 }
 .muted {
   color: var(--muted);
@@ -435,8 +473,11 @@ h3 {
   opacity: 0.65;
 }
 .selected {
-  border-color: var(--accent);
-  background: var(--accent-bg);
+  color: var(--accent);
+}
+.model-row:hover h3,
+.session-row:hover h3 {
+  color: var(--accent);
 }
 dl {
   display: grid;
@@ -472,15 +513,15 @@ dd {
   padding: 32px 20px;
   text-align: center;
   color: var(--muted);
-  border: 1px dashed var(--border);
-  border-radius: 12px;
+  border: 0;
   font-size: 12px;
 }
 .notice {
   padding: 10px 12px;
-  border-radius: 8px;
+  border-radius: 0;
   background: rgba(220, 174, 92, 0.12);
-  border: 1px solid rgba(220, 174, 92, 0.3);
+  border: 0;
+  border-left: 2px solid rgba(220, 174, 92, 0.6);
   font-size: 11px;
   margin-bottom: 15px;
 }
@@ -586,7 +627,10 @@ footer {
 .compact-content {
   border: 0;
   background: none;
-  display: block;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: space-between;
   text-align: left;
   width: 100%;
   padding: 14px 17px 10px;
@@ -626,10 +670,10 @@ footer {
 .quota-placeholder {
   display: flex;
   justify-content: space-between;
-  border: 1px solid var(--border);
-  background: var(--card);
-  border-radius: 6px;
-  padding: 6px 8px;
+  border: 0;
+  border-top: 1px solid var(--border);
+  background: none;
+  padding: 9px 0 0;
   font-size: 10px;
   color: var(--muted);
 }
@@ -672,6 +716,26 @@ footer {
 }
 .quota-bucket h3 {
   font-size: 12px;
+}
+.quota-windows {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 24px;
+  margin-top: 14px;
+}
+.quota-value {
+  display: block;
+  font-size: 30px;
+  font-weight: 600;
+  line-height: 1.35;
+  letter-spacing: -0.8px;
+  margin: 3px 0 8px;
+  font-variant-numeric: tabular-nums;
+}
+.quota-value small {
+  color: var(--muted);
+  font-size: 14px;
+  margin-left: 3px;
 }
 .quota-bucket .card-heading {
   margin-bottom: 4px;

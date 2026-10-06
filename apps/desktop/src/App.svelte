@@ -199,6 +199,7 @@
 </script>
 
 <main
+  class:native-shell={native}
   class:compact={mode === 'compact'}
   class:opaque={!settings.glass || !glassSupported}
   data-theme={settings.theme}
@@ -267,18 +268,22 @@
     >
       {#if data.error || error}<div class="notice" role="status">{error || data.error}</div>{/if}
       {#if page === 'overview'}
-        <div class="section-heading">
-          <div>
-            <p class="eyebrow">YOUR CODEX, AT A GLANCE</p>
-            <h1>工作脉搏</h1>
-          </div>
+        <div class="overview-heading">
+          <p class="muted">
+            {data.sources
+              .filter((s) => s.status === 'connected')
+              .map((s) => s.label)
+              .join(' + ') || '等待连接本地来源'}
+          </p>
           <span class="badge">{data.collecting ? '正在索引…' : '已连接本地账本'}</span>
         </div>
         <section class="card quotas">
-          <div class="card-heading">
-            <h2>使用额度</h2>
-            <span class="muted">{data.quota?.buckets.length ? '只读同步' : '等待同步'}</span>
-          </div>
+          {#if data.quota?.buckets.length !== 1}
+            <div class="card-heading">
+              <h2>使用额度</h2>
+              <span class="muted">{data.quota?.buckets.length ? '只读同步' : '等待同步'}</span>
+            </div>
+          {/if}
           {#each data.quota?.buckets ?? [] as bucket}<QuotaCard
               {bucket}
               {now}
@@ -316,7 +321,7 @@
             <span>当前输出速度 <b>—</b> tokens/s</span><small>日志不提供连续输出 token 样本</small>
           </div>
         </section>
-        <section class="card">
+        <section class="card usage-summary">
           <div class="card-heading">
             <h2>最近 30 天 · 所有模型</h2>
             <button class="text-button" onclick={() => void goPage('models')}>模型明细 →</button>
