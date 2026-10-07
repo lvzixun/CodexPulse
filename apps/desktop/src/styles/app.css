@@ -973,8 +973,19 @@ body {
 .cp-compact-info .cp-stale {
   opacity: 0.65;
 }
-.cp-compact-tokens {
+.cp-compact-info > .cp-compact-model {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+.cp-compact-model b {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cp-compact-rate {
   margin-left: auto;
+  flex-shrink: 0;
 }
 .cp-compact-info > svg {
   width: 8px;

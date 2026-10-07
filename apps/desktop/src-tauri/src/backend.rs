@@ -294,6 +294,7 @@ impl Backend {
         let (rpc_sender, rpc_receiver) = mpsc::sync_channel::<NetworkRequest>(1);
         let network_sender = rpc_sender.clone();
         let replies = sender.clone();
+        let network_app = app.clone();
         thread::Builder::new()
             .name("pulse-network".into())
             .spawn(move || {
@@ -333,11 +334,15 @@ impl Backend {
                             }
                         }
                         Ok(NetworkRequest::Quotas(generation, scopes)) => {
+                            let cancelled = || {
+                                worker_stop.load(Ordering::Relaxed)
+                                    || worker_quota_epoch.load(Ordering::Relaxed) != generation
+                                    || (cfg!(windows)
+                                        && !crate::platform::account_panel_visible(&network_app))
+                            };
                             let mut results = Vec::new();
                             for scope in scopes {
-                                if worker_stop.load(Ordering::Relaxed)
-                                    || worker_quota_epoch.load(Ordering::Relaxed) != generation
-                                {
+                                if cancelled() {
                                     break;
                                 }
                                 let (stamp, result) = crate::http_quota::checked_fetch(
@@ -350,13 +355,14 @@ impl Backend {
                                         ));
                                     },
                                     |credentials| {
-                                        if worker_stop.load(Ordering::Relaxed)
-                                            || worker_quota_epoch.load(Ordering::Relaxed)
-                                                != generation
-                                        {
+                                        if cancelled() {
                                             Err("cancelled".into())
                                         } else {
-                                            crate::http_quota::fetch(&scope, credentials)
+                                            crate::http_quota::fetch_cancellable(
+                                                &scope,
+                                                credentials,
+                                                &cancelled,
+                                            )
                                         }
                                     },
                                 );
@@ -364,10 +370,7 @@ impl Backend {
                                     &scope,
                                     |_| {},
                                     |credentials| {
-                                        if worker_stop.load(Ordering::Relaxed)
-                                            || worker_quota_epoch.load(Ordering::Relaxed)
-                                                != generation
-                                        {
+                                        if cancelled() {
                                             Err("cancelled".into())
                                         } else {
                                             crate::http_quota::fetch_profile(credentials)
@@ -1078,15 +1081,16 @@ impl Backend {
                         .unwrap_or(0);
                     // Re-query the current native window so tray-only startup,
                     // hiding and WebView destruction/rebuilding use the same policy.
-                    let panel_visible = app
-                        .get_webview_window("pulse")
-                        .is_some_and(|w| w.is_visible().unwrap_or(false));
-                    if quota_schedule.due_for_account(
-                        &settings.quota_refresh,
-                        now,
-                        0,
-                        panel_visible,
-                    ) {
+                    let panel_visible = crate::platform::account_panel_visible(&app);
+                    if (!cfg!(windows) || panel_visible)
+                        && quota_schedule.due_for_account(
+                            &settings.quota_refresh,
+                            now,
+                            0,
+                            panel_visible,
+                            !cfg!(windows),
+                        )
+                    {
                         let scopes = sources
                             .iter()
                             .filter(|s| {

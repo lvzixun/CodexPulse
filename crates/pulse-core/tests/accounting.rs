@@ -28,6 +28,31 @@ fn model(p: &mut ParserState, m: &str) {
         "2026-10-01T00:00:00Z",
     ));
 }
+#[test]
+fn current_model_tracks_latest_context_and_does_not_relabel_previous_speed() {
+    let mut p = state("model-switch");
+    assert_eq!(
+        p.session.as_ref().unwrap().current_model.as_deref(),
+        Some("a")
+    );
+    p.session.as_mut().unwrap().output_rate = Some(pulse_core::domain::OutputRate {
+        output_tokens: 100,
+        elapsed_ms: 1000,
+        ..Default::default()
+    });
+    model(&mut p, "z");
+    assert_eq!(
+        p.session.as_ref().unwrap().current_model.as_deref(),
+        Some("z")
+    );
+    assert!(p.session.as_ref().unwrap().output_rate.is_none());
+    let mut p: ParserState = serde_json::from_str(&serde_json::to_string(&p).unwrap()).unwrap();
+    p.parse(&row("event_msg", json!({"type":"thread_settings_applied","thread_id":"parent","thread_settings":{"model":"wrong"}}), "2026-10-01T00:00:00Z"));
+    assert_eq!(
+        p.session.as_ref().unwrap().current_model.as_deref(),
+        Some("z")
+    );
+}
 fn usage(p: &mut ParserState, c: Value, last: Value, ts: &str) -> Option<UsageFact> {
     p.parse(&row(
         "event_msg",

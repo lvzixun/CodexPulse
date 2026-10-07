@@ -90,8 +90,6 @@
   ]);
   const number = (n: number) =>
     new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 }).format(n);
-  const compactNumber = (n: number) =>
-    new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 0 }).format(n);
   const magnitude = (n: number) => {
     const divisor = n >= 1e9 ? 1e9 : n >= 1e6 ? 1e6 : n >= 1e3 ? 1e3 : 1;
     return {
@@ -146,16 +144,8 @@
       ? ((outputRate.output_tokens * 1000) / outputRate.elapsed_ms).toFixed(1)
       : '—',
   );
-  const compactQuota = $derived(data.quota.buckets[0]);
-  const compactWindows = $derived(
-    [compactQuota?.secondary ?? compactQuota?.primary].filter((w) => w != null),
-  );
-  const compactStale = $derived(
-    compactQuota != null &&
-      (now - new Date(compactQuota.captured_at).getTime() >
-        (data.settings.quota_refresh.interval_seconds + 60) * 1000 ||
-        data.quota.sources[compactQuota.source_id]?.status !== 'connected'),
-  );
+  const compactModel = $derived(working?.meta.current_model ?? null);
+  const compactRate = $derived(working ? rateText : '—');
   const highest = $derived(Math.max(1, ...data.usage.days.map((d) => d.total)));
   const unreadKeys = $derived(data.news.unread_keys ?? []);
   const accountBucket = $derived(
@@ -463,44 +453,25 @@
             ? $t('查看新消息')
             : $t('展开 CodexPulse 详情')}
       >
-        {#each compactWindows as window}<span
-            class:cp-stale={compactStale}
-            title={$t('{_0}剩余额度{_1}', {
-              _0: windowLabel(window, $locale),
-              _1: compactStale ? $t(' · 快照已过期') : '',
-            })}
-            ><small
-              >{window.duration_minutes && window.duration_minutes % 1440 === 0
-                ? `${window.duration_minutes / 1440}d`
-                : window.duration_minutes && window.duration_minutes % 60 === 0
-                  ? `${window.duration_minutes / 60}h`
-                  : window.duration_minutes === null
-                    ? $t('额')
-                    : `${window.duration_minutes}m`}</small
-            ><b
-              >{window.remaining_percent === null
-                ? '—'
-                : `${window.remaining_percent.toFixed(0)}%`}{compactStale ? '*' : ''}</b
-            ></span
-          >{:else}<small class="cp-compact-wait"
-            >{data.collecting ? $t('索引中') : $t('等待额度')}</small
-          >{/each}
-        {#if importantUnread}<span
+        <span class="cp-compact-model" title={compactModel ?? $t('模型未知')}>
+          <b>{compactModel ? compactModel.replace(/^gpt-/, '') : '—'}</b>
+        </span>
+        <span class="cp-compact-rate" title={$t('本轮平均输出速度 · 含推理、工具和等待')}>
+          <b>{compactRate}</b><small>t/s</small>
+        </span>
+        {#if importantUnread}
+          <span
             class="cp-reset-alert"
             title={$t('{_0} 条新的重要重置消息 · 点击查看公告，实际额度以账户快照为准', {
               _0: importantUnread,
-            })}>{$t('重置')}<span class="cp-news-indicator"></span></span
-          >{:else}<span
-            class="cp-compact-tokens"
-            title={$t('当前 session · {_0} · {_1} · {_2}', {
-              _0: current ? current.total.toLocaleString() + ' tokens' : $t('待采集'),
-              _1: current?.models.join(' / ') || $t('模型未知'),
-              _2: current ? referenceMoney(current.reference) : $t('待计价'),
-            })}><b>{sessionTokens(current, compactNumber)}</b><small>tok</small></span
-          >{#if unreadKeys.length}<span
-              class="cp-news-indicator"
-              title={$t('{_0} 条新动态', { _0: unreadKeys.length })}
-            ></span>{/if}{/if}
+            })}
+          >
+            {$t('重置')}
+          </span>
+        {:else if unreadKeys.length}
+          <span class="cp-news-indicator" title={$t('{_0} 条新动态', { _0: unreadKeys.length })}
+          ></span>
+        {/if}
         <Icon name="right" />
       </button>
     </div>

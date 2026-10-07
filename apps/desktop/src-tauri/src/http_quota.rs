@@ -287,7 +287,18 @@ pub fn checked_fetch<T>(
         ),
     }
 }
+#[cfg(test)]
 pub fn fetch(scope: &Scope, credentials: &Credentials) -> Result<Readout, Failure> {
+    fetch_cancellable(scope, credentials, &|| false)
+}
+pub fn fetch_cancellable(
+    scope: &Scope,
+    credentials: &Credentials,
+    cancelled: &impl Fn() -> bool,
+) -> Result<Readout, Failure> {
+    if cancelled() {
+        return Err("cancelled".into());
+    }
     if credentials.stamp.status != "ready" {
         return Err(credentials.stamp.status.as_str().into());
     }
@@ -302,6 +313,10 @@ pub fn fetch(scope: &Scope, credentials: &Credentials) -> Result<Readout, Failur
     let mut result = fetch_with(&agent, USAGE_URL, scope, credentials)?;
     if probe(scope) != credentials.stamp {
         return Err("credentials_changed".into());
+    }
+    if cancelled() {
+        result.allowance.expiration_status = "cancelled".into();
+        return Ok(result);
     }
     match fetch_json(&agent, RESET_CREDITS_URL, credentials).and_then(|value| {
         result

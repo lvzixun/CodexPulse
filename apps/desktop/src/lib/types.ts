@@ -100,6 +100,7 @@ export interface SessionMeta {
   parent_id: string | null;
   status: string;
   last_activity: string;
+  current_model?: string | null;
   output_rate: {
     output_tokens: number;
     elapsed_ms: number;

@@ -115,6 +115,8 @@ pub struct SessionMeta {
     pub status: String,
     pub last_activity: String,
     #[serde(default)]
+    pub current_model: Option<String>,
+    #[serde(default)]
     pub output_rate: Option<OutputRate>,
 }
 

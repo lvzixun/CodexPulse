@@ -96,6 +96,16 @@ pub fn trace_window(app: &tauri::AppHandle, event: Event, visible: Option<bool>)
         );
     }
 }
+pub fn account_panel_visible(app: &tauri::AppHandle) -> bool {
+    app.get_webview_window("pulse")
+        .is_some_and(|w| w.is_visible().unwrap_or(false))
+        && (!cfg!(windows)
+            || app
+                .state::<WindowHost>()
+                .view
+                .lock()
+                .is_ok_and(|v| v.mode == "details"))
+}
 impl WindowHost {
     pub fn diagnostics(&self) -> Result<crate::diagnostics::Window, String> {
         let view = self.view.lock().map_err(|_| "界面状态不可用")?;

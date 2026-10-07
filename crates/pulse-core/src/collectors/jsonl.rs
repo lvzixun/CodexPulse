@@ -112,6 +112,22 @@ fn read_inner(
         });
     let recover_source =
         !titles_only && cursor.state.session.is_some() && !cursor.state.session_source_known;
+    // An old checkpoint already knows its latest model. Project that metadata once,
+    // without changing offsets or replaying usage facts.
+    let recovered_model = if !titles_only {
+        cursor
+            .state
+            .session
+            .as_mut()
+            .filter(|s| s.current_model.is_none() && cursor.state.model.is_some())
+            .map(|s| {
+                s.current_model = cursor.state.model.clone();
+                s.clone()
+            })
+    } else {
+        None
+    };
+    let recover_model = recovered_model.is_some();
     let mut header_bytes = 0;
     let recovered_session = if recover_source {
         let mut header = Vec::new();
@@ -126,12 +142,13 @@ fn read_inner(
             })
     } else {
         None
-    };
+    }
+    .or(recovered_model);
     if !modified_ns.is_empty()
         && cursor.modified_ns == modified_ns
         && cursor.state.observed_file_len == Some(meta.len())
     {
-        if recover_source {
+        if recover_source || recover_model {
             store.commit_batch(
                 &cursor,
                 &recovered_session.into_iter().collect::<Vec<_>>(),

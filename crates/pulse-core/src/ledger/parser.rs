@@ -73,6 +73,19 @@ fn counters(value: &Value) -> Option<TokenCounts> {
 }
 
 impl ParserState {
+    fn set_model(&mut self, model: Option<String>) {
+        if self.model != model {
+            if let Some(session) = self.session.as_mut() {
+                session.output_rate = None;
+            }
+            self.rate_started_at = None;
+            self.rate_output = None;
+        }
+        self.model = model;
+        if let Some(session) = self.session.as_mut() {
+            session.current_model = self.model.clone();
+        }
+    }
     /// Upgrade old checkpoints from the bounded metadata header, without replaying
     /// counters or resetting the current activity/output-rate state.
     pub fn recover_session_source(&mut self, raw: &[u8]) -> Option<SessionMeta> {
@@ -131,6 +144,7 @@ impl ParserState {
                 parent_id: parent,
                 status: "unknown".into(),
                 last_activity: timestamp.clone().unwrap_or_default(),
+                current_model: self.model.clone(),
                 output_rate: None,
             });
             self.session_source_known = true;
@@ -143,7 +157,8 @@ impl ParserState {
             if self.model != text(payload, "model") {
                 self.service_tier = None;
             }
-            self.model = text(payload, "model");
+            let next_model = text(payload, "model");
+            self.set_model(next_model);
             if let Some(provider) = text(payload, "model_provider") {
                 self.provider = Some(provider);
             }
@@ -151,7 +166,10 @@ impl ParserState {
             if payload.get("service_tier").is_some() {
                 self.service_tier = text(payload, "service_tier");
             }
-            return ParseOutput::default();
+            return ParseOutput {
+                session: self.session.clone(),
+                ..Default::default()
+            };
         }
         if kind != "event_msg" {
             return ParseOutput::default();
@@ -167,12 +185,16 @@ impl ParserState {
                     return ParseOutput::default();
                 }
                 let settings = &payload["thread_settings"];
-                self.model = text(settings, "model");
+                let next_model = text(settings, "model");
+                self.set_model(next_model);
                 if let Some(provider) = text(settings, "model_provider_id") {
                     self.provider = Some(provider);
                 }
                 self.service_tier = text(settings, "service_tier");
-                ParseOutput::default()
+                ParseOutput {
+                    session: self.session.clone(),
+                    ..Default::default()
+                }
             }
             "task_started" | "turn_started" => {
                 self.turn_id = text(payload, "turn_id");

@@ -490,5 +490,6 @@
   "打开系统启动应用设置": "Open Windows Startup apps",
   "无法打开系统启动应用设置": "Unable to open Windows Startup apps",
   "无法修改登录启动，请检查系统启动应用设置": "Unable to change login startup. Check Windows Startup apps.",
-  "登录启动配置不属于 CodexPulse": "The startup entry does not belong to CodexPulse"
+  "登录启动配置不属于 CodexPulse": "The startup entry does not belong to CodexPulse",
+  "本轮平均输出速度 · 含推理、工具和等待": "Average output speed this turn, including reasoning, tools, and waiting"
 }

@@ -61,7 +61,9 @@ impl Schedule {
             && (self.requested || (config.mode == "auto" && now >= self.next))
     }
     /// Only account automation is visibility-aware. The first dispatched flight
-    /// may run before a window exists; invalidation/rebuilding never renews that
+    /// may run before a window exists only on hosts that allow hidden startup;
+    /// Windows requires expanded details even for its first automatic flight.
+    /// Invalidation/rebuilding never renews that
     /// allowance. Explicit requests retain the existing manual-mode semantics.
     pub fn due_for_account(
         &self,
@@ -69,8 +71,10 @@ impl Schedule {
         now: i64,
         blocked_until: i64,
         visible: bool,
+        allow_hidden_startup: bool,
     ) -> bool {
-        (visible || !self.started || self.requested) && self.due(config, now, blocked_until)
+        (visible || (allow_hidden_startup && !self.started) || self.requested)
+            && self.due(config, now, blocked_until)
     }
     pub fn begin(&mut self) -> u64 {
         self.requested = false;
@@ -120,6 +124,37 @@ pub fn retry_after(value: Option<&str>, now: i64) -> i64 {
 mod tests {
     use super::*;
     #[test]
+    fn windows_compact_startup_never_dispatches_and_expansion_keeps_due_time() {
+        let config = Config {
+            interval_seconds: 30,
+            ..Config::default()
+        };
+        let mut account = Schedule::new();
+        let mut news = Schedule::new();
+        for now in [100, 200, 500] {
+            assert!(!account.due_for_account(&config, now, 0, false, false));
+            assert!(news.due(&config, now, 0));
+            let id = news.begin();
+            assert!(news.finish(id, now + 30));
+        }
+        assert!(account.due_for_account(&config, 500, 0, true, false));
+        let flight = account.begin();
+        assert!(!account.due_for_account(&config, 501, 0, true, false));
+        assert!(account.finish(flight, 530));
+        for now in [530, 600, 1000] {
+            assert!(!account.due_for_account(&config, now, 0, false, false));
+        }
+        assert!(account.due_for_account(&config, 1000, 0, true, false));
+        assert!(!account.due_for_account(&config, 1000, 1001, true, false));
+        account.invalidate(0);
+        assert!(!account.due_for_account(&config, 1000, 0, false, false));
+        let manual = Config {
+            mode: "manual".into(),
+            ..config
+        };
+        assert!(!account.due_for_account(&manual, 1000, 0, true, false));
+    }
+    #[test]
     fn manual_has_no_startup_timer_and_clicks_coalesce_without_overlap() {
         let config = Config {
             mode: "manual".into(),
@@ -168,7 +203,7 @@ mod tests {
         let mut account = Schedule::new();
         let mut news = Schedule::new();
         // Startup has no window, but both automatic groups dispatch once.
-        assert!(account.due_for_account(&config, 100, 0, false));
+        assert!(account.due_for_account(&config, 100, 0, false, true));
         assert!(news.due(&config, 100, 0));
         let account_flight = account.begin();
         let news_flight = news.begin();
@@ -177,7 +212,7 @@ mod tests {
         let mut news_refreshes = 1;
         // More than two account intervals hidden: news retains its timer.
         for now in 101..=200 {
-            assert!(!account.due_for_account(&config, now, 0, false));
+            assert!(!account.due_for_account(&config, now, 0, false, true));
             if news.due(&config, now, 0) {
                 let flight = news.begin();
                 assert!(news.finish(flight, now + 30));
@@ -185,20 +220,20 @@ mod tests {
             }
         }
         assert_eq!(news_refreshes, 4);
-        assert!(account.due_for_account(&config, 200, 0, true));
+        assert!(account.due_for_account(&config, 200, 0, true, true));
         let flight = account.begin();
         // Repeated shows and manual clicks while in flight do not add requests.
         account.request();
         for visible in [false, true, false, true] {
-            assert!(!account.due_for_account(&config, 201, 0, visible));
+            assert!(!account.due_for_account(&config, 201, 0, visible, true));
         }
         // Hiding lets the accepted flight finish and retain its cache deadline.
         assert!(account.finish(flight, 231));
         for now in 202..231 {
-            assert!(!account.due_for_account(&config, now, 0, true));
+            assert!(!account.due_for_account(&config, now, 0, true, true));
         }
-        assert!(account.due_for_account(&config, 231, 0, true));
-        assert!(!account.due_for_account(&config, 231, 0, false));
+        assert!(account.due_for_account(&config, 231, 0, true, true));
+        assert!(!account.due_for_account(&config, 231, 0, false, true));
     }
 
     #[test]
@@ -209,15 +244,15 @@ mod tests {
         };
         let mut account = Schedule::new();
         for visible in [false, true] {
-            assert!(!account.due_for_account(&config, 100, 0, visible));
+            assert!(!account.due_for_account(&config, 100, 0, visible, true));
         }
         account.request();
         account.request();
-        assert!(account.due_for_account(&config, 100, 0, false));
+        assert!(account.due_for_account(&config, 100, 0, false, true));
         let flight = account.begin();
         assert!(account.finish(flight, 400));
         for visible in [true, false, true] {
-            assert!(!account.due_for_account(&config, 1000, 0, visible));
+            assert!(!account.due_for_account(&config, 1000, 0, visible, true));
         }
     }
 
@@ -230,21 +265,21 @@ mod tests {
         assert!(account.finish(flight, 400));
         for now in [200, 400, 500, 599] {
             for visible in [false, true] {
-                assert!(!account.due_for_account(&config, now, 600, visible));
+                assert!(!account.due_for_account(&config, now, 600, visible, true));
             }
         }
         // Credential/config invalidation does not grant another hidden flight.
         account.invalidate(0);
-        assert!(!account.due_for_account(&config, 600, 600, false));
-        assert!(account.due_for_account(&config, 600, 600, true));
+        assert!(!account.due_for_account(&config, 600, 600, false, true));
+        assert!(account.due_for_account(&config, 600, 600, true, true));
         let old = account.begin();
         account.invalidate(0);
-        assert!(!account.due_for_account(&config, 700, 600, true));
+        assert!(!account.due_for_account(&config, 700, 600, true, true));
         assert!(!account.finish(old, 900));
-        assert!(!account.due_for_account(&config, 700, 600, false));
-        assert!(account.due_for_account(&config, 700, 600, true));
+        assert!(!account.due_for_account(&config, 700, 600, false, true));
+        assert!(account.due_for_account(&config, 700, 600, true, true));
         account.request();
-        assert!(!account.due_for_account(&config, 700, 800, false));
-        assert!(account.due_for_account(&config, 800, 800, false));
+        assert!(!account.due_for_account(&config, 700, 800, false, true));
+        assert!(account.due_for_account(&config, 800, 800, false, true));
     }
 }

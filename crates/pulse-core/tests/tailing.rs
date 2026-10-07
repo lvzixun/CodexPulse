@@ -53,6 +53,32 @@ fn unchanged_files_read_zero_content_and_appends_resume() {
     );
 }
 #[test]
+fn old_checkpoint_projects_current_model_without_reading_or_recounting_logs() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("session.jsonl");
+    fs::write(&path, fixture("old-model")).unwrap();
+    let mut store = Store::in_memory().unwrap();
+    assert_eq!(read(&mut store, &path).inserted, 1);
+    let key = path.to_string_lossy();
+    let mut cursor = store.cursor("windows", &key).unwrap().unwrap();
+    cursor.state.session.as_mut().unwrap().current_model = None;
+    let old = cursor.state.session.clone().unwrap();
+    store
+        .commit_batch(&cursor, &[old], &[], &[], chrono_tz::UTC)
+        .unwrap();
+    let report = read(&mut store, &path);
+    assert_eq!(report.bytes_read, 0);
+    assert_eq!(report.inserted, 0);
+    assert_eq!(
+        store.recent_sessions(None, 1).unwrap()[0]
+            .meta
+            .current_model
+            .as_deref(),
+        Some("test-model")
+    );
+    assert!(read(&mut store, &path).unchanged);
+}
+#[test]
 fn partial_record_is_not_committed_and_survives_restart() {
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("session.jsonl");
