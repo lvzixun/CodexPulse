@@ -112,7 +112,6 @@ impl Translator {
     }
 }
 struct FeedUpdate {
-    status: Cache,
     history: Cache,
     history_pages: Vec<history::Page>,
     items: Vec<NewsItem>,
@@ -130,6 +129,7 @@ pub struct NewsSnapshot {
     pub last_attempt: Option<String>,
     pub latest_reset: Option<NewsItem>,
     pub scheduled_reset: Option<NewsItem>,
+    pub active_watch: Option<pulse_core::news::ResetWatch>,
     pub challenge: Option<Challenge>,
     pub challenge_status: String,
     pub challenge_fetched_at: Option<String>,
@@ -142,6 +142,22 @@ pub struct ResetDate {
     pub reset_type: String,
 }
 impl Feed {
+    fn accept_status(&mut self, cache: Cache) -> Result<(), FetchError> {
+        let body = cache
+            .body
+            .as_ref()
+            .ok_or(("missing_status_cache".into(), 300))?;
+        let rows = status_items(body).map_err(|e| (e.into(), 300))?;
+        self.latest_reset = rows
+            .iter()
+            .find(|item| Some(item.id.as_str()) == body["data"]["latest_reset"]["id"].as_str())
+            .cloned();
+        self.scheduled_reset = rows
+            .into_iter()
+            .find(|item| item.kind == pulse_core::news::NewsKind::Scheduled);
+        self.status_cache = cache;
+        Ok(())
+    }
     pub fn prepare_manual_refresh(&mut self, now: i64) -> Option<i64> {
         // A click may retry transient failures before automatic exponential backoff.
         // Preserve explicit server waits, and conservatively retain old 429 records
@@ -208,6 +224,11 @@ impl Feed {
             last_attempt: self.last_attempt.clone(),
             latest_reset: self.latest_reset.clone(),
             scheduled_reset: self.scheduled_reset.clone(),
+            active_watch: self
+                .status_cache
+                .body
+                .as_ref()
+                .and_then(pulse_core::news::active_watch),
             challenge: self
                 .challenge_cache
                 .body
@@ -260,7 +281,8 @@ pub fn fetch(mut old: Feed, interval: u64, manual: bool, cancelled: &dyn Fn() ->
         .max_redirects(0)
         .build()
         .into();
-    let run = || -> Result<FeedUpdate, FetchError> {
+    let mut fresh_status = None;
+    let mut run = || -> Result<FeedUpdate, FetchError> {
         if cancelled() {
             return Err(("cancelled".into(), 0));
         }
@@ -272,6 +294,15 @@ pub fn fetch(mut old: Feed, interval: u64, manual: bool, cancelled: &dyn Fn() ->
         if cancelled() {
             return Err(("cancelled".into(), 0));
         }
+        let status_rows = status_items(
+            status
+                .body
+                .as_ref()
+                .ok_or(("missing_status_cache".into(), 300))?,
+        )
+        .map_err(|e| (e.into(), 300))?;
+        // Keep a validated status response even if the independent history fails.
+        fresh_status = Some((status, wait_a));
         let empty_history = Cache::default();
         let (history, history_pages, wait_b) = history::fetch(
             &old.history_pages,
@@ -285,13 +316,6 @@ pub fn fetch(mut old: Feed, interval: u64, manual: bool, cancelled: &dyn Fn() ->
                 fetch_resource_until(&agent, url, cache, Resource::Json, Some(timeout))
             },
         )?;
-        let status_items = status_items(
-            status
-                .body
-                .as_ref()
-                .ok_or(("missing_status_cache".into(), 300))?,
-        )
-        .map_err(|e| (e.into(), 300))?;
         let history_items = history_items(
             history
                 .body
@@ -300,34 +324,27 @@ pub fn fetch(mut old: Feed, interval: u64, manual: bool, cancelled: &dyn Fn() ->
         )
         .map_err(|e| (e.into(), 300))?;
         Ok(FeedUpdate {
-            status,
             history,
             history_pages,
-            items: merge(status_items, history_items),
+            items: merge(status_rows, history_items),
             wait: wait_a.max(wait_b),
         })
     };
     if now.timestamp() >= old.retry_until && (manual || now.timestamp() >= old.next_attempt) {
-        match run() {
+        let result = run();
+        if !cancelled()
+            && let Some((status, wait)) = fresh_status
+        {
+            old.accept_status(status)
+                .expect("validated status response");
+            old.status_cache_until = now.timestamp().saturating_add(wait);
+        }
+        match result {
             Ok(update) => {
-                old.status_cache = update.status;
                 old.history_cache = update.history;
                 old.history_pages = update.history_pages;
                 old.history_limit = 100;
                 old.items = update.items;
-                let status = old
-                    .status_cache
-                    .body
-                    .as_ref()
-                    .expect("validated status cache");
-                let status_rows = status_items(status).expect("validated status items");
-                old.latest_reset = status_rows
-                    .iter()
-                    .find(|i| Some(i.id.as_str()) == status["data"]["latest_reset"]["id"].as_str())
-                    .cloned();
-                old.scheduled_reset = status_rows
-                    .into_iter()
-                    .find(|i| i.kind == pulse_core::news::NewsKind::Scheduled);
                 old.status = "connected".into();
                 old.last_success = Some(chrono::Utc::now().to_rfc3339());
                 old.failures = 0;
@@ -598,7 +615,14 @@ mod tests {
             let started = std::time::Instant::now();
             let result = agent
                 .get(url)
-                .header("User-Agent", "CodexPulse/0.1.0 (+https://codex-resets.com)")
+                .header(
+                    "User-Agent",
+                    concat!(
+                        "CodexPulse/",
+                        env!("CARGO_PKG_VERSION"),
+                        " (+https://codex-resets.com)"
+                    ),
+                )
                 .header("Accept", "application/json")
                 .call();
             let mut report = serde_json::json!({"resource": name});
@@ -740,6 +764,66 @@ mod tests {
             .timeout_global(Some(Duration::from_secs(3)))
             .build()
             .into()
+    }
+
+    #[test]
+    fn fresh_status_survives_history_failure_without_clearing_backoff_or_history() {
+        let mut feed = Feed {
+            status: "network_error".into(),
+            failures: 2,
+            retry_until: 1234,
+            last_success: Some("previous-success".into()),
+            history_cache: Cache {
+                body: Some(serde_json::json!({"old_history": true})),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let cache = Cache {
+            body: Some(serde_json::json!({"meta":{"api_version":"v1"},"data":{
+                "latest_reset":{"id":"reset","reset_type":"regular","announced_at":"2026-10-02T21:18:48Z","text":"Reset confirmed","source":{"type":"observed"}},
+                "scheduled_reset":null,
+                "active_watch":{"level":"elevated","observed_at":"2026-10-06T22:00:00Z","expires_at":"2026-10-07T07:00:00Z","text":"New clue","source":{"type":"x_post","author":"thsottiaux"}}
+            }})),
+            ..Default::default()
+        };
+        feed.accept_status(cache.clone()).unwrap();
+        assert!(feed.view().active_watch.is_some());
+        assert_eq!(feed.latest_reset.as_ref().unwrap().id, "reset");
+        assert_eq!(feed.status, "network_error");
+        assert_eq!(feed.retry_until, 1234);
+        assert_eq!(feed.failures, 2);
+        assert_eq!(feed.last_success.as_deref(), Some("previous-success"));
+        assert_eq!(
+            feed.history_cache.body.as_ref().unwrap()["old_history"],
+            true
+        );
+        assert!(
+            feed.accept_status(Cache {
+                body: Some(serde_json::json!({"invalid":true})),
+                ..Default::default()
+            })
+            .is_err()
+        );
+        assert_eq!(feed.status_cache.body, cache.body);
+    }
+
+    #[test]
+    fn watch_snapshot_uses_status_cache_independently_and_respects_no_store() {
+        let mut feed = Feed {
+            status_cache: Cache {
+                body: Some(
+                    serde_json::json!({"meta":{"api_version":"v1"},"data":{"active_watch":{"level":"elevated","observed_at":"2026-10-06T22:00:00Z","expires_at":"2026-10-07T07:00:00Z","text":"Synthetic clue","source":{"type":"x_post","author":"thsottiaux"}}}}),
+                ),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert!(feed.items.is_empty());
+        assert!(feed.view().active_watch.is_some());
+        feed.status_cache.no_store = true;
+        assert!(feed.view().active_watch.is_some());
+        assert!(feed.for_storage().view().active_watch.is_none());
     }
 
     #[test]

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { translator as t, locale } from '../lib/i18n';
 
+  import ResetWatch from './ResetWatch.svelte';
   import type { Snapshot } from '../lib/types';
   import { resetAge } from '../lib/format';
   let { news, now }: { news: Snapshot['news']; now: number } = $props();
@@ -43,5 +44,6 @@
               : $t('等待同步')}</strong
     >
   </div>
+  <ResetWatch {news} {now} compact />
   {#if news.status !== 'connected' && news.last_success}<small>{$t('离线缓存')}</small>{/if}
 </div>

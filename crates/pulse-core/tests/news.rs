@@ -96,3 +96,26 @@ fn oversized_history_is_an_error_instead_of_silent_truncation() {
     assert_eq!(history_items(&history).unwrap_err(), "history_too_large");
     assert!(!pulse_core::news::reset_stats(&json!(null), &history).history_complete);
 }
+
+#[test]
+fn active_watch_projection_keeps_signal_separate_from_long_history() {
+    let status = json!({"meta":{"api_version":"v1"},"data":{"active_watch":{"level":"elevated","reset_chance_percent":40,"observed_at":"2026-10-06T22:00:00Z","expires_at":"2026-10-07T07:00:00Z","text":"Synthetic watch clue","source":{"type":"x_post","author":"thsottiaux"}}}});
+    let watch = pulse_core::news::active_watch(&status).unwrap();
+    assert_eq!(watch.level.as_deref(), Some("elevated"));
+    assert_eq!(watch.item.kind, NewsKind::Forecast);
+    assert_eq!(watch.item.probability, Some(40));
+    assert_eq!(watch.item.scheduled_for, None);
+    let rows = (0..100).map(|id| json!({"id":id.to_string(),"announced_at":"2026-10-07T00:00:00Z","text":"Synthetic history","source":{"type":"observed"}})).collect::<Vec<_>>();
+    let merged = merge(
+        status_items(&status).unwrap(),
+        history_items(&json!({"meta":{"api_version":"v1"},"data":rows})).unwrap(),
+    );
+    assert_eq!(merged.len(), 100);
+    assert!(!merged.iter().any(|item| item.kind == NewsKind::Forecast));
+    assert_eq!(pulse_core::news::active_watch(&status), Some(watch));
+    let mut invalid = status.clone();
+    invalid["data"]["active_watch"]["expires_at"] = json!("bad");
+    assert!(pulse_core::news::active_watch(&invalid).is_none());
+    invalid["data"]["active_watch"] = json!(null);
+    assert!(pulse_core::news::active_watch(&invalid).is_none());
+}

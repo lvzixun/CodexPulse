@@ -7,6 +7,8 @@
   import NewsCard from './NewsCard.svelte';
   import Icon from './Icon.svelte';
   import ResetOverview from './ResetOverview.svelte';
+  import ResetWatch from './ResetWatch.svelte';
+  import { activeResetWatch } from '../lib/reset-watch';
   import ChallengeSummary from './ChallengeSummary.svelte';
   import ChallengeDetail from './ChallengeDetail.svelte';
   let {
@@ -38,8 +40,11 @@
       ) ?? [],
     ),
   );
+  const watch = $derived(activeResetWatch(news, now));
   const entries = $derived(
-    newsEntries(news, $locale).filter((e) => e.item && !productUrls.has(e.sourceUrl)),
+    newsEntries(news, $locale).filter(
+      (e) => e.item && e.item.id !== watch?.item.id && !productUrls.has(e.sourceUrl),
+    ),
   );
   const visible = $derived(entries.slice(0, limit));
   async function source() {
@@ -65,6 +70,7 @@
               : $t('等待同步')}</small
         >{/if}
     </div>
+    <ResetWatch {news} {now} {acknowledge} />
     <ResetOverview {news} {now} {timezone} />
     <ChallengeSummary {news} {now} open={() => navigate(true)} />
     <div class="cp-sectionhead cp-news-feed-heading"><span>{$t('最新公告与消息')}</span></div>

@@ -7,8 +7,8 @@ pub fn translations_page(html: &str) -> Result<BTreeMap<String, String>, &'stati
         return Err("translation_body_too_large");
     }
     let page = Html::parse_document(html);
-    let rows = Selector::parse(".log-item[data-tweet-id]").unwrap();
-    let paragraphs = Selector::parse(".log-item-text[data-role='tweet-display-text']").unwrap();
+    let rows = Selector::parse(".log-item[data-tweet-id], .watch-tweet[data-tweet-id]").unwrap();
+    let paragraphs = Selector::parse(".log-item-text[data-role='tweet-display-text'], .watch-tweet-text[data-role='tweet-display-text']").unwrap();
     let mut result = BTreeMap::new();
     for row in page.select(&rows).take(100) {
         let Some(id) = row.value().attr("data-tweet-id") else {
@@ -65,5 +65,12 @@ mod tests {
         assert!(translations_page(&rows).is_err());
         let rows = rows.replace(&"中".repeat(4100), "中文");
         assert_eq!(translations_page(&rows).unwrap().len(), 100);
+    }
+    #[test]
+    fn watch_clues_use_published_body_not_quotes_or_scripts() {
+        let page = r#"<a class="watch-tweet" data-tweet-id="123"><span class="watch-tweet-context">Not the reply body</span><span class="watch-tweet-text" data-role="tweet-display-text">接受你的投票 &amp; 继续观察</span></a><a class="watch-tweet" data-tweet-id="bad"><span class="watch-tweet-text" data-role="tweet-display-text"><script>not_visible</script></span></a>"#;
+        let rows = translations_page(page).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows["123"], "接受你的投票 & 继续观察");
     }
 }
