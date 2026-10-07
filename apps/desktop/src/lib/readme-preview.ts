@@ -1,5 +1,12 @@
 /** Synthetic fixtures for documentation screenshots, imported only by Vite's dev preview. */
-import type { Snapshot, RecentSession, ModelPage, ViewState } from './types';
+import type {
+  Snapshot,
+  RecentSession,
+  ModelPage,
+  ViewState,
+  SessionDetail,
+  UsageBreakdown,
+} from './types';
 
 export function previewSnapshot(base: Snapshot): Snapshot {
   const now = Date.now();
@@ -21,7 +28,8 @@ export function previewSnapshot(base: Snapshot): Snapshot {
     source_version: null,
     parent_id: null,
     status: 'active',
-    last_activity: at,
+    current_model: 'gpt-6.1-sol',
+    last_activity: new Date(now - 2000).toISOString(),
     output_rate: { output_tokens: 1240, elapsed_ms: 40000, measured_at: at, completed: false },
   };
   const session: RecentSession = {
@@ -87,7 +95,25 @@ export function previewSnapshot(base: Snapshot): Snapshot {
         last_read: at,
       },
     ],
-    recent: [session],
+    recent: [
+      session,
+      ...['Improve search performance', 'Review the settings flow', 'Add export support'].map(
+        (title, i): RecentSession => ({
+          ...session,
+          total: [1.6e6, 920000, 640000][i],
+          models: [['gpt-6-astra'], ['gpt-6.1-sol'], ['gpt-6-luna']][i],
+          reference: { ...session.reference, cost_nanousd: [8.2e9, 4.1e9, 1.8e9][i] },
+          meta: {
+            ...meta,
+            id: `example-session-${i + 2}`,
+            title,
+            status: 'completed',
+            last_activity: new Date(now - (i + 1) * 3600000).toISOString(),
+            output_rate: null,
+          },
+        }),
+      ),
+    ],
     usage: {
       ...base.usage,
       reference,
@@ -153,6 +179,8 @@ export function previewSnapshot(base: Snapshot): Snapshot {
       status: 'connected',
       last_success: at,
       latest_reset: latest,
+      important_unread: 1,
+      unread_keys: [latest.id],
       items: [latest],
       reset_stats: {
         total: 18,
@@ -189,13 +217,15 @@ export function previewSnapshot(base: Snapshot): Snapshot {
 }
 
 export function previewView(): ViewState {
+  const params = new URLSearchParams(location.search);
+  const windows = params.get('platform') === 'windows';
   return {
-    mode: 'details',
-    page: 'overview',
+    mode: params.get('mode') === 'compact' ? 'compact' : 'details',
+    page: params.get('page') ?? 'overview',
     news_challenge: false,
     news_limit: 5,
     selected_model: null,
-    selected_session: null,
+    selected_session: params.get('page') === 'sessions' ? 'example-session' : null,
     session_query: {
       filter: { model: null, from_day: null, through_day: null },
       cursor: null,
@@ -204,7 +234,35 @@ export function previewView(): ViewState {
     model_query: { from_day: '', through_day: '', cursor: null, direction: 'next' },
     scroll: {},
     glass_supported: false,
-    floating_supported: false,
+    floating_supported: windows,
+  };
+}
+
+export function previewSessionDetail(base: Snapshot, id: string): SessionDetail | null {
+  const session = base.recent.find((s) => s.meta.id === id);
+  if (!session) return null;
+  const measure = (known: number) => ({ known, unknown_events: 0 });
+  const usage: UsageBreakdown = {
+    events: session.events,
+    total: measure(session.total),
+    input: measure(session.total * 0.8),
+    cached: measure(session.total * 0.6),
+    output: measure(session.total * 0.2),
+    reasoning: measure(session.total * 0.1),
+    cache_write: measure(0),
+    cost_nanousd: 0,
+    unpriced_tokens: 0,
+    unpriced_events: 0,
+    started_at: new Date(Date.parse(session.meta.last_activity) - 1800000).toISOString(),
+    ended_at: session.meta.last_activity,
+  };
+  return {
+    session,
+    usage,
+    models: [{ model: session.models[0], usage }],
+    models_next: null,
+    prices: [],
+    prices_next: null,
   };
 }
 

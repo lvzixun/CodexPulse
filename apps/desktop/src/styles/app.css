@@ -883,7 +883,8 @@ body {
   color: var(--cp-accent) !important;
   cursor: grab;
   flex-shrink: 0;
-  width: 23px;
+  min-width: 23px;
+  width: auto;
   height: 26px;
   opacity: 0.65;
   display: flex;
@@ -894,6 +895,7 @@ body {
 .cp-activity-dot {
   width: 4px;
   height: 4px;
+  flex-shrink: 0;
   border-radius: 50%;
   background: currentColor;
 }

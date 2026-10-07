@@ -193,8 +193,14 @@ export const modelPage = async (request: ModelPageRequest): Promise<ModelPage> =
     unknown_total_events: 0,
   };
 };
-export const sessionDetail = (request: SessionDetailRequest) =>
-  native ? invoke<SessionDetail | null>('get_session_detail', { request }) : Promise.resolve(null);
+export const sessionDetail = async (
+  request: SessionDetailRequest,
+): Promise<SessionDetail | null> => {
+  if (native) return invoke<SessionDetail | null>('get_session_detail', { request });
+  if (readmePreview)
+    return (await import('./readme-preview')).previewSessionDetail(await snapshot(), request.id);
+  return null;
+};
 export const defaultSessionQuery = (): SessionPageRequest => ({
   filter: { model: null, from_day: null, through_day: null },
   cursor: null,

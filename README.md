@@ -2,58 +2,79 @@
 
 **中文** · [English](README.en.md)
 
-Codex 的桌面状态面板。查看账户额度、会话用量和公开重置动态。
+把 Codex 的**账户额度、工作状态、Token 用量和重置动态**放到桌面上。
 
-[下载 Windows / macOS 版](https://github.com/lvzixun/CodexPulse/releases) · [开发状态](docs/development/status.md)
+Windows 支持托盘与小浮窗，macOS 使用菜单栏面板。可采集 Codex App / CLI 的本地用量，Windows 也支持 WSL 数据源。
 
-## 功能
+**[下载最新版本](https://github.com/lvzixun/CodexPulse/releases/latest)** · [界面与功能](#界面与功能) · [数据说明](#数据与统计口径) · [开发文档](docs/development/status.md)
 
-- **总览**：额度与重置时间、重置卡和 credits、当前工作会话；底部集中展示本机最近 30 天用量与账户累计。
-- **模型 / Sessions**：模型用量占比、会话历史与行内详情、API 等价费用及计价覆盖。
-- **Tibo**：重置观察与倒计时、最新公开重置、近半年重置历史和 28 天挑战；展开查看每日内容。
+## 安装与打开
 
-默认深色外观，可在设置中切换。macOS 使用菜单栏图标与原生材质面板。Windows 提供系统托盘和可选小浮窗，两平台共享账户、用量、Tibo 和设置功能。
+| 平台                                  | 下载文件                      | 安装后怎么用                                       |
+| ------------------------------------- | ----------------------------- | -------------------------------------------------- |
+| **Windows 10 / 11 · x64**             | Releases 中的 `x64-setup.exe` | 安装后从开始菜单启动；点击托盘图标或浮窗打开详情。 |
+| **macOS 12+ · Apple Silicon / Intel** | Releases 中的通用 `.dmg`      | 拖到 Applications，启动后点击菜单栏图标。          |
 
-## 界面预览
+Windows 需要 WebView2 Runtime，安装器可按需安装。登录启动默认关闭，可在设置中开启。
 
-使用虚构账户和示例数据。原生材质会随系统主题和桌面背景变化。
+当前 Windows 安装包未做 Authenticode 签名；macOS 包为 ad-hoc 签名，尚未进行 Developer ID 签名和公证。
 
-<img src="docs/screenshots/overview-zh.svg" alt="CodexPulse 总览" width="380" />
+## 日常怎么用
 
-<details>
-<summary>Tibo 与模型页面</summary>
+**Windows 小浮窗**收起后只有一行，显示工作状态、当前模型和平均速度；有新的重要重置消息时，显示醒目的「重置」标记。点击展开详情，拖动左侧调整位置。
 
-<img src="docs/screenshots/tibo-zh.svg" alt="Tibo 重置历史和挑战" width="380" />
+<a href="docs/screenshots/compact-zh.png"><img src="docs/screenshots/compact-zh.png" alt="Windows 一行小浮窗：忙、6.1-sol、31.0 t/s、重置消息标记" width="184" /></a>
 
-<img src="docs/screenshots/models-zh.svg" alt="模型用量" width="380" />
+浮窗可在设置中关闭。托盘左键打开同一个详情面板，右键提供设置、退出等简单操作。
 
-</details>
+**macOS** 保留菜单栏图标，点击即可查看详情。两平台共享以下功能。
 
-## 安装
+## 界面与功能
 
-Windows 10/11 x64：从 [Releases](https://github.com/lvzixun/CodexPulse/releases) 下载 `x64-setup.exe`，安装后从开始菜单启动。需要 WebView2 Runtime；安装器可按需安装。点击浮窗或托盘左键打开同一详情；托盘右键提供设置和退出。登录启动可在设置中开启。
+截图使用虚构账户和示例数据，来自实际前端的开发预览；详情采用菜单栏布局。原生字体与毛玻璃效果会随平台、系统主题和桌面背景变化。图片以 **3 倍分辨率 PNG** 导出，点击可查看原图。
 
-macOS：
+### 总览：先看额度，再看正在做什么
 
-1. 从 [Releases](https://github.com/lvzixun/CodexPulse/releases) 下载通用 DMG。
-2. 打开 DMG，将 CodexPulse 拖到 Applications。
-3. 启动应用，点击菜单栏图标打开面板。
+集中查看剩余额度、账户刷新时间、credits 和重置卡；公开重置信息靠前展示。当前会话显示模型、Tokens、API 等价费用和平均速度，向下滚动查看本机最近 30 天用量与账户累计。
 
-通用包包含 Apple Silicon 和 Intel 架构，最低部署目标为 macOS 12。本轮实机验证在 Apple Silicon 完成。
+<a href="docs/screenshots/overview-zh.png"><img src="docs/screenshots/overview-zh.png" alt="总览：每周剩余额度、重置卡、最近重置、工作中会话与最近 30 天用量" width="380" /></a>
 
-macOS 包使用 **ad-hoc 签名，尚未进行 Developer ID 签名和公证**；Windows 安装包尚无 Authenticode 签名。正式 Release 指 GitHub 发布渠道，并不表示已获得平台发行证书。登录启动默认为关闭，可在设置中开启。
+### 模型：总量与分类一起看
+
+查看最近 30 天的模型用量占比、Token 构成和 API 等价费用。点击模型展开明细，并继续查看相关 Sessions。
+
+<a href="docs/screenshots/models-zh.png"><img src="docs/screenshots/models-zh.png" alt="模型：用量占比图表、各模型 Tokens 与 API 等价费用" width="380" /></a>
+
+### Sessions：正在运行的排在前面
+
+会话按列表展示，标注运行状态；点击一行展开用量、费用、速度、项目和模型详情。
+
+<a href="docs/screenshots/sessions-zh.png"><img src="docs/screenshots/sessions-zh.png" alt="Sessions：运行中会话置顶，行内展开 Tokens、费用与平均速度" width="380" /></a>
+
+### Tibo：重置消息与 28 天挑战
+
+查看最新公开重置、重置观察与倒计时、近半年重置历史，以及 Tibo 的 28 天挑战和每日内容。消息支持点击翻译；公开公告不代表当前账户额度已到账。
+
+<a href="docs/screenshots/tibo-zh.png"><img src="docs/screenshots/tibo-zh.png" alt="Tibo：最近一次额度重置、重置历史热力图、28 天挑战与最新消息" width="380" /></a>
+
+## 设置与刷新
+
+- **外观**：深色、浅色或跟随系统；默认蓝色，可选紫色、青绿、琥珀和玫红。
+- **独立刷新**：账户额度与 Codex Resets 消息分别设置自动 / 手动、刷新间隔，并可立即刷新。手动模式启动时显示缓存，不发起该组后台请求。翻译只在点击时请求。
+- **按需采集**：Windows 仅在详情展开且可见时自动请求账户数据，小浮窗不触发账户请求；macOS 启动时执行首轮，之后在面板可见时按间隔请求。重新打开时按缓存期限决定是否刷新。本地日志采集与公开消息刷新独立运行。
 
 ## 数据与统计口径
 
-本机用量来自可读取的 Codex 日志，账户累计来自服务端，两者分别标明范围。用量账本保存在本机，个人资料仅在内存中保留。认证请求使用 Codex 的文件型凭据；程序不改写 `auth.json`，凭据不进入数据库或诊断输出，也不保存对话正文。
-
-Windows 账户自动刷新仅在详情展开且可见时运行；小浮窗显示当前模型和平均速度，不触发账户请求。macOS 启动时执行首轮，之后仅在面板可见时按间隔运行。重新打开时按缓存期限决定是否刷新。公开重置消息和本地日志采集继续在后台运行。子代理不列入会话列表及会话数量，其 tokens 和费用仍计入总用量。
-
-API 等价费用是参考价估算，标明未覆盖用量，**不是订阅账单**。`tok/s` 是有日志样本时的轮次平均输出速度，包含推理、工具和等待时间。缺少数据时显示 `—`。
+- **用量范围**：本机统计来自可读取的 Codex 日志，账户累计来自服务端，分别标明范围。子代理不列入会话列表及数量，其 Tokens 和费用仍计入总量。
+- **费用与速度**：API 等价费用按参考价估算，标明未覆盖用量，**不是订阅账单**。`tok/s` 为日志样本中的轮次平均输出速度，包含推理、工具与等待时间；缺少数据时显示 `—`。
+- **本地数据**：用量账本保存在本机，不保存对话正文；个人资料仅在内存中保留。认证请求使用 Codex 的文件型凭据，不改写 `auth.json`，凭据不进入数据库或诊断输出。
 
 ## 开发
 
-需要 Rust stable ≥ 1.90、Node.js 24+ 和 pnpm 11；发布检查固定使用 Rust 1.97.1。macOS 需要 Xcode Command Line Tools；Windows 需要 Visual Studio C++ 工具与 WebView2。
+<details>
+<summary>环境要求、运行与构建命令</summary>
+
+需要 Rust stable ≥ 1.90、Node.js 24+ 和 pnpm 11；发布检查使用 Rust 1.97.1。Windows 需要 Visual Studio C++ 工具与 WebView2；macOS 需要 Xcode Command Line Tools。
 
 ```sh
 pnpm install --frozen-lockfile
@@ -79,11 +100,12 @@ pnpm build --target universal-apple-darwin
 
 Cargo 和 target 标准库须使用同一 Rust 工具链。通用包位于 `target/universal-apple-darwin/release/bundle`。
 
-## 文档
+截图更新方法见 [截图说明](docs/screenshots/README.md)。
 
-- [产品与技术设计](docs/design/codexpulse-v1.md)
-- [实施状态与待验证项目](docs/development/status.md)
-- [Windows 对齐与双平台发布](docs/development/windows-release-0.1.6.md)
-- [开发交接](docs/development/handoff-2026-10-06.md)
-- [macOS 验证记录](docs/development/macos-2026-10-06.md)
-- [参考价与覆盖说明](resources/pricing/README.md)
+</details>
+
+## 开发文档
+
+- [产品与技术设计](docs/design/codexpulse-v1.md) · [实施状态](docs/development/status.md)
+- [Windows 对齐与双平台发布](docs/development/windows-release-0.1.6.md) · [macOS 验证](docs/development/macos-2026-10-06.md)
+- [开发交接](docs/development/handoff-2026-10-06.md) · [参考价与覆盖说明](resources/pricing/README.md)
