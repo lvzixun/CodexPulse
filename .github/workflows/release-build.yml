@@ -13,6 +13,11 @@ on:
 permissions:
   contents: read
 
+env:
+  # Match the locally verified compiler instead of changing lints per runner date.
+  CARGO_PROFILE_DEV_DEBUG: '0'
+  CARGO_PROFILE_TEST_DEBUG: '0'
+
 concurrency:
   group: release-build-${{ github.ref }}
   cancel-in-progress: false
@@ -42,6 +47,7 @@ jobs:
       - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
       - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
         with:
+          toolchain: '1.97.0'
           targets: ${{ runner.os == 'macOS' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
