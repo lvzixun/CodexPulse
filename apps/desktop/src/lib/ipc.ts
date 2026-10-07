@@ -54,7 +54,7 @@ export const empty: Snapshot = {
   },
   quota: { buckets: [], sources: {}, request_status: '', last_success: null, next_attempt: null },
   settings: {
-    theme: 'dark',
+    theme: 'system',
     language: 'system',
     accent: 'blue',
     glass: true,

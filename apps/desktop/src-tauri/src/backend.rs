@@ -48,7 +48,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            theme: "dark".into(),
+            theme: "system".into(),
             language: "system".into(),
             accent: "blue".into(),
             glass: true,

@@ -56,6 +56,28 @@ jobs:
       - run: cargo test --workspace --locked
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: pnpm build ${{ matrix.args }}
+      - name: Verify Windows x64 application and installer versions
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $expected = (Get-Content apps/desktop/package.json | ConvertFrom-Json).version
+          $app = Get-Item target/release/codexpulse.exe
+          $bytes = [System.IO.File]::ReadAllBytes($app.FullName)
+          $peOffset = [BitConverter]::ToInt32($bytes, 0x3c)
+          if ([BitConverter]::ToUInt32($bytes, $peOffset) -ne 0x00004550 -or
+              [BitConverter]::ToUInt16($bytes, $peOffset + 4) -ne 0x8664) {
+            throw 'Application is not a Windows x64 PE executable'
+          }
+          $installers = @(Get-ChildItem target/release/bundle/nsis/*.exe)
+          if ($installers.Count -ne 1) { throw 'Expected exactly one NSIS installer' }
+          foreach ($file in @($app, $installers[0])) {
+            $version = $file.VersionInfo.ProductVersion
+            if ($version -notin @($expected, "$expected.0")) {
+              throw "Unexpected product version: $version"
+            }
+          }
+          $hash = (Get-FileHash $installers[0].FullName -Algorithm SHA256).Hash
+          Write-Output "Verified Windows x64 version $expected; installer SHA256 $hash"
       - name: Verify universal application and ad-hoc signature
         if: runner.os == 'macOS'
         run: |
