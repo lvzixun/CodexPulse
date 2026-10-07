@@ -134,9 +134,12 @@ impl Service {
                 // Windows updater exits directly after starting NSIS; flush collectors first.
                 exit_app.state::<crate::backend::Backend>().shutdown();
                 exit_app.cleanup_before_exit();
-            })
-            .build()
-            .map_err(|_| ())?;
+            });
+        #[cfg(windows)]
+        let updater = updater.installer_arg(
+            install_directory_arg(&std::env::current_exe().map_err(|_| ())?).ok_or(())?,
+        );
+        let updater = updater.build().map_err(|_| ())?;
         let Some(mut update) = updater.check().await.map_err(|_| ())? else {
             self.publish(app, |cache| {
                 cache.info.update_available = false;
@@ -213,6 +216,14 @@ fn safe_download(url: &url::Url) -> bool {
             .starts_with("/lvzixun/CodexPulse/releases/download/")
         && url.username().is_empty()
         && url.password().is_none()
+}
+#[cfg(windows)]
+fn install_directory_arg(executable: &std::path::Path) -> Option<std::ffi::OsString> {
+    // NSIS requires /D to be last and unquoted, including paths containing spaces.
+    // Updater appends custom installer arguments after its /UPDATE, /R and /ARGS.
+    let mut arg = std::ffi::OsString::from("/D=");
+    arg.push(executable.parent()?);
+    Some(arg)
 }
 #[derive(Debug)]
 struct Failure {
@@ -291,6 +302,16 @@ fn fetch(url: &str) -> Result<Version, Failure> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(windows)]
+    #[test]
+    fn update_keeps_the_running_directory_even_with_spaces_and_unicode() {
+        assert_eq!(
+            install_directory_arg(std::path::Path::new(
+                r"D:\我的应用\Codex Pulse\codexpulse.exe"
+            )),
+            Some(std::ffi::OsString::from(r"/D=D:\我的应用\Codex Pulse"))
+        );
+    }
     fn release(tag: &str) -> String {
         serde_json::json!({"version":tag}).to_string()
     }
