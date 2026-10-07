@@ -10,6 +10,8 @@ mod language;
 #[cfg(target_os = "macos")]
 mod macos;
 mod material;
+#[cfg(any(target_os = "macos", test))]
+mod menubar_status;
 mod news;
 mod platform;
 mod refresh;
@@ -25,12 +27,18 @@ use tauri::{Manager, State};
 use tauri_plugin_opener::OpenerExt;
 
 #[tauri::command]
-async fn check_updates(manual: bool, app: tauri::AppHandle) -> Result<updates::Info, String> {
+async fn check_updates(app: tauri::AppHandle) -> Result<updates::Info, String> {
     let handle = app.clone();
-    tauri::async_runtime::spawn_blocking(move || handle.state::<updates::Service>().check(manual))
+    tauri::async_runtime::spawn_blocking(move || handle.state::<updates::Service>().check())
         .await
         .map_err(|_| "更新检查失败".to_string())??;
     app.state::<updates::Service>().prepare(&app)
+}
+#[tauri::command]
+async fn get_app_update_info(app: tauri::AppHandle) -> Result<updates::Info, String> {
+    tauri::async_runtime::spawn_blocking(move || app.state::<updates::Service>().info())
+        .await
+        .map_err(|_| "更新状态不可用".to_string())?
 }
 #[tauri::command]
 async fn install_app_update(app: tauri::AppHandle) -> Result<(), String> {
@@ -328,6 +336,7 @@ fn main() {
             get_view_state,
             remember_view,
             check_updates,
+            get_app_update_info,
             install_app_update,
             open_app_release
         ])
@@ -354,6 +363,15 @@ fn main() {
                 .clone();
             app.manage(backend);
             platform::setup(app, &settings)?;
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn_blocking(move || {
+                use tauri::Emitter;
+                let service = handle.state::<updates::Service>();
+                if let Ok(info) = service.startup() {
+                    let next = service.prepare(&handle).unwrap_or(info);
+                    let _ = handle.emit("app-update", next);
+                }
+            });
             Ok(())
         })
         .on_window_event(|window, event| match event {

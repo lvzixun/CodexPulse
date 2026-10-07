@@ -15,7 +15,7 @@ Track Codex account limits, work status, token usage, and reset updates on your 
 
 ## Preview
 
-Windows offers a tray icon and a one-line floating window; click to expand. On macOS, click the menu bar icon.
+Windows offers a tray icon and a one-line floating window. The macOS menu bar shows work status, model, and speed, with `↻` for new reset messages. Click to expand details.
 
 New updates download automatically and are signature-verified. Click “Restart and update” to install without opening a browser.
 

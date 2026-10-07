@@ -439,6 +439,8 @@ impl Backend {
                 let mut last_wsl = Instant::now() - Duration::from_secs(60);
                 let mut wsl_home_cache = BTreeMap::<String, PathBuf>::new();
                 let mut last_publish = Instant::now() - Duration::from_secs(1);
+                #[cfg(target_os = "macos")]
+                let mut last_status = Instant::now() - Duration::from_secs(1);
                 let mut dirty = true;
                 let mut quota = quota;
                 let mut news = news;
@@ -1336,8 +1338,6 @@ impl Backend {
                                 _ => state.error = Some("账本查询失败；请查看数据源状态".into()),
                             }
                         }
-                        #[cfg(target_os = "macos")]
-                        crate::macos::update_status(&app);
                         // Hidden windows receive no stream of state events; opening reads cache.
                         if app
                             .get_webview_window("pulse")
@@ -1347,6 +1347,13 @@ impl Backend {
                         }
                         last_publish = Instant::now();
                         dirty = false;
+                    }
+                    #[cfg(target_os = "macos")]
+                    if last_status.elapsed() >= Duration::from_secs(1) {
+                        // Existing collector clock: activity/rate expiry still
+                        // updates the native menu bar with no visible WebView.
+                        crate::macos::update_status(&app);
+                        last_status = Instant::now();
                     }
                 }
             })?;

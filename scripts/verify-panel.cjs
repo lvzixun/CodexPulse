@@ -12,7 +12,7 @@ const boot = String.raw`
 import {mockIPC,mockWindows} from '__TAURI_API__/mocks.js';
 window.isTauri=true;
 mockWindows('pulse');
-const state=window.__panelTest={data:null,view:null,shown:true,reads:[],actions:[],menus:[],popups:[],closed:[],fail:false,hold:false,release:null,checks:[],upgrades:0,installs:0,updateRevision:0,drags:0};
+const state=window.__panelTest={data:null,view:null,shown:true,reads:[],actions:[],menus:[],popups:[],closed:[],fail:false,hold:false,release:null,checks:[],cacheReads:0,upgrades:0,installs:0,updateRevision:0,drags:0};
 let emit;
 mockIPC(async(cmd,args)=>{
  if(cmd==='get_ui_language')return new URLSearchParams(location.search).get('language')||'zh';
@@ -21,9 +21,10 @@ mockIPC(async(cmd,args)=>{
  if(cmd==='remember_view')return;
  if(cmd==='get_startup_status')return 'disabled';
  if(cmd==='check_updates'){
-  state.checks.push(args.manual);
-  return state.updateInfo('available');
+  state.checks.push('manual');
+  return state.cached=state.updateInfo('available');
  }
+ if(cmd==='get_app_update_info'){state.cacheReads++;return state.cached}
  if(cmd==='install_app_update'){
   state.installs++;
   if(state.installs===1){await state.update('ready');throw Error('Installation failed')}
@@ -63,7 +64,9 @@ mockIPC(async(cmd,args)=>{
 },{shouldMockEvents:true});
 ({emit}=await import('__TAURI_API__/event.js'));
 state.updateInfo=(status)=>({current_version:'0.1.14',latest_version:'0.1.15',update_available:true,checked_at:new Date().toISOString(),next_check_at:Date.now()/1000+86400,status,revision:++state.updateRevision,downloaded_bytes:25,total_bytes:100});
-state.update=async(status)=>emit('app-update',state.updateInfo(status));
+// The Rust startup check has completed before this WebView is created.
+state.cached=state.updateInfo('available');
+state.update=async(status)=>emit('app-update',state.cached=state.updateInfo(status));
 const {empty}=await import('/src/lib/ipc.ts');
 const {previewSnapshot,previewView}=await import('/src/lib/readme-preview.ts');
 state.data=previewSnapshot(empty);
@@ -130,7 +133,11 @@ await import('/src/main.ts');
       await page.locator('.cp-brand strong').click();
       await page.waitForFunction(() => __panelTest.drags === 2);
       await page.locator('.app-update-banner').waitFor();
-      assert.deepEqual(await page.evaluate(() => __panelTest.checks), [false]);
+      assert.deepEqual(
+        await page.evaluate(() => __panelTest.checks),
+        [],
+        'Mount must only read the Rust startup result',
+      );
       await page.locator('.app-update-banner button').first().click();
       await page.waitForFunction(() => __panelTest.upgrades === 1);
       await page.locator('.app-update-banner button').last().click();
@@ -147,8 +154,8 @@ await import('/src/main.ts');
           exact: true,
         })
         .click();
-      await page.waitForFunction(() => __panelTest.checks.length === 2);
-      assert.deepEqual(await page.evaluate(() => __panelTest.checks), [false, true]);
+      await page.waitForFunction(() => __panelTest.checks.length === 1);
+      assert.deepEqual(await page.evaluate(() => __panelTest.checks), ['manual']);
       await page.getByRole('button', { name: /查看发布说明|View release notes/ }).click();
       await page.waitForFunction(() => __panelTest.upgrades === 2);
       await page.evaluate(() => __panelTest.update('downloading'));
@@ -347,9 +354,22 @@ await import('/src/main.ts');
       assert.deepEqual(await page.evaluate(() => __panelTest.actions), ['expand', 'hide', 'exit']);
       assert.deepEqual(
         await page.evaluate(() => __panelTest.checks),
-        [false, true],
+        ['manual'],
         'Compact/hidden/reopening must reuse the update cache',
       );
+      await page.clock.install();
+      // Jump wall time without expiring Vite's WebSocket heartbeat/reloading.
+      await page.clock.setSystemTime(new Date(Date.now() + 25 * 60 * 60 * 1000));
+      await page.evaluate(() => __panelTest.visibility(true));
+      await page.evaluate(() => __panelTest.mode('details'));
+      await page.locator('.cp-tabs').waitFor();
+      await page.clock.runFor(61000);
+      assert.deepEqual(
+        await page.evaluate(() => __panelTest.checks),
+        ['manual'],
+        'Elapsed time and reopening must never make an update request',
+      );
+      assert.ok(await page.evaluate(() => __panelTest.cacheReads > 1));
       assert.deepEqual(errors, []);
       console.log(
         language +

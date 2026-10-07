@@ -42,7 +42,7 @@ ureq = { version = "3.4", default-features = false, features = ["platform-verifi
 objc2 = "0.6.5"
 block2 = "0.6.2"
 objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSNotification", "NSOperation", "NSString", "NSProcessInfo", "NSLocale", "NSArray", "block2"] }
-objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSWorkspace", "NSApplication", "NSAccessibility", "NSWindow", "NSView", "NSImage", "NSStatusItem", "NSStatusBarButton", "NSButton", "NSFontDescriptor", "NSPasteboard", "NSAppearance", "objc2-core-foundation", "objc2-quartz-core"] }
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSWorkspace", "NSApplication", "NSAccessibility", "NSWindow", "NSView", "NSImage", "NSStatusItem", "NSStatusBarButton", "NSButton", "NSControl", "NSCell", "NSFont", "NSFontDescriptor", "NSPasteboard", "NSAppearance", "objc2-core-foundation", "objc2-quartz-core"] }
 objc2-service-management = { version = "=0.3.2", default-features = false, features = ["std", "SMAppService", "objc2", "objc2-foundation"] }
 plist = "=1.10.1"
 

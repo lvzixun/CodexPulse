@@ -1,9 +1,5 @@
 # Usage and development
 
-## App updates
-
-Opening details checks for updates automatically. New versions download in the background and are signature-verified. Click **Restart and update** to install and relaunch; Settings also offers a manual check. Install 0.1.15 once to enable this flow for future updates.
-
 [Back to README](../README.en.md) · [中文](guide.md)
 
 ## Install and open
@@ -25,7 +21,7 @@ Disable the floating window in Settings if desired. Left-click the tray icon to 
 
 Right-click the compact window for Expand, Quit, and Hide. Use the tray icon to reopen it after hiding. Messages in the current snapshot are automatically marked as read when the Tibo page is visible, including new messages refreshed while it remains open.
 
-On **macOS**, click the menu bar icon to open details. Both platforms share the features below.
+The **macOS menu bar** shows busy / idle / unknown, the current model, and average speed. `↻` marks new important reset announcements or plans, `•` marks other posts, and `!` marks source errors. Hover for details and click to open the panel. Parallel tasks show a count; long model names are shortened. Missing activity or speed samples display `—`. Local status keeps updating while the panel is hidden. Both platforms share the features below.
 
 ## Settings and refresh
 
@@ -35,7 +31,9 @@ On **macOS**, click the menu bar icon to open details. Both platforms share the 
 
 ## App updates
 
-Go to **Settings → App updates → Check for updates**. Expanded, visible panels also check automatically and cache successful results for 24 hours. Compact and hidden windows do not check automatically. An upgrade prompt opens the GitHub download page; download and install the new package there. The repository is public, so gh and GitHub login are not required. Failed checks back off independently of account and news refreshes.
+The app checks once in the background at startup. After that, only **Settings → App updates → Check for updates** makes a request. Opening, hiding, or recreating the panel reads cached state; failed checks do not retry automatically. Concurrent clicks share a request and respect the one-minute minimum interval and server retry delays.
+
+New versions download automatically and are signature-verified. Click **Restart and update** to install and relaunch. In-app upgrades require 0.1.15 or newer; older versions need one manual installation. No gh or GitHub login is required. Checks are independent of account limits, Resets messages, and local collection.
 
 ## Data and metrics
 

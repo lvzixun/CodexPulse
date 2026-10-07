@@ -1,5 +1,9 @@
 # 实施状态
 
+## 0.1.18 菜单栏状态与启动更新检查
+
+macOS 菜单栏新增工作状态、模型、速度和重要重置消息标记，与 Windows 小浮窗的判定对齐；隐藏面板继续更新本地状态。更新检查改为 Rust 启动一次与手动触发，面板只读缓存，不再周期检查；保留单飞、服务端等待与签名更新。实现与验证见 [0.1.18 记录](menubar-and-update-policy-0.1.18.md)。
+
 ## 0.1.17 同账号凭据恢复（双平台正式发布）
 
 修复 Codex 更新同账号凭据后仍显示旧过期状态、继续等待认证退避的问题；保留手动模式、详情可见性及服务端等待，合并重复错误提示。根因及验证见 [凭据恢复记录](credential-recovery-0.1.17.md)。[Windows x64 / macOS Universal 正式版](https://github.com/lvzixun/CodexPulse/releases/tag/v0.1.17) 已发布：162 项本机 Rust 测试、真实 WSL HTTPS 查询、原生旧缓存恢复、双平台 CI、更新签名与服务端文件校验通过。本机已安装 CI 正式包并自动重启；收起状态恢复凭据时未触发 HTTP，macOS 本轮无实机升级验收。未生成 target/debug。

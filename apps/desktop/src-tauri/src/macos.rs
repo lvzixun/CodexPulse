@@ -3,6 +3,13 @@
 use crate::{geometry::Area, platform};
 use tauri::Manager;
 
+#[derive(Default)]
+pub struct StatusState {
+    desired: Option<crate::menubar_status::Status>,
+    applied: Option<crate::menubar_status::Status>,
+    queued: bool,
+}
+
 pub fn icon() -> tauri::image::Image<'static> {
     // A 22-point template pulse at Retina resolution. Only alpha matters to
     // AppKit; it supplies the correct foreground for the current menu bar.
@@ -60,6 +67,10 @@ pub fn set_status_symbol(tray: &tauri::tray::TrayIcon) {
             .unwrap_or(symbol);
         image.setTemplate(true);
         button.setImage(Some(&image));
+        button.setFont(Some(
+            &objc2_app_kit::NSFont::monospacedDigitSystemFontOfSize_weight(13.0, 0.0),
+        ));
+        button.setImagePosition(objc2_app_kit::NSCellImagePosition::ImageLeft);
         true
     });
     if matches!(configured, Ok(true)) {
@@ -159,33 +170,69 @@ pub fn update_status(app: &tauri::AppHandle) {
     let Some(backend) = app.try_state::<crate::backend::Backend>() else {
         return;
     };
-    let marked = backend.snapshot.read().is_ok_and(|s| {
-        !s.news.unread_keys.is_empty()
-            || s.error.is_some()
-            || s.quota
-                .sources
-                .values()
-                .any(|q| !matches!(q.status.as_str(), "connected" | "verifying_account"))
-    });
+    let Ok(snapshot) = backend.snapshot.read() else {
+        return;
+    };
+    let status = crate::menubar_status::render(
+        &snapshot,
+        chrono::Utc::now(),
+        crate::language::effective(&snapshot.settings.language),
+    );
+    drop(snapshot);
     let host = app.state::<platform::WindowHost>();
-    if let Ok(mut badge) = host.badge.lock() {
-        if *badge == marked {
-            return;
-        }
-        *badge = marked;
-        let handle = app.clone();
-        let _ = app.run_on_main_thread(move || {
-            if let Some(tray) = handle.tray_by_id("pulse-tray") {
-                // Keep the SF Symbol installed. set_icon would create a fresh
-                // non-template NSImage and incorrectly turn it black on a dark
-                // menu bar. Status changes only update the native tooltip.
-                let _ = tray.set_tooltip(Some(if marked {
-                    "CodexPulse · 有新消息或来源异常"
-                } else {
-                    "CodexPulse"
-                }));
+    let Ok(mut state) = host.status.lock() else {
+        return;
+    };
+    state.desired = Some(status);
+    if state.queued || state.applied == state.desired {
+        return;
+    }
+    state.queued = true;
+    drop(state);
+    let handle = app.clone();
+    if app
+        .run_on_main_thread(move || {
+            let host = handle.state::<platform::WindowHost>();
+            // Read the latest desired value, coalescing updates while AppKit is busy.
+            let desired = host
+                .status
+                .lock()
+                .ok()
+                .and_then(|state| state.desired.clone());
+            let applied = desired.filter(|status| {
+                handle.tray_by_id("pulse-tray").is_some_and(|tray| {
+                    // Retain the native template SF Symbol. A new raster icon would
+                    // lose AppKit's automatic light/dark menu-bar foreground.
+                    let applied = tray.set_title(Some(&status.title)).is_ok()
+                        && tray.set_tooltip(Some(&status.tooltip)).is_ok();
+                    if applied {
+                        let label = status.tooltip.clone();
+                        let _ = tray.with_inner_tray_icon(move |inner| {
+                            use objc2_app_kit::NSAccessibility;
+                            if let Some(mtm) = objc2::MainThreadMarker::new()
+                                && let Some(button) =
+                                    inner.ns_status_item().and_then(|item| item.button(mtm))
+                            {
+                                button.setAccessibilityLabel(Some(
+                                    &objc2_foundation::NSString::from_str(&label),
+                                ));
+                            }
+                        });
+                    }
+                    applied
+                })
+            });
+            if let Ok(mut state) = host.status.lock() {
+                if applied.is_some() {
+                    state.applied = applied;
+                }
+                state.queued = false;
             }
-        });
+        })
+        .is_err()
+        && let Ok(mut state) = host.status.lock()
+    {
+        state.queued = false;
     }
 }
 

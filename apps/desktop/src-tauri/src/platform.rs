@@ -61,7 +61,7 @@ pub struct WindowHost {
     material: Mutex<Option<(bool, String)>>,
     pub last_hidden: Mutex<Option<Instant>>,
     #[cfg(target_os = "macos")]
-    pub badge: Mutex<bool>,
+    pub status: Mutex<crate::macos::StatusState>,
     #[cfg(target_os = "macos")]
     pub deactivate_observer: std::sync::atomic::AtomicUsize,
     maintenance: Mutex<Instant>,
@@ -81,7 +81,7 @@ impl Default for WindowHost {
             material: Mutex::new(None),
             last_hidden: Mutex::new(None),
             #[cfg(target_os = "macos")]
-            badge: Mutex::new(false),
+            status: Mutex::new(Default::default()),
             #[cfg(target_os = "macos")]
             deactivate_observer: std::sync::atomic::AtomicUsize::new(0),
             maintenance: Mutex::new(Instant::now()),

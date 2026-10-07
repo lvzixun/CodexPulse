@@ -18,6 +18,7 @@
     defaultSessionQuery,
     readNews,
     checkAppUpdates,
+    getAppUpdateInfo,
     openAppRelease,
     installAppUpdate,
   } from './lib/ipc';
@@ -223,11 +224,20 @@
       error = String(e);
     }
   }
-  async function loadAppUpdate(manual = false) {
+  async function loadCachedAppUpdate() {
+    if (!native) return;
+    try {
+      const next = await getAppUpdateInfo();
+      if (next.revision >= appUpdate.revision) appUpdate = next;
+    } catch {
+      // Reading process-local state must not overwrite a completed network check.
+    }
+  }
+  async function loadAppUpdate() {
     if (!native || updateBusy) return;
     updateBusy = true;
     try {
-      const next = await checkAppUpdates(manual);
+      const next = await checkAppUpdates();
       if (next.revision >= appUpdate.revision) appUpdate = next;
     } catch {
       appUpdate = { ...appUpdate, status: 'network_error', next_check_at: Date.now() / 1000 + 900 };
@@ -249,19 +259,6 @@
       updateBusy = false;
     }
   }
-  $effect(() => {
-    if (
-      native &&
-      viewReady &&
-      mode === 'details' &&
-      windowVisible &&
-      documentVisible &&
-      !updateBusy &&
-      !['downloading', 'ready', 'installing'].includes(appUpdate.status) &&
-      now / 1000 >= appUpdate.next_check_at
-    )
-      void loadAppUpdate();
-  });
   $effect(() => {
     if (!viewReady || mode !== 'details' || page !== 'news' || !windowVisible || !documentVisible) {
       newsReadAttempt = '';
@@ -542,6 +539,7 @@
         onEvent<boolean>('window-visible', (visible) => {
           windowVisible = visible;
           clockVisible(visible && documentVisible);
+          if (visible && !disposed) void loadCachedAppUpdate();
         }),
       () =>
         onEvent<boolean>('glass-supported', (supported) => {
@@ -554,6 +552,7 @@
       })
       .then(async () => {
         if (!disposed) {
+          void loadCachedAppUpdate();
           windowVisible = native ? await getCurrentWindow().isVisible() : true;
           clockVisible(windowVisible && documentVisible);
           await refresh();
@@ -730,7 +729,7 @@
       <AppUpdates
         info={appUpdate}
         busy={updateBusy}
-        check={() => void loadAppUpdate(true)}
+        check={() => void loadAppUpdate()}
         open={openUpgrade}
         install={() => void applyUpgrade()}
         banner
@@ -940,7 +939,7 @@
         <AppUpdates
           info={appUpdate}
           busy={updateBusy}
-          check={() => void loadAppUpdate(true)}
+          check={() => void loadAppUpdate()}
           open={openUpgrade}
           install={() => void applyUpgrade()}
         />

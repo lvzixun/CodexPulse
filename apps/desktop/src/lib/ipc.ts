@@ -16,9 +16,10 @@ import type {
   AppUpdateInfo,
 } from './types';
 export const native = isTauri();
-export const checkAppUpdates = (manual = false) =>
+export const getAppUpdateInfo = () => invoke<AppUpdateInfo>('get_app_update_info');
+export const checkAppUpdates = () =>
   native
-    ? invoke<AppUpdateInfo>('check_updates', { manual })
+    ? invoke<AppUpdateInfo>('check_updates')
     : Promise.reject(new Error(t('更新检查仅在桌面应用中可用')));
 export const openAppRelease = () => (native ? invoke<void>('open_app_release') : Promise.resolve());
 export const installAppUpdate = () => invoke<void>('install_app_update');

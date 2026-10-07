@@ -7,7 +7,6 @@ use tauri_plugin_updater::{Update, UpdaterExt};
 
 pub const RELEASES_URL: &str = "https://github.com/lvzixun/CodexPulse/releases/latest";
 const API_URL: &str = "https://github.com/lvzixun/CodexPulse/releases/latest/download/latest.json";
-const DAY: i64 = 86400;
 
 #[derive(Clone, Debug, Serialize)]
 pub struct Info {
@@ -39,18 +38,32 @@ impl Default for Info {
 #[derive(Default)]
 struct Cache {
     info: Info,
+    startup_checked: bool,
     last_attempt: i64,
     blocked_until: i64,
     prepared: Option<(Update, Vec<u8>)>,
 }
 impl Cache {
-    fn due(&self, now: i64, manual: bool) -> bool {
+    fn due(&self, now: i64) -> bool {
         !matches!(
             self.info.status.as_str(),
             "downloading" | "ready" | "installing"
         ) && now >= self.blocked_until
             && (self.last_attempt == 0 || now >= self.last_attempt.saturating_add(60))
-            && (manual || now >= self.info.next_check_at)
+    }
+    fn reserve_check(&mut self, now: i64, startup: bool) -> bool {
+        if startup {
+            if self.startup_checked {
+                return false;
+            }
+            // Consume startup even on failure/wait. It must never become an
+            // automatic retry, and a manual check racing startup already counts.
+            self.startup_checked = true;
+            if self.last_attempt != 0 {
+                return false;
+            }
+        }
+        self.due(now)
     }
     fn finish(&mut self, result: Result<Version, Failure>, now: i64) {
         self.info.revision += 1;
@@ -67,7 +80,7 @@ impl Cache {
                     "current"
                 }
                 .into();
-                self.info.next_check_at = now.saturating_add(DAY);
+                self.info.next_check_at = now.saturating_add(60);
                 self.blocked_until = 0;
             }
             Err(failure) => {
@@ -83,11 +96,34 @@ pub struct Service(Mutex<Cache>);
 impl Service {
     // Called on a blocking worker, never the UI thread. Holding the lock makes
     // callers share a completed check; the one-minute floor merges manual clicks.
-    pub fn check(&self, manual: bool) -> Result<Info, String> {
+    pub fn info(&self) -> Result<Info, String> {
+        self.0
+            .lock()
+            .map(|cache| cache.info.clone())
+            .map_err(|_| "更新状态不可用".into())
+    }
+
+    pub fn startup(&self) -> Result<Info, String> {
+        self.run_check(true)
+    }
+
+    pub fn check(&self) -> Result<Info, String> {
+        self.run_check(false)
+    }
+
+    fn run_check(&self, startup: bool) -> Result<Info, String> {
+        self.check_using(startup, || fetch(API_URL))
+    }
+
+    fn check_using(
+        &self,
+        startup: bool,
+        fetch: impl FnOnce() -> Result<Version, Failure>,
+    ) -> Result<Info, String> {
         let mut cache = self.0.lock().map_err(|_| "更新状态不可用")?;
         let now = chrono::Utc::now().timestamp();
-        if cache.due(now, manual) {
-            let result = fetch(API_URL);
+        if cache.reserve_check(now, startup) {
+            let result = fetch();
             cache.finish(result, chrono::Utc::now().timestamp());
         }
         Ok(cache.info.clone())
@@ -345,8 +381,7 @@ mod tests {
         let mut cache = Cache::default();
         for status in ["downloading", "ready", "installing"] {
             cache.info.status = status.into();
-            assert!(!cache.due(999999, true));
-            assert!(!cache.due(999999, false));
+            assert!(!cache.due(999999));
         }
         for url in [
             "http://github.com/lvzixun/CodexPulse/releases/download/v1/a.exe",
@@ -364,12 +399,12 @@ mod tests {
     #[test]
     fn caches_checks_and_honors_retry_even_when_manual() {
         let mut cache = Cache::default();
-        assert!(cache.due(1000, false));
+        assert!(cache.reserve_check(1000, true));
         cache.finish(release_version(&release("v9.0.0")), 1000);
-        assert!(!cache.due(1001, true));
-        assert!(cache.due(1060, true));
-        assert!(!cache.due(1060, false));
-        assert!(cache.due(1000 + DAY, false));
+        assert!(!cache.reserve_check(1001, false));
+        assert!(cache.reserve_check(1060, false));
+        assert!(!cache.reserve_check(1060, true));
+        assert!(!cache.reserve_check(1000 + 86400 * 30, true));
         cache.finish(
             Err(Failure {
                 status: "rate_limited",
@@ -377,9 +412,68 @@ mod tests {
             }),
             2000,
         );
-        assert!(!cache.due(5599, true));
-        assert!(cache.due(5600, true));
+        assert!(!cache.reserve_check(5599, false));
+        assert!(cache.reserve_check(5600, false));
         assert!(cache.info.update_available); // A failed check retains the known update.
+    }
+    #[test]
+    fn startup_failure_does_not_schedule_automatic_retries() {
+        let mut cache = Cache::default();
+        assert!(cache.reserve_check(1000, true));
+        cache.finish(
+            Err(Failure {
+                status: "rate_limited",
+                wait: 3600,
+            }),
+            1000,
+        );
+        for now in [1001, 4600, 86400, 86400 * 30] {
+            assert!(!cache.reserve_check(now, true));
+        }
+        assert!(!cache.reserve_check(4599, false));
+        assert!(cache.reserve_check(4600, false));
+    }
+    #[test]
+    fn manual_check_before_startup_is_not_repeated_and_cache_reads_are_passive() {
+        let service = Service::default();
+        {
+            let mut cache = service.0.lock().unwrap();
+            assert!(cache.reserve_check(1000, false));
+            cache.finish(release_version(&release("v9.0.0")), 1000);
+            assert!(!cache.reserve_check(2000, true));
+        }
+        for _ in 0..10 {
+            let info = service.info().unwrap();
+            assert_eq!(info.revision, 1);
+            assert_eq!(info.latest_version.as_deref(), Some("9.0.0"));
+        }
+        let cache = service.0.lock().unwrap();
+        assert_eq!(cache.last_attempt, 1000);
+        assert_eq!(cache.info.status, "available");
+    }
+    #[test]
+    fn concurrent_startup_and_manual_checks_share_one_request() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let service = Service::default();
+        let calls = AtomicUsize::new(0);
+        std::thread::scope(|scope| {
+            for startup in [true, false, true, false] {
+                let service = &service;
+                let calls = &calls;
+                scope.spawn(move || {
+                    let info = service
+                        .check_using(startup, || {
+                            calls.fetch_add(1, Ordering::Relaxed);
+                            std::thread::sleep(Duration::from_millis(20));
+                            Ok(Version::new(9, 0, 0))
+                        })
+                        .unwrap();
+                    assert_eq!(info.revision, 1);
+                });
+            }
+        });
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
+        assert_eq!(service.info().unwrap().revision, 1);
     }
     #[test]
     fn http_transport_handles_success_and_retry_after() {
