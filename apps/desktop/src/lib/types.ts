@@ -236,6 +236,7 @@ export interface Snapshot {
     last_attempt: string | null;
     latest_reset: NewsItem | null;
     scheduled_reset: NewsItem | null;
+    active_watch: { item: NewsItem; level: string | null } | null;
     challenge: Challenge | null;
     challenge_status: string;
     challenge_fetched_at: string | null;

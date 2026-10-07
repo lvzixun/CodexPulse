@@ -1664,3 +1664,46 @@ main.menubar.opaque {
 .cp-news-feed-heading {
   margin-top: 18px;
 }
+
+.cp-reset-watch {
+  grid-column: 1 / -1;
+  margin: 0 0 20px;
+  padding: 14px;
+  border: 1px solid var(--cp-line);
+  border-left: 3px solid var(--cp-amber);
+  border-radius: 12px;
+  background: var(--card);
+}
+.cp-watch-kicker {
+  color: var(--cp-amber);
+  font-size: 12px;
+  font-weight: 600;
+}
+.cp-watch-title {
+  display: block;
+  font-size: 21px;
+  line-height: 1.35;
+  margin-top: 6px;
+}
+.cp-watch-deadline {
+  margin: 7px 0;
+  font-size: 12px;
+}
+.cp-watch-caveat {
+  margin: 7px 0 0;
+}
+.cp-reset-watch .cp-news-row {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+.cp-reset-watch-compact {
+  margin: 0;
+  padding: 10px 0 0;
+  border: 0;
+  border-top: 1px solid var(--cp-line);
+  border-radius: 0;
+  background: transparent;
+}
+.cp-reset-watch-compact .cp-watch-title {
+  font-size: 18px;
+}

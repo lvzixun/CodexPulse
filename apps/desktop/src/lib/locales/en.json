@@ -491,5 +491,13 @@
   "无法打开系统启动应用设置": "Unable to open Windows Startup apps",
   "无法修改登录启动，请检查系统启动应用设置": "Unable to change login startup. Check Windows Startup apps.",
   "登录启动配置不属于 CodexPulse": "The startup entry does not belong to CodexPulse",
-  "本轮平均输出速度 · 含推理、工具和等待": "Average output speed this turn, including reasoning, tools, and waiting"
+  "本轮平均输出速度 · 含推理、工具和等待": "Average output speed this turn, including reasoning, tools, and waiting",
+  "重置观察": "Reset watch",
+  "有迹象": "Signs of a reset",
+  "迹象较强": "Strong signs",
+  "观察窗口已结束": "Watch window ended",
+  "{_0} 小时 {_1} 分钟内可能重置": "Possible reset within {_0}h {_1}m",
+  "{_0} 分钟内可能重置": "Possible reset within {_0}m",
+  "预计在 {_0} 前（本地时间）": "Estimated before {_0} (local time)",
+  "站点观察，尚未确认；不代表当前账户额度已恢复。": "Site observation, unconfirmed; your account limits may not have recovered."
 }

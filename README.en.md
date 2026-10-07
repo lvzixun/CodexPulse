@@ -10,7 +10,7 @@ A desktop status panel for Codex. Track account limits, session usage, and publi
 
 - **Overview:** limits and reset times, reset cards and credits, the current work session, and a combined section for local 30-day usage and account lifetime totals.
 - **Models / Sessions:** model usage shares, paginated session history, inline details, and API-equivalent pricing coverage.
-- **Tibo:** the latest public reset, six months of reset history, and expandable daily entries from the 28-day challenge.
+- **Tibo:** active reset watches with countdowns, the latest public reset, six months of reset history, and expandable daily entries from the 28-day challenge.
 
 Dark appearance is the default; change it in Settings. macOS uses a menu bar icon and a native material panel. Windows supports a tray icon and an optional compact floating window. Both platforms share accounts, usage, Tibo, and preferences.
 

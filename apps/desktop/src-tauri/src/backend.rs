@@ -1338,6 +1338,14 @@ impl Backend {
                 .items
                 .iter()
                 .find(|item| item.id == id)
+                .or_else(|| {
+                    state
+                        .news
+                        .active_watch
+                        .as_ref()
+                        .map(|watch| &watch.item)
+                        .filter(|item| item.id == id)
+                })
                 .ok_or("消息已更新，请刷新后重试")?;
             let mut keys = vec![item.id.clone()];
             if let Some(url) = item

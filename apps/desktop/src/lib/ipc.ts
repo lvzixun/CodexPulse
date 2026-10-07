@@ -33,6 +33,7 @@ export const empty: Snapshot = {
     last_attempt: null,
     latest_reset: null,
     scheduled_reset: null,
+    active_watch: null,
     challenge: null,
     challenge_status: '',
     challenge_fetched_at: null,

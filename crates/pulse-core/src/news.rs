@@ -41,6 +41,28 @@ pub struct NewsItem {
     pub source_url: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ResetWatch {
+    pub item: NewsItem,
+    pub level: Option<String>,
+}
+
+/// A separate projection keeps the active signal reachable even when history
+/// exceeds the bounded news list. It never becomes an executed/confirmed reset.
+pub fn active_watch(response: &Value) -> Option<ResetWatch> {
+    let item = status_items(response)
+        .ok()?
+        .into_iter()
+        .find(|item| item.kind == NewsKind::Forecast)?;
+    Some(ResetWatch {
+        item,
+        level: response["data"]["active_watch"]["level"]
+            .as_str()
+            .filter(|v| v.len() <= 32)
+            .map(str::to_owned),
+    })
+}
+
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ResetStats {
     pub total: Option<u64>,
