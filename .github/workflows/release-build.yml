@@ -47,7 +47,8 @@ jobs:
       - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
       - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
         with:
-          toolchain: '1.97.0'
+          toolchain: '1.97.1'
+          components: clippy,rustfmt
           targets: ${{ runner.os == 'macOS' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
