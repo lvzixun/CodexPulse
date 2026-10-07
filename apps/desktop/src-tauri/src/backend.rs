@@ -699,9 +699,14 @@ impl Backend {
                                         continue;
                                     }
                                     probes_changed = true;
-                                    reconcile_identity(&mut quota, &scope, &stamp);
+                                    let recovered = reconcile_probe(
+                                        &mut quota,
+                                        &scope,
+                                        &stamp,
+                                        stamps.get(&scope.source_id),
+                                    );
                                     stamps.insert(scope.source_id.clone(), stamp);
-                                    if changed {
+                                    if changed || recovered {
                                         quota_schedule.invalidate(0);
                                         quota_epoch
                                             .store(quota_schedule.generation, Ordering::Relaxed);
@@ -1544,6 +1549,36 @@ fn reconcile_identity(
         .filter_map(|q| q.last_success.clone())
         .max();
 }
+// A successful local probe can recover a stale authentication failure without
+// issuing HTTP. Same-account renewal must release only authentication backoff;
+// a new token does not waive a server's 429 / Retry-After or transport backoff.
+fn reconcile_probe(
+    quota: &mut QuotaState,
+    scope: &crate::http_quota::Scope,
+    stamp: &crate::http_quota::Stamp,
+    previous: Option<&crate::http_quota::Stamp>,
+) -> bool {
+    let credentials_changed = previous.is_some_and(|old| old.revision != stamp.revision);
+    reconcile_identity(quota, scope, stamp);
+    if stamp.status != "ready" {
+        return false;
+    }
+    let recovered = |status: &str| {
+        status == "credentials_expired" || (status == "reauth_required" && credentials_changed)
+    };
+    let state = quota.sources.get_mut(&scope.source_id).unwrap();
+    let quota_recovered = recovered(&state.status);
+    let profile_recovered = recovered(&state.profile_status);
+    if quota_recovered {
+        state.status = "awaiting_refresh".into();
+        state.failures = 0;
+        state.retry_at = 0;
+    }
+    if profile_recovered {
+        state.profile_status = "awaiting_refresh".into();
+    }
+    quota_recovered || profile_recovered
+}
 fn source(id: String, label: String, home: PathBuf) -> Source {
     Source {
         health: SourceHealth {
@@ -1700,6 +1735,98 @@ mod tests {
         }
         let store = Store::open(&database).unwrap();
         assert_eq!(initial_settings(&store).unwrap().timezone, "UTC");
+    }
+    #[test]
+    fn same_account_renewal_releases_auth_backoff_without_changing_refresh_policy() {
+        let scope = crate::http_quota::Scope {
+            source_id: "wsl:Ubuntu".into(),
+            home: PathBuf::from("C:/test-wsl"),
+            wsl: Some(crate::source_config::WslTarget {
+                distro: "Ubuntu".into(),
+                user: String::new(),
+            }),
+        };
+        let old = crate::http_quota::Stamp {
+            identity: Some("same-account".into()),
+            revision: "expired-token".into(),
+            status: "credentials_expired".into(),
+            ..Default::default()
+        };
+        let ready = crate::http_quota::Stamp {
+            revision: "renewed-token".into(),
+            status: "ready".into(),
+            ..old.clone()
+        };
+        for previous in [Some(&old), None] {
+            let mut quota = QuotaState::default();
+            reconcile_identity(&mut quota, &scope, &old);
+            let state = quota.sources.get_mut(&scope.source_id).unwrap();
+            state.failures = 5;
+            state.retry_at = 1060;
+            assert!(reconcile_probe(&mut quota, &scope, &ready, previous));
+            let state = &quota.sources[&scope.source_id];
+            assert_eq!(state.identity, ready.identity);
+            assert_eq!(state.status, "awaiting_refresh");
+            assert_eq!(state.profile_status, "awaiting_refresh");
+            assert_eq!((state.failures, state.retry_at), (0, 0));
+            let mut schedule = crate::refresh::Schedule::new();
+            schedule.invalidate(0);
+            let auto = crate::refresh::Config::default();
+            assert!(schedule.due_for_account(&auto, 1000, state.retry_at, true, false));
+            assert!(!schedule.due_for_account(&auto, 1000, state.retry_at, false, false));
+            let manual = crate::refresh::Config {
+                mode: "manual".into(),
+                ..auto
+            };
+            assert!(!schedule.due_for_account(&manual, 1000, state.retry_at, true, false));
+            schedule.request();
+            assert!(schedule.due_for_account(&manual, 1000, state.retry_at, true, false));
+        }
+    }
+    #[test]
+    fn local_probe_requires_new_credentials_for_401_and_preserves_other_backoffs() {
+        let scope = crate::http_quota::Scope {
+            source_id: "windows".into(),
+            home: PathBuf::from("C:/test"),
+            wsl: None,
+        };
+        let old = crate::http_quota::Stamp {
+            identity: Some("same-account".into()),
+            revision: "old-token".into(),
+            status: "ready".into(),
+            ..Default::default()
+        };
+        let renewed = crate::http_quota::Stamp {
+            revision: "renewed-token".into(),
+            ..old.clone()
+        };
+        for (status, stamp, expected) in [
+            ("reauth_required", &old, false),
+            ("reauth_required", &renewed, true),
+            ("http_429", &renewed, false),
+            ("http_403", &renewed, false),
+            ("network_error", &renewed, false),
+        ] {
+            let mut quota = QuotaState::default();
+            reconcile_identity(&mut quota, &scope, &old);
+            let state = quota.sources.get_mut(&scope.source_id).unwrap();
+            state.status = status.into();
+            state.profile_status = status.into();
+            state.failures = 5;
+            state.retry_at = 1060;
+            assert_eq!(
+                reconcile_probe(&mut quota, &scope, stamp, Some(&old)),
+                expected
+            );
+            let state = &quota.sources[&scope.source_id];
+            if expected {
+                assert_eq!((state.failures, state.retry_at), (0, 0));
+            } else {
+                assert_eq!(state.status, status);
+                assert_eq!(state.profile_status, status);
+                assert_eq!((state.failures, state.retry_at), (5, 1060));
+            }
+        }
     }
     #[test]
     fn refresh_configs_survive_restart_and_account_switch_clears_every_cache_view() {

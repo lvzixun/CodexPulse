@@ -356,6 +356,8 @@ IPC 定义版本化 DTO：`OverviewSnapshot`、`ModelPage`、`SessionPage`、`Se
 
 认证存储先检查 `cli_auth_credentials_store`：支持文件；`keyring` / `auto` / `ephemeral` 明确显示系统凭据库未支持或内存凭据不可读取，不冒用可能过期的文件缓存。API key 等其他登录方式、自定义后端、凭据过期、401、账号不符和接口格式变化分别显示状态，不自行刷新认证。凭据只在内存使用，不记录 token、邮件或账号 ID，不写入产品数据库或原 Codex 文件。
 
+同账号由 Codex 更新凭据后，本地探测确认访问令牌有效即清除旧的令牌过期状态及认证失败退避；401 失败只在检测到凭据修订变化后恢复。恢复先显示等待刷新，不将本地有效等同于接口请求成功。自动模式仅在详情可见时重新查询，手动模式仍等待点击；429 / Retry-After、403 与网络失败的等待不因凭据更新而取消。保存的令牌过期不直接断言用户已退出 Codex，相同的额度与账户统计错误合并显示。
+
 代理按每个来源的 CODEX_HOME `.env` 读取 HTTPS_PROXY / https_proxy、ALL_PROXY、HTTP_PROXY 及 NO_PROXY，支持 HTTP CONNECT 和 SOCKS；Windows 没有本地值时可继承本进程环境，WSL 使用其来源文件。HTTPS_PROXY 优先，NO_PROXY 匹配时直连。显式代理无效则显示配置错误，不悄悄绕过；代理值 / 密码不写日志或数据库。旧 CLI 数据仅用于[实测对照](../development/cli-refresh-benchmark-2026-10-06.md)。
 
 CodexPulse 不直接写入原 Codex 认证、配置、日志或内部数据库；认证过期提示用户在相应环境重新登录。不能因为 Windows 已登录就把其 token 文件复制到 WSL。

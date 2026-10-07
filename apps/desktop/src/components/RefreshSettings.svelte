@@ -36,7 +36,7 @@
     credential_config_invalid: $t('认证存储配置不兼容'),
     credential_store_unsupported: $t('系统凭据库暂不支持直读'),
     credentials_ephemeral: $t('凭据仅存于 Codex 进程内存'),
-    credentials_expired: $t('登录已过期，请在 Codex 中重新登录'),
+    credentials_expired: $t('保存的访问令牌已过期，等待 Codex 更新凭据'),
     not_signed_in: $t('未登录'),
     reauth_required: $t('需要在 Codex 中重新登录'),
     auth_mode_unsupported: $t('该登录方式不支持账号额度'),
@@ -184,7 +184,7 @@
         {#if isFailure(source.status)}<p class="cp-note" role="status">
             {sourceNames([id], data.sources)} · {label(source.status)}
           </p>{/if}
-        {#if isFailure(source.profile_status)}<p class="cp-note" role="status">
+        {#if isFailure(source.profile_status) && source.profile_status !== source.status}<p class="cp-note" role="status">
             {sourceNames([id], data.sources)}
             {$t('· 账户统计：')}{label(source.profile_status)}
           </p>{/if}

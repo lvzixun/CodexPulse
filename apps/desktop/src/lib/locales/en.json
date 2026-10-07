@@ -251,7 +251,7 @@
   "认证存储配置不兼容": "Incompatible credential storage configuration",
   "系统凭据库暂不支持直读": "Direct reading of the system credential store is not supported",
   "凭据仅存于 Codex 进程内存": "Credentials exist only in Codex process memory",
-  "登录已过期，请在 Codex 中重新登录": "Sign-in expired. Sign in to Codex again.",
+  "保存的访问令牌已过期，等待 Codex 更新凭据": "Saved access token expired; waiting for Codex to update credentials",
   "未登录": "Not signed in",
   "需要在 Codex 中重新登录": "Sign in to Codex again",
   "该登录方式不支持账号额度": "This sign-in method does not support account quota",
