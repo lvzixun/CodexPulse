@@ -20,6 +20,8 @@ use std::{
 };
 use tauri::{Emitter, Manager};
 
+const LIVE_INTERVAL: Duration = Duration::from_millis(250);
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
@@ -169,6 +171,7 @@ pub struct QuotaSource {
     pub proxy_source: String,
 }
 pub enum Message {
+    FilesChanged,
     Settings(Settings, tokio::sync::oneshot::Sender<Result<(), String>>),
     UiPreferences(
         Option<String>,
@@ -412,6 +415,7 @@ impl Backend {
                 }
             })?;
         let shared = snapshot.clone();
+        let watcher_sender = sender.clone();
         thread::Builder::new()
             .name("pulse-collector".into())
             .spawn(move || {
@@ -422,14 +426,8 @@ impl Backend {
                 let watcher_paths = changed.clone();
                 let mut watcher =
                     notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
-                        if let Ok(event) = event
-                            && let Ok(mut paths) = watcher_paths.lock()
-                        {
-                            for path in event.paths {
-                                if paths.len() < 4096 {
-                                    paths.push(path);
-                                }
-                            }
+                        if let Ok(event) = event {
+                            queue_file_events(&watcher_paths, &watcher_sender, event.paths);
                         }
                     })
                     .ok();
@@ -439,8 +437,10 @@ impl Backend {
                 let mut last_wsl = Instant::now() - Duration::from_secs(60);
                 let mut wsl_home_cache = BTreeMap::<String, PathBuf>::new();
                 let mut last_publish = Instant::now() - Duration::from_secs(1);
+                let mut last_live = Instant::now() - LIVE_INTERVAL;
+                let mut live_dirty = false;
                 #[cfg(target_os = "macos")]
-                let mut last_status = Instant::now() - Duration::from_secs(1);
+                let mut last_status = Instant::now() - LIVE_INTERVAL;
                 let mut dirty = true;
                 let mut quota = quota;
                 let mut news = news;
@@ -516,11 +516,16 @@ impl Backend {
                         }
                     }
                     let wait = if store.timezone_rebuild_status().is_some() {
-                        10
+                        Duration::from_millis(10)
+                    } else if live_dirty {
+                        LIVE_INTERVAL
+                            .saturating_sub(last_live.elapsed())
+                            .min(Duration::from_millis(300))
                     } else {
-                        300
+                        Duration::from_millis(300)
                     };
-                    match receiver.recv_timeout(Duration::from_millis(wait)) {
+                    match receiver.recv_timeout(wait) {
+                        Ok(Message::FilesChanged) => {}
                         Ok(Message::ReadNews(keys, reply)) => {
                             let mut next = inbox.clone();
                             next.acknowledge(&keys);
@@ -1208,10 +1213,10 @@ impl Backend {
                         if !source.owns_path(&path) || !source.available() {
                             continue;
                         }
-                        let result = if path
+                        let titles_only = path
                             .file_name()
-                            .is_some_and(|name| name == "session_index.jsonl")
-                        {
+                            .is_some_and(|name| name == "session_index.jsonl");
+                        let result = if titles_only {
                             pulse_core::collectors::jsonl::read_titles(&mut store, &id, &path)
                         } else {
                             read_batch(
@@ -1229,6 +1234,7 @@ impl Backend {
                                     source.health.last_read = Some(Utc::now().to_rfc3339());
                                     source.health.issues += report.issues;
                                     dirty = true;
+                                    live_dirty |= !titles_only && report.records > 0;
                                 }
                                 if report.more {
                                     enqueue(&mut queue, &mut queued, (id, path));
@@ -1280,6 +1286,7 @@ impl Backend {
                         summary_day = day;
                         dirty = true;
                     }
+                    let mut live_changed = false;
                     if dirty && last_publish.elapsed() >= Duration::from_secs(1) {
                         let timezone = settings.timezone.parse::<Tz>().unwrap_or(chrono_tz::UTC);
                         let usage = store
@@ -1347,9 +1354,39 @@ impl Backend {
                         }
                         last_publish = Instant::now();
                         dirty = false;
+                        live_dirty = false;
+                        last_live = Instant::now();
+                    } else if live_dirty && last_live.elapsed() >= LIVE_INTERVAL {
+                        let ids = shared
+                            .read()
+                            .map(|state| {
+                                state
+                                    .recent
+                                    .iter()
+                                    .map(|s| s.meta.id.clone())
+                                    .collect::<Vec<_>>()
+                            })
+                            .unwrap_or_default();
+                        if let Ok(activity) = store.session_activity(&ids)
+                            && let Ok(mut state) = shared.write()
+                        {
+                            live_changed = update_live_sessions(&mut state, activity);
+                            if live_changed {
+                                state.sources = sources.iter().map(|s| s.health.clone()).collect();
+                            }
+                        }
+                        if live_changed
+                            && app
+                                .get_webview_window("pulse")
+                                .is_some_and(|w| w.is_visible().unwrap_or(false))
+                        {
+                            let _ = app.emit("snapshot-changed", ());
+                        }
+                        live_dirty = false;
+                        last_live = Instant::now();
                     }
                     #[cfg(target_os = "macos")]
-                    if last_status.elapsed() >= Duration::from_secs(1) {
+                    if live_changed || last_status.elapsed() >= LIVE_INTERVAL {
                         // Existing collector clock: activity/rate expiry still
                         // updates the native menu bar with no visible WebView.
                         crate::macos::update_status(&app);
@@ -1670,9 +1707,157 @@ fn enqueue_source(
     }
 }
 
+fn queue_file_events(
+    paths: &Mutex<Vec<PathBuf>>,
+    sender: &SyncSender<Message>,
+    incoming: Vec<PathBuf>,
+) {
+    if let Ok(mut paths) = paths.lock() {
+        let was_empty = paths.is_empty();
+        let remaining = 4096usize.saturating_sub(paths.len());
+        paths.extend(incoming.into_iter().take(remaining));
+        if was_empty && !paths.is_empty() {
+            // A full inbox already wakes the collector; paths remain buffered.
+            // Only the first event in a burst needs a wakeup, never a new thread.
+            let _ = sender.try_send(Message::FilesChanged);
+        }
+    }
+}
+
+fn update_live_sessions(
+    state: &mut Snapshot,
+    activity: Vec<pulse_core::domain::SessionMeta>,
+) -> bool {
+    let mut changed = false;
+    for next in activity {
+        if let Some(session) = state.recent.iter_mut().find(|s| s.meta.id == next.id) {
+            let previous = &mut session.meta;
+            if (
+                &previous.status,
+                &previous.last_activity,
+                &previous.current_model,
+                &previous.output_rate,
+            ) != (
+                &next.status,
+                &next.last_activity,
+                &next.current_model,
+                &next.output_rate,
+            ) {
+                previous.status = next.status;
+                previous.last_activity = next.last_activity;
+                previous.current_model = next.current_model;
+                previous.output_rate = next.output_rate;
+                changed = true;
+            }
+        }
+    }
+    changed
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn file_events_wake_once_per_burst_and_keep_paths_when_inbox_is_full() {
+        let paths = Mutex::new(Vec::new());
+        let (sender, receiver) = mpsc::sync_channel(1);
+        queue_file_events(&paths, &sender, vec![]);
+        assert!(receiver.try_recv().is_err());
+        queue_file_events(&paths, &sender, vec!["a.jsonl".into(), "b.jsonl".into()]);
+        queue_file_events(&paths, &sender, vec!["c.jsonl".into()]);
+        assert!(matches!(receiver.try_recv(), Ok(Message::FilesChanged)));
+        assert!(receiver.try_recv().is_err());
+        assert_eq!(paths.lock().unwrap().len(), 3);
+        paths.lock().unwrap().clear();
+        sender.try_send(Message::FilesChanged).unwrap();
+        queue_file_events(&paths, &sender, vec!["d.jsonl".into()]);
+        assert_eq!(paths.lock().unwrap().as_slice(), [PathBuf::from("d.jsonl")]);
+        assert!(matches!(receiver.try_recv(), Ok(Message::FilesChanged)));
+        paths.lock().unwrap().clear();
+        queue_file_events(
+            &paths,
+            &sender,
+            (0..5000)
+                .map(|n| PathBuf::from(format!("{n}.jsonl")))
+                .collect(),
+        );
+        assert_eq!(paths.lock().unwrap().len(), 4096);
+    }
+
+    #[test]
+    fn fast_activity_updates_preserve_titles_totals_and_network_state() {
+        use pulse_core::domain::{OutputRate, SessionMeta};
+        let mut state = Snapshot::default();
+        state.usage.total = 800;
+        state.quota.request_status = "paused".into();
+        state.updated_at = Some("summary timestamp".into());
+        state.recent.push(RecentSession {
+            meta: SessionMeta {
+                id: "main".into(),
+                title: Some("Indexed title".into()),
+                project: Some("Project".into()),
+                status: "active".into(),
+                ..Default::default()
+            },
+            sources: vec!["macos".into()],
+            models: vec![],
+            total: 120,
+            events: 1,
+            unknown_totals: 0,
+            cost_nanousd: 12345,
+            unpriced_tokens: 0,
+            reference: Default::default(),
+        });
+        let next = SessionMeta {
+            id: "main".into(),
+            status: "active".into(),
+            last_activity: "2026-10-07T10:00:01Z".into(),
+            current_model: Some("gpt-6.1-sol".into()),
+            output_rate: Some(OutputRate {
+                output_tokens: 100,
+                elapsed_ms: 2500,
+                measured_at: "2026-10-07T10:00:01Z".into(),
+                completed: false,
+            }),
+            ..Default::default()
+        };
+        assert!(update_live_sessions(&mut state, vec![next.clone()]));
+        assert!(!update_live_sessions(&mut state, vec![next]));
+        assert_eq!(
+            state.recent[0]
+                .meta
+                .output_rate
+                .as_ref()
+                .unwrap()
+                .output_tokens,
+            100
+        );
+        assert_eq!(state.recent[0].meta.title.as_deref(), Some("Indexed title"));
+        assert_eq!(state.recent[0].meta.project.as_deref(), Some("Project"));
+        assert_eq!(state.recent[0].total, 120);
+        assert_eq!(state.recent[0].cost_nanousd, 12345);
+        assert_eq!(state.usage.total, 800);
+        assert_eq!(state.quota.request_status, "paused");
+        assert_eq!(state.updated_at.as_deref(), Some("summary timestamp"));
+        assert!(!update_live_sessions(
+            &mut state,
+            vec![SessionMeta {
+                id: "not displayed".into(),
+                ..Default::default()
+            }]
+        ));
+        assert_eq!(state.recent.len(), 1);
+        assert!(update_live_sessions(
+            &mut state,
+            vec![SessionMeta {
+                id: "main".into(),
+                status: "completed".into(),
+                ..Default::default()
+            }]
+        ));
+        assert!(state.recent[0].meta.output_rate.is_none());
+    }
+
     #[test]
     fn system_timezone_changes_replace_stale_stages_and_publish_atomically() {
         let mut store = Store::in_memory().unwrap();

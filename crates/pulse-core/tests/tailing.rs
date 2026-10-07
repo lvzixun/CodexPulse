@@ -30,6 +30,49 @@ fn read(store: &mut Store, path: &Path) -> pulse_core::collectors::jsonl::ReadRe
     .unwrap()
 }
 #[test]
+fn activity_query_tracks_only_committed_rate_samples_without_recounting_usage() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("live.jsonl");
+    let records = [
+        json!({"type":"session_meta","timestamp":"2026-10-01T00:00:00Z","payload":{"id":"live"}}),
+        json!({"type":"turn_context","payload":{"model":"test-model","turn_id":"turn"}}),
+        json!({"type":"event_msg","timestamp":"2026-10-01T00:00:00Z","payload":{"type":"task_started","turn_id":"turn"}}),
+        usage(100, "2026-10-01T00:01:00Z"),
+    ];
+    fs::write(
+        &path,
+        records
+            .iter()
+            .map(|r| r.to_string() + "\n")
+            .collect::<String>(),
+    )
+    .unwrap();
+    let mut store = Store::in_memory().unwrap();
+    read(&mut store, &path);
+    let ids = vec!["live".into(), "missing".into()];
+    let first = store.session_activity(&ids).unwrap();
+    assert_eq!(first.len(), 1);
+    assert_eq!(first[0].current_model.as_deref(), Some("test-model"));
+    assert_eq!(first[0].output_rate.as_ref().unwrap().elapsed_ms, 60_000);
+    let mut sample = usage(200, "2026-10-01T00:02:00Z");
+    sample["payload"]["info"]["total_token_usage"]["output_tokens"] = json!(30);
+    sample["payload"]["info"]["total_token_usage"]["total_tokens"] = json!(230);
+    append(&path, sample.to_string().as_bytes());
+    assert_eq!(read(&mut store, &path).records, 0);
+    assert_eq!(store.session_activity(&ids).unwrap()[0], first[0]);
+    append(&path, b"\n");
+    assert_eq!(read(&mut store, &path).records, 1);
+    let second = store.session_activity(&ids).unwrap();
+    assert_eq!(second[0].output_rate.as_ref().unwrap().output_tokens, 30);
+    assert_eq!(second[0].output_rate.as_ref().unwrap().elapsed_ms, 120_000);
+    let total = store.session_by_id("live").unwrap().unwrap().total;
+    for _ in 0..5 {
+        assert_eq!(store.session_activity(&ids).unwrap(), second);
+    }
+    assert_eq!(store.session_by_id("live").unwrap().unwrap().total, total);
+    assert!(store.session_activity(&[]).unwrap().is_empty());
+}
+#[test]
 fn unchanged_files_read_zero_content_and_appends_resume() {
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("session.jsonl");

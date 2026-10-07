@@ -490,16 +490,18 @@
   onMount(() => {
     let disposed = false;
     let clock: ReturnType<typeof setInterval> | undefined;
+    let languageClock: ReturnType<typeof setInterval> | undefined;
     const clockVisible = (visible: boolean) => {
       if (disposed) return;
       clearInterval(clock);
+      clearInterval(languageClock);
       if (visible) {
         now = Date.now();
         void refreshLanguage();
         clock = setInterval(() => {
           now = Date.now();
-          void refreshLanguage();
-        }, 60000);
+        }, 1000);
+        languageClock = setInterval(() => void refreshLanguage(), 60000);
       }
     };
     clockVisible(windowVisible && documentVisible);
@@ -601,6 +603,7 @@
       compactMenuDisposed = true;
       if (!compactMenuBusy) void closeCompactMenu();
       clearInterval(clock);
+      clearInterval(languageClock);
       disposed = true;
       subscriptions.dispose();
       document.removeEventListener('visibilitychange', visible);

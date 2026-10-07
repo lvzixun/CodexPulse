@@ -43,6 +43,17 @@ pub struct UsageSummary {
     pub reference: super::ReferenceEstimate,
 }
 impl Store {
+    /// Read live fields for the displayed sessions without aggregating usage or prices.
+    /// Titles still come from session_by_id; callers merge only activity/model/rate.
+    pub fn session_activity(&self, ids: &[String]) -> Result<Vec<SessionMeta>, StoreError> {
+        let ids = &ids[..ids.len().min(100)];
+        let mut query = self.connection.prepare(
+            "SELECT metadata FROM sessions WHERE id IN (SELECT value FROM json_each(?1))",
+        )?;
+        let rows = query.query_map([serde_json::to_string(ids)?], |row| row.get::<_, String>(0))?;
+        rows.map(|row| Ok(serde_json::from_str(&row?)?)).collect()
+    }
+
     pub fn setting<T: serde::de::DeserializeOwned>(
         &self,
         key: &str,

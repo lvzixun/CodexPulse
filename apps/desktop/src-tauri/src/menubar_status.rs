@@ -83,7 +83,15 @@ pub fn render(snapshot: &Snapshot, now: DateTime<Utc>, language: &str) -> Status
             .quota
             .sources
             .values()
-            .any(|q| !matches!(q.status.as_str(), "connected" | "verifying_account"));
+            // Match RefreshSettings' failure classification. Local credential
+            // recovery and a hidden/manual panel can legitimately wait without
+            // an HTTP failure; absence of a completed readout is not an error.
+            .any(|q| {
+                !matches!(
+                    q.status.as_str(),
+                    "" | "connected" | "ready" | "verifying_account" | "awaiting_refresh"
+                )
+            });
     let mark = if important > 0 {
         " ↻"
     } else if unread > 0 {
@@ -248,6 +256,63 @@ mod tests {
         s.news.important_unread = 0;
         s.news.unread_keys.clear();
         assert!(!render(&s, now, "zh").title.contains('↻'));
+    }
+    #[test]
+    fn normal_account_waiting_does_not_add_an_error_badge() {
+        let (mut s, now) = fixture();
+        s.news.important_unread = 1;
+        for state in [
+            "",
+            "awaiting_refresh",
+            "verifying_account",
+            "ready",
+            "connected",
+        ] {
+            s.quota.sources.insert(
+                "macos".into(),
+                crate::backend::QuotaSource {
+                    status: state.into(),
+                    failures: 0,
+                    ..Default::default()
+                },
+            );
+            for language in ["zh", "en"] {
+                let status = render(&s, now, language);
+                assert!(status.title.ends_with(" ↻"), "{state}: {}", status.title);
+                assert!(!status.tooltip.contains("\n!"), "{state}");
+                assert!(status.title.contains("6.1-sol · 38.4 t/s"));
+            }
+        }
+    }
+    #[test]
+    fn real_account_errors_remain_visible_and_clear_on_credential_recovery() {
+        let (mut s, now) = fixture();
+        for state in [
+            "credentials_expired",
+            "reauth_required",
+            "credentials_unreadable",
+            "network_error",
+            "forbidden",
+            "rate_limited",
+            "invalid_response",
+        ] {
+            // Local authentication errors can have zero HTTP failure attempts.
+            s.quota.sources.insert(
+                "macos".into(),
+                crate::backend::QuotaSource {
+                    status: state.into(),
+                    failures: 0,
+                    ..Default::default()
+                },
+            );
+            assert!(render(&s, now, "zh").title.ends_with(" !"), "{state}");
+        }
+        let source = s.quota.sources.get_mut("macos").unwrap();
+        source.status = "awaiting_refresh".into();
+        source.failures = 0;
+        assert!(!render(&s, now, "zh").title.ends_with(" !"));
+        s.error = Some("ledger query failed".into());
+        assert!(render(&s, now, "zh").title.ends_with(" !"));
     }
     #[test]
     fn long_models_are_bounded_without_invalid_unicode_or_control_characters() {
