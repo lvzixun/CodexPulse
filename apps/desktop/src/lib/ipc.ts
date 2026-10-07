@@ -41,6 +41,7 @@ export const empty: Snapshot = {
     scheduled_reset: null,
     active_watch: null,
     challenge: null,
+    history_status: '',
     challenge_status: '',
     challenge_fetched_at: null,
     reset_stats: {

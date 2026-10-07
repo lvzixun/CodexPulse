@@ -260,6 +260,7 @@ impl Backend {
         let mut news = store
             .setting::<crate::news::Feed>("news")?
             .unwrap_or_default();
+        news.reconcile_cached_status();
         if news.challenge_status.is_empty() {
             // Refresh legacy caches once so the newly added challenge is available.
             news.next_attempt = 0;
@@ -632,9 +633,8 @@ impl Backend {
                                                 chrono::DateTime::parse_from_rfc3339(s).ok()
                                             })
                                             .map_or(0, |d| d.timestamp());
-                                        news.next_attempt = attempt
-                                            .saturating_add(config.interval_seconds as i64)
-                                            .max(news.status_cache_until);
+                                        news.next_attempt =
+                                            attempt.saturating_add(config.interval_seconds as i64);
                                         let challenge_attempt = news
                                             .challenge_cache
                                             .fetched_at
@@ -644,8 +644,7 @@ impl Backend {
                                             })
                                             .map_or(0, |d| d.timestamp());
                                         news.challenge_next_attempt = challenge_attempt
-                                            .saturating_add(config.interval_seconds as i64)
-                                            .max(news.challenge_cache_until);
+                                            .saturating_add(config.interval_seconds as i64);
                                         news_schedule.invalidate(
                                             if old.mode == "manual" && config.mode == "auto" {
                                                 now

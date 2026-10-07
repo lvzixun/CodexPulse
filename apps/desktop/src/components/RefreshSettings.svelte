@@ -49,6 +49,7 @@
     proxy_config_invalid: $t('Codex .env 代理配置无效'),
     http_429: $t('服务端限流'),
     http_403: $t('接口拒绝访问'),
+    site_verification_required: $t('站点要求访问验证'),
     body_too_large: $t('接口响应过大'),
     body_read_error: $t('响应读取失败'),
     history_timeout: $t('重置历史同步超时'),
@@ -191,6 +192,9 @@
       {#if isFailure(data.news.status)}<p class="cp-note" role="status">
           {$t('重置公告 / Tibo ·')}
           {label(data.news.status)}
+        </p>{/if}
+      {#if isFailure(data.news.history_status ?? '')}<p class="cp-note" role="status">
+          {$t('重置历史 ·')}{label(data.news.history_status ?? '')}
         </p>{/if}
       {#if isFailure(data.news.challenge_status)}<p class="cp-note" role="status">
           {$t('28 天挑战 ·')}
