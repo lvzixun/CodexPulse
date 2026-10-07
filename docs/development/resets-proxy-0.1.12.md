@@ -1,4 +1,4 @@
-# 0.1.11 Resets 与 Codex 代理对齐
+# 0.1.12 Resets 与 Codex 代理对齐
 
 ## 问题与实现
 
@@ -13,3 +13,5 @@
 ## 检查
 
 Rust workspace 全部常规测试通过（桌面 77 项通过，6 项显式联网探针忽略），Clippy all-targets -D warnings 通过。新增测试检查 `.env` 重读 / 无凭据依赖 / 目标 NO_PROXY、真实本地代理 CONNECT 及无账户认证头、无效配置的缓存保留和正常退避。Svelte 0 错误 / 0 警告，15 项 Node 测试和格式检查通过。
+
+按用户要求重新同步 origin/main，合入 4fab8cc 的交接与原生 UI 记录。0.1.11 仅保留为未发布候选标签，其本地构建及 CI 已取消；最终使用 0.1.12 合并后的代码重新构建。
