@@ -20,4 +20,20 @@
 
 本机 Rust 176 项测试通过，6 项显式联网测试默认忽略；Clippy 无警告，Svelte 无错误 / 警告，15 项前端测试和发布清单测试通过。当前本机数据库只读 metadata 查询及 JSON 解析，10 个会话、40 次采样的 P95 为 0.035 ms；此测量不包含文件事件、采集调度或原生绘制，不作为端到端延迟证明。
 
-打包、发布、安装与清理结果在完成后补充。
+## 发布与本机安装
+
+源代码提交 `d6f593d736ec69ad69c901b4288eac0f834b9d9e`，标签 `v0.1.19`。[双平台 CI 37614806756](https://github.com/lvzixun/CodexPulse/actions/runs/37614806756) 全部成功：Windows 175 项 Rust 测试、macOS 176 项，均有 6 项显式联网测试默认忽略；前端检查、Clippy、安装包版本和更新签名验证通过。
+
+[0.1.19 正式 Release](https://github.com/lvzixun/CodexPulse/releases/tag/v0.1.19) 已发布并设为 latest，发布说明仅中文。Windows x64 安装器、macOS Universal DMG 与更新归档、两份更新签名、latest.json 和 SHA256SUMS 共 7 个资产；上传前后大小与 GitHub 服务端 SHA-256 一致。匿名 HTTPS 的 latest 更新地址及版本指定地址均返回与本地相同的 0.1.19 清单，包含三个平台键。
+
+两个更新包通过内置公钥签名、签名版本绑定和篡改拒绝校验。DMG 与更新归档中的 App 均为 0.1.19、最低 macOS 12、包含 arm64 / x86_64；严格 ad-hoc 签名校验通过，Info.plist、可执行文件及 CodeResources 一致。系统正式签名与 macOS 公证仍未接入。
+
+| 产物 | 字节数 | SHA-256 |
+| --- | ---: | --- |
+| Windows x64 安装器 | 5,040,866 | `d12fb5f62ff3349d23413c1982fb5464aed2c27f84b074536eb789cf44c30339` |
+| macOS Universal DMG | 13,674,315 | `e2a1a93d41b8c574dfad7448c5c5d6b88b2b678b690509bff20f54392fbfbf38` |
+| macOS Universal 更新归档 | 13,998,262 | `25b840e31002053bf79d560e2a1bf4cc0451aa8ab934a85edb85d18709df83cc` |
+
+用户确认退出后，两处 Applications 的 App 已替换为 CI 正式 Universal 0.1.19；安装后的版本、两种架构、严格签名及关键文件与 CI 归档一致。保留原有账户数据、账本和设置。桌面自动化接口持续报 native pipe startup failed，无法自动重新打开与执行本轮原生界面验收；已告知用户手动打开。不得把文件校验视为原生菜单绘制或速度端到端延迟验证。
+
+本地 Rust target 已删除，释放约 3.42 GiB；临时 UI 依赖、测试服务、下载副本、安装备份和 DMG 挂载已清理。保留正式产物及发布验证记录，未清理用户日志或应用数据。
