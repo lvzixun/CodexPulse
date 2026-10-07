@@ -53,7 +53,7 @@ API 等价费用是参考价估算，标明未覆盖用量，**不是订阅账�
 
 ## 开发
 
-需要 Rust stable ≥ 1.90、Node.js 24+ 和 pnpm 11。macOS 需要 Xcode Command Line Tools；Windows 需要 Visual Studio C++ 工具与 WebView2。
+需要 Rust stable ≥ 1.90、Node.js 24+ 和 pnpm 11；发布检查固定使用 Rust 1.97.1。macOS 需要 Xcode Command Line Tools；Windows 需要 Visual Studio C++ 工具与 WebView2。
 
 ```sh
 pnpm install --frozen-lockfile
@@ -83,7 +83,7 @@ Cargo 和 target 标准库须使用同一 Rust 工具链。通用包位于 `targ
 
 - [产品与技术设计](docs/design/codexpulse-v1.md)
 - [实施状态与待验证项目](docs/development/status.md)
-- [Windows 对齐与双平台发布](docs/development/windows-parity-0.1.4.md)
+- [Windows 对齐与双平台发布](docs/development/windows-release-0.1.6.md)
 - [开发交接](docs/development/handoff-2026-10-06.md)
 - [macOS 验证记录](docs/development/macos-2026-10-06.md)
 - [参考价与覆盖说明](resources/pricing/README.md)

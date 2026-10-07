@@ -1,4 +1,4 @@
-# Windows 对齐与双平台发布 0.1.4
+# Windows 对齐与验证：0.1.4 基线
 
 日期：2026-10-07，Asia/Shanghai。基线为另一台机器完成的 macOS 提交 `2d94760`，通过 fast-forward 更新；不回退共享功能。
 
@@ -29,8 +29,18 @@
 
 ## 验证与发布
 
-实施中：原生 release 验证、CI 双平台构建、安装包校验、发布及 debug 清理完成后在此补充实测结果。未实测项目不会从历史待办中直接标记通过。
+本机 Windows release 检查：Rust 136 项通过（核心 77、桌面 59），6 项显式联网探针默认忽略；Node 12 项通过；Svelte 0 错误 / 0 警告，Clippy `-D warnings`、Rustfmt、Prettier 及 diff 空白检查通过。PE 子系统为 Windows GUI（2），正常启动不创建终端。
+
+原生验证已覆盖：一行浮窗实际显示当前 `gpt-6.1-sol` 与约 33 tok/s；点击展开；总览账户资料 / 五项累计 / 重置卡 / credits；模型占比图；运行优先 Sessions 及行内详情；Tibo 半年历史和 28 天挑战入口；Windows 登录启动只读状态；英文即时切换与恢复系统语言；Windows 诊断生成与原生复制成功。测试期间未修改真实登录启动项或隐藏名称偏好。
+
+收起状态使用真实自动 300 秒设置。09:33:20 启动后保持紧凑浮窗，到 09:38:58 两路账户缓存的 last_attempt / last_success 均保持原值（分别为本日 09:27:53 和前日 02:19:14），只读账本对比窗口约 300.55 秒，本地 facts 增加 11 条；09:39:11 展开，09:39:15 账户刷新成功。脱敏诊断中的 Resets 成功时间为 09:38:21，早于展开，说明消息组继续独立运行。当前 WSL 没有运行中的发行版，未将历史 40 个 WSL 文件断点误计为本轮活跃采集，也未主动唤醒发行版。
+
+资源采样使用 `scripts/windows-process-sample.ps1`，按实时父子关系统计宿主与 WebView2；不记录命令行、账户或路径。紧凑模式 61 个样本跨度 308.154 秒：7 个进程，私有提交峰值 263.32 MiB，工作集总和峰值 469.91 MiB，CPU 增量约占单核 1.32%，句柄首尾 4057 / 4083；详情交互 29 个样本跨度 59.859 秒：7 个进程，私有提交峰值 311.02 MiB，工作集总和峰值 533.14 MiB，CPU 约占单核 2.43%，句柄 4120 / 4132。采样中未观察到额度 CLI 子进程。工作集总和包含共享页重复计数，私有提交也不等同于私有工作集；不能用这些数值判定设计的私有 RSS 或长期漂移预算通过。此前 277.87 MiB 为旧功能版本的不同负载采样，不据此宣称本轮性能改善比例。
+
+隐藏释放实测：09:47:53 隐藏，09:52:53 请求释放并销毁第 1 代窗口。64 个资源样本中，释放后进程从 7 降到 1，最后样本私有提交 43.51 MiB、工作集 78.98 MiB、637 个句柄。09:53:45 重开创建第 2 代窗口并恢复设置页及滚动位置；宿主 PID 保持 32016，托盘和采集仍在运行。测试后已恢复用户桌面浮窗开启、系统语言 / 外观及两组 300 秒自动设置。最终安装包、发布和 debug 清理见 [0.1.6 发布记录](windows-release-0.1.6.md)。多屏拔插、真实注销登录、旧 Windows / Intel Mac 实机与长期漂移保持未验收；macOS 本轮采用 CI 构建和签名 / 架构校验，未把远程构建当作 GUI 实机验证。
 
 流程：`.github/workflows/release-build.yml` 在手动触发 / 版本 tag 推送时对 Windows x64 和 macOS Universal 执行检查、测试、Clippy 和构建；macOS 校验 ad-hoc 签名及 arm64 / x86_64 架构。Actions 固定到具体提交，权限只有源码读取；人工发布命令在两个构建成功后上传安装包及校验文件。
+
+CI 修复：Universal 校验调整为 `lipo <file> -verify_arch arm64 x86_64`；固定 Rust 1.97.1 并显式安装 Clippy / Rustfmt，避免不同 runner 自动升级到 1.99 后新增 Clippy 规则导致既有 Windows 解码代码检查漂移。禁用 CI 的测试 / dev 调试符号，保留 release 构建参数。版本 tag `v0.1.4` 对应应用代码 `3f00f50`，此后的工作流和采样工具修正不改变 tag 中的应用 / 核心 / 依赖代码；支持手动指定该 tag 重新构建。
 
 参考：[Windows Run 注册表项](https://learn.microsoft.com/windows/win32/setupapi/run-and-runonce-registry-keys)、[Windows 剪贴板所有权](https://learn.microsoft.com/windows/win32/api/winuser/nf-winuser-setclipboarddata)、[Tauri GitHub 构建](https://v2.tauri.app/distribute/pipelines/github/)。

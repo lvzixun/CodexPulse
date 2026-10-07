@@ -53,7 +53,7 @@ API-equivalent costs are reference-price estimates with explicit coverage, **not
 
 ## Development
 
-Requires Rust stable ≥ 1.90, Node.js 24+, and pnpm 11. macOS needs Xcode Command Line Tools. Windows needs Visual Studio C++ tools and WebView2.
+Requires Rust stable ≥ 1.90, Node.js 24+, and pnpm 11. Release checks use Rust 1.97.1. macOS needs Xcode Command Line Tools. Windows needs Visual Studio C++ tools and WebView2.
 
 ```sh
 pnpm install --frozen-lockfile
@@ -85,7 +85,7 @@ Implementation documents are currently in Chinese:
 
 - [Product and technical design](docs/design/codexpulse-v1.md)
 - [Implementation status and pending acceptance](docs/development/status.md)
-- [Windows parity and cross-platform release](docs/development/windows-parity-0.1.4.md)
+- [Windows parity and cross-platform release](docs/development/windows-release-0.1.6.md)
 - [Development handoff](docs/development/handoff-2026-10-06.md)
 - [macOS validation](docs/development/macos-2026-10-06.md)
 - [Reference prices and coverage](resources/pricing/README.md)

@@ -5,7 +5,7 @@
 | 产品名称 | CodexPulse                                         |
 | 设计日期 | 2026-10-06                                         |
 | 状态     | 实施基线；开发进度见 `docs/development/status.md`  |
-| 当前发布 | macOS 0.1.5 通用包；Windows 构建与验收记录见开发状态 |
+| 当前发布 | macOS 0.1.5 已发布；0.1.6 双平台发布准备，见开发状态 |
 | 平台形态 | macOS 菜单栏面板；Windows 托盘与可选浮窗           |
 | 产品形态 | 独立桌面状态伴侣，Windows 可选浮窗 + 系统托盘      |
 | 技术方向 | Tauri 2、Rust、Svelte + TypeScript、SQLite         |
