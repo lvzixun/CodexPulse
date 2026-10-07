@@ -72,5 +72,5 @@ Cargo 和 target 标准库须使用同一 Rust 工具链。通用包位于 `targ
 ## 开发文档
 
 - [产品与技术设计](design/codexpulse-v1.md) · [实施状态](development/status.md)
-- [Windows 对齐与双平台发布](development/windows-release-0.1.6.md) · [macOS 验证](development/macos-2026-10-06.md)
+- [最新双平台发布](development/release-0.1.7.md) · [Windows 对齐基线](development/windows-release-0.1.6.md) · [macOS 验证](development/macos-2026-10-06.md)
 - [开发交接](development/handoff-2026-10-06.md) · [参考价与覆盖说明](../resources/pricing/README.md)

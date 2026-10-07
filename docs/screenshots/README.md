@@ -35,4 +35,4 @@ Playwright 可以安装在独立的工具目录，用 `CODEXPULSE_PLAYWRIGHT_MOD
 
 ## 交互验证
 
-同一开发服务器及 Playwright 环境下，可运行 `node scripts/verify-panel.cjs`。它使用 Tauri 官方 IPC 模拟，验证中英文 Tibo 自动已读的页面 / 可见性限制、新消息、并发及失败处理，以及浮窗菜单的三项顺序、动作与复用，不连接真实账户、不退出真实应用。该检查不代替 Windows 原生菜单绘制验收。
+同一开发服务器及 Playwright 环境下，可运行 `node scripts/verify-panel.cjs`。它使用 Tauri 官方 IPC 模拟，验证中英文更新提示、手动检查、下载动作、提示关闭及缓存复用，Tibo 自动已读的页面 / 可见性限制、新消息、并发及失败处理，以及浮窗菜单的三项顺序、动作与复用，不连接真实账户、不退出真实应用。该检查不代替 Windows 原生菜单绘制验收。

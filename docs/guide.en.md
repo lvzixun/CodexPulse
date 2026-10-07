@@ -74,5 +74,5 @@ See [screenshot notes](screenshots/README.md) for capture instructions.
 Implementation documents are currently in Chinese:
 
 - [Product and technical design](design/codexpulse-v1.md) · [Implementation status](development/status.md)
-- [Windows parity and cross-platform release](development/windows-release-0.1.6.md) · [macOS validation](development/macos-2026-10-06.md)
+- [Latest cross-platform release](development/release-0.1.7.md) · [Windows parity baseline](development/windows-release-0.1.6.md) · [macOS validation](development/macos-2026-10-06.md)
 - [Development handoff](development/handoff-2026-10-06.md) · [Reference prices and coverage](../resources/pricing/README.md)
