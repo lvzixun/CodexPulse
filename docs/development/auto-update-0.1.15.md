@@ -19,3 +19,23 @@ Rust Service 持有下载状态和已验证字节，窗口隐藏、收起或销�
 ## 验证
 
 本机 release 模式 Rust workspace 测试、Clippy、Svelte 和 Node 测试；浏览器 IPC 测试覆盖中英文下载进度、未校验完成不可安装、安装失败恢复、安装期间禁用重复操作和原有拖动/Tibo交互。正式产物及各平台安装更新验证结果在发布后追加。不把浏览器模拟称为原生更新验收，也不把 Windows 验证称为 macOS 实机测试。
+
+## 正式发布结果
+
+[0.1.15 正式 Release](https://github.com/lvzixun/CodexPulse/releases/tag/v0.1.15) 已发布为 latest，非预发布。源标签提交 `b366505010e6b0c158fa9369ee80338e1a39384b`；[双平台 CI #37576575913](https://github.com/lvzixun/CodexPulse/actions/runs/37576575913) 全部通过。0.1.14 是未发布的中间标签，CI 已取消，保留源码历史。
+
+本机 Rust release 测试 157 项通过、6 项显式网络测试忽略，Clippy 无警告；15 项前端 Node 测试、发布清单测试、Svelte 检查和中英文 IPC 交互检查通过。60 种主题 / 平台 / 语言 / 强调色组合检查通过。CI 再次运行双平台 Rust / Clippy / 前端检查，Windows 验证应用和安装器 x64 / 版本，macOS 验证 Universal arm64 + x86_64 和 ad-hoc 签名。两端实际更新资产均通过签名、绑定版本与篡改字节拒绝测试，下载后使用公钥再次复核。
+
+| 资产 | 字节 | SHA-256 |
+| --- | ---: | --- |
+| Windows x64 安装 / 更新包 | 5,028,051 | `47a3065b23ccb7b28943297ef5a5c1a741c2fd485394f2567d6cd480886f9453` |
+| macOS Universal DMG | 13,631,729 | `b1e18464e8db23d34387b73d11bea0c77fdc99d99a218ae3e0a022a7cec6ba02` |
+| macOS Universal 更新归档 | 13,958,717 | `bd8121335c5f811c34520ed0a543171d3a59aa6c60476307fc70cc3101d6d870` |
+
+上传到草稿的 7 个资产（以上 3 包、2 个签名、latest.json、SHA256SUMS.txt）已全部与 GitHub 服务端大小及 digest 比对，再一次正式发布。公开 HTTPS latest.json 读取成功，版本 0.1.15，Windows x64 和 Mac 两种架构的 URL 均指向该正式标签。Mac 归档内 Info.plist 版本 / 最低系统 12.0、两种 Mach-O 架构和签名资源也单独检查。
+
+本机先用同提交的本地安装包从 0.1.13 静默升级，再用 CI 安装包执行 `/S /UPDATE /R /D=D:\files\CodexPulse` 验证当前目录安装和自动重新启动。最终进程 PID 36712，应用 `D:\files\CodexPulse\codexpulse.exe` 版本 0.1.15，SHA-256 `eea48179f7beadc41ab225359f2518c29d4266a69a47dd8ff1648210f1f4eea2`。此验证覆盖安装器及重启参数，不等同于从旧版点击一次应用内升级。macOS 本轮仅有原生 CI 和产物校验，未进行 Mac 实机点击升级。
+
+额外的一次性 `tauri/test` MockRuntime 下载探针在本机以 `STATUS_ENTRYPOINT_NOT_FOUND` 退出，未完成网络 / 错版清单负例验证，**未计入通过**。辅助源码仅留在忽略的 work 目录，不包含在发布源码或应用内；正式不启用该测试 feature 的应用已启动并保持运行。后续可在受支持的测试运行环境继续排查此辅助程序启动问题。
+
+升级前后各 20 秒只读进程树采样：0.1.13 / 0.1.15 的 CPU 增量为 0.250 / 0.219 秒，最大 private commit 265.6 / 244.3 MiB，working set 520.3 / 448.6 MiB，均为 7 个进程、0 个额度 CLI。界面和缓存生命周期未严格控制，作为运行状态记录，不能据此宣称更新功能降低了内存。无 target/debug 产物。
