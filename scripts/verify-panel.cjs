@@ -22,7 +22,7 @@ mockIPC(async(cmd,args)=>{
  if(cmd==='get_startup_status')return 'disabled';
  if(cmd==='check_updates'){
   state.checks.push(args.manual);
-  return {current_version:'0.1.8',latest_version:'0.1.9',update_available:true,checked_at:new Date().toISOString(),next_check_at:Date.now()/1000+86400,status:'available'};
+  return {current_version:'0.1.9',latest_version:'0.1.10',update_available:true,checked_at:new Date().toISOString(),next_check_at:Date.now()/1000+86400,status:'available'};
  }
  if(cmd==='open_app_release'){state.upgrades++;return}
  if(cmd==='plugin:window|is_visible')return state.shown;
@@ -139,7 +139,7 @@ await import('/src/main.ts');
         .click();
       await page.waitForFunction(() => __panelTest.checks.length === 2);
       assert.deepEqual(await page.evaluate(() => __panelTest.checks), [false, true]);
-      await page.getByRole('button', { name: /升级到 v0.1.9|Upgrade to v0.1.9/ }).click();
+      await page.getByRole('button', { name: /升级到 v0.1.10|Upgrade to v0.1.10/ }).click();
       await page.waitForFunction(() => __panelTest.upgrades === 2);
       assert.equal(
         await page.evaluate(() => __panelTest.drags),
