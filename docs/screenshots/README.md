@@ -35,4 +35,6 @@ Playwright 可以安装在独立的工具目录，用 `CODEXPULSE_PLAYWRIGHT_MOD
 
 ## 交互验证
 
+`node scripts/verify-appearance.cjs` 覆盖中英文、Windows / macOS、深浅 / 跟随系统主题和五种强调色的 60 种组合，验证选中标签可区分及重置行同行显示。`verify-panel.cjs` 也覆盖浮窗整条拖动、标题栏留白、操作按钮排除、点击 / 拖动阈值及拖动后点击恢复。拖动使用 IPC 模拟，仍需 OS 手感实测。
+
 同一开发服务器及 Playwright 环境下，可运行 `node scripts/verify-panel.cjs`。它使用 Tauri 官方 IPC 模拟，验证中英文更新提示、手动检查、下载动作、提示关闭及缓存复用，Tibo 自动已读的页面 / 可见性限制、新消息、并发及失败处理，以及浮窗菜单的三项顺序、动作与复用，不连接真实账户、不退出真实应用。该检查不代替 Windows 原生菜单绘制验收。

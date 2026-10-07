@@ -384,8 +384,54 @@
       saving = false;
     }
   }
+  let compactGesture: { pointer: number; x: number; y: number; target: Element } | null = null;
+  let compactDragged = false;
+  function startWindowDrag() {
+    void getCurrentWindow()
+      .startDragging()
+      .catch((e) => (error = String(e)));
+  }
   function drag(e: PointerEvent) {
-    if (native && e.button === 0) void getCurrentWindow().startDragging();
+    if (!native || e.button !== 0 || !e.isPrimary || !(e.target instanceof Element)) return;
+    compactGesture = null;
+    compactDragged = false;
+    if (mode === 'compact' && e.target.closest('.cp-compact-line')) {
+      const target = e.target.closest('button') ?? e.target;
+      compactGesture = { pointer: e.pointerId, x: e.clientX, y: e.clientY, target };
+      // Keep receiving movement even when the pointer leaves the tiny window.
+      try {
+        target.setPointerCapture(e.pointerId);
+      } catch {}
+    } else if (e.target.closest('.cp-header')) {
+      const button = e.target.closest('button');
+      if (button && !button.matches('.cp-logo, .cp-brand')) return;
+      e.preventDefault();
+      startWindowDrag();
+    }
+  }
+  function moveCompact(e: PointerEvent) {
+    const gesture = compactGesture;
+    if (!gesture || e.pointerId !== gesture.pointer) return;
+    if (!(e.buttons & 1)) {
+      compactGesture = null;
+      return;
+    }
+    if (Math.hypot(e.clientX - gesture.x, e.clientY - gesture.y) < 4) return;
+    compactGesture = null;
+    compactDragged = true;
+    try {
+      gesture.target.releasePointerCapture(e.pointerId);
+    } catch {}
+    startWindowDrag();
+  }
+  function openCompact(e: MouseEvent) {
+    // Native dragging can deliver a final click; it must not expand the window.
+    // A fresh pointer-down clears this flag, so the next deliberate click works.
+    if (compactDragged && e.detail !== 0) {
+      e.preventDefault();
+      return;
+    }
+    void windowAction(unreadKeys.length ? 'news' : 'expand');
   }
   async function closeCompactMenu() {
     const resources = [...compactMenuItems, ...(compactMenu ? [compactMenu] : [])];
@@ -544,7 +590,14 @@
   });
 </script>
 
-<svelte:window oncontextmenu={compactContextMenu} />
+<svelte:window
+  oncontextmenu={compactContextMenu}
+  onpointerdown={drag}
+  onpointermove={moveCompact}
+  onpointerup={() => (compactGesture = null)}
+  onpointercancel={() => (compactGesture = null)}
+  onblur={() => (compactGesture = null)}
+/>
 
 <main
   class="cp-shell"
@@ -562,7 +615,6 @@
         class:cp-working={activity === 'busy'}
         class:cp-unknown={activity === 'unknown'}
         class:cp-indexing={data.collecting}
-        onpointerdown={drag}
         aria-label={$t('{_0} · 拖动 CodexPulse 浮窗', { _0: activityTitle })}
         title={$t('CodexPulse · {_0}{_1} · 拖动调整位置', {
           _0: activityTitle,
@@ -571,7 +623,7 @@
       >
       <button
         class="cp-compact-info"
-        onclick={() => void windowAction(unreadKeys.length ? 'news' : 'expand')}
+        onclick={openCompact}
         aria-label={importantUnread
           ? $t('查看新的重要重置消息')
           : unreadKeys.length
@@ -602,10 +654,10 @@
     </div>
   {:else}
     <header class="cp-header">
-      <button class="cp-logo" onpointerdown={drag} aria-label={$t('拖动 CodexPulse 窗口')}
+      <button class="cp-logo" aria-label={$t('拖动 CodexPulse 窗口')}
         ><Icon name="activity" /></button
       >
-      <button class="cp-brand" onpointerdown={drag} aria-label={$t('拖动 CodexPulse 窗口')}
+      <button class="cp-brand" aria-label={$t('拖动 CodexPulse 窗口')}
         ><strong>CodexPulse</strong><small
           >{$t('额度快照')}{data.quota?.buckets[0]?.plan
             ? ` · ${data.quota.buckets[0].plan}`

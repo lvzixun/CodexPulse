@@ -15,7 +15,7 @@ The Windows installer has no Authenticode signature. The macOS package is ad-hoc
 
 ## Everyday use
 
-The **Windows floating window** fits into one line: work status, current model, and average speed. A highlighted “Reset” marker appears for new important reset messages. Click to expand details; drag its left side to reposition it.
+The **Windows floating window** fits into one line: work status, current model, and average speed. A highlighted “Reset” marker appears for new important reset messages. Click to expand details; drag anywhere on the strip to reposition it. Drag the expanded panel by its header; action buttons keep their normal behavior.
 
 Disable the floating window in Settings if desired. Left-click the tray icon to open the same detail panel; right-click for Settings, Quit, and other simple actions.
 

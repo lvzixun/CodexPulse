@@ -12,7 +12,7 @@ const boot = String.raw`
 import {mockIPC,mockWindows} from '__TAURI_API__/mocks.js';
 window.isTauri=true;
 mockWindows('pulse');
-const state=window.__panelTest={data:null,view:null,shown:true,reads:[],actions:[],menus:[],popups:[],closed:[],fail:false,hold:false,release:null,checks:[],upgrades:0};
+const state=window.__panelTest={data:null,view:null,shown:true,reads:[],actions:[],menus:[],popups:[],closed:[],fail:false,hold:false,release:null,checks:[],upgrades:0,drags:0};
 let emit;
 mockIPC(async(cmd,args)=>{
  if(cmd==='get_ui_language')return new URLSearchParams(location.search).get('language')||'zh';
@@ -22,10 +22,11 @@ mockIPC(async(cmd,args)=>{
  if(cmd==='get_startup_status')return 'disabled';
  if(cmd==='check_updates'){
   state.checks.push(args.manual);
-  return {current_version:'0.1.7',latest_version:'0.1.8',update_available:true,checked_at:new Date().toISOString(),next_check_at:Date.now()/1000+86400,status:'available'};
+  return {current_version:'0.1.8',latest_version:'0.1.9',update_available:true,checked_at:new Date().toISOString(),next_check_at:Date.now()/1000+86400,status:'available'};
  }
  if(cmd==='open_app_release'){state.upgrades++;return}
  if(cmd==='plugin:window|is_visible')return state.shown;
+ if(cmd==='plugin:window|start_dragging'){state.drags++;return}
  if(cmd==='read_news'){
   state.reads.push([...args.keys]);
   if(state.hold)await new Promise(resolve=>state.release=resolve);
@@ -112,6 +113,12 @@ await import('/src/main.ts');
           throw e;
         });
       await page.waitForTimeout(150);
+      const header = await page.locator('.cp-header').boundingBox();
+      await page.mouse.move(header.x + 3, header.y + 3);
+      await page.mouse.down();
+      await page.mouse.up();
+      await page.locator('.cp-brand strong').click();
+      await page.waitForFunction(() => __panelTest.drags === 2);
       await page.locator('.app-update-banner').waitFor();
       assert.deepEqual(await page.evaluate(() => __panelTest.checks), [false]);
       await page.locator('.app-update-banner button').first().click();
@@ -132,8 +139,13 @@ await import('/src/main.ts');
         .click();
       await page.waitForFunction(() => __panelTest.checks.length === 2);
       assert.deepEqual(await page.evaluate(() => __panelTest.checks), [false, true]);
-      await page.getByRole('button', { name: /升级到 v0.1.8|Upgrade to v0.1.8/ }).click();
+      await page.getByRole('button', { name: /升级到 v0.1.9|Upgrade to v0.1.9/ }).click();
       await page.waitForFunction(() => __panelTest.upgrades === 2);
+      assert.equal(
+        await page.evaluate(() => __panelTest.drags),
+        2,
+        'Header controls must not start dragging',
+      );
       await page.locator('.cp-tabs button').first().click();
       assert.equal(
         await page.evaluate(() => __panelTest.reads.length),
@@ -226,6 +238,37 @@ await import('/src/main.ts');
         await __panelTest.push(['compact-news']);
       });
       await page.locator('.cp-compact-line').waitFor();
+      const info = await page.locator('.cp-compact-info').boundingBox();
+      await page.mouse.move(info.x + 15, info.y + 15);
+      await page.mouse.down();
+      await page.mouse.move(info.x + 17, info.y + 15);
+      assert.equal(
+        await page.evaluate(() => __panelTest.drags),
+        2,
+        'Click jitter must not start dragging',
+      );
+      await page.mouse.move(info.x + 24, info.y + 15);
+      await page.waitForFunction(() => __panelTest.drags === 3);
+      await page.mouse.up();
+      assert.deepEqual(
+        await page.evaluate(() => __panelTest.actions),
+        [],
+        'Dragging model/speed must not expand the window',
+      );
+      await page.locator('.cp-compact-info').click();
+      await page.waitForFunction(() => __panelTest.actions.length === 1);
+      assert.deepEqual(
+        await page.evaluate(() => __panelTest.actions),
+        ['news'],
+        'The next intentional click must open the unread messages',
+      );
+      await page.evaluate(() => (__panelTest.actions.length = 0));
+      const strip = await page.locator('.cp-compact-line').boundingBox();
+      await page.mouse.move(strip.x + 2, strip.y + 18);
+      await page.mouse.down();
+      await page.mouse.move(strip.x - 20, strip.y + 18);
+      await page.waitForFunction(() => __panelTest.drags === 4);
+      await page.mouse.up();
       await page.waitForTimeout(100);
       assert.equal(
         await page.evaluate(() => __panelTest.reads.length),
@@ -278,7 +321,7 @@ await import('/src/main.ts');
       assert.deepEqual(errors, []);
       console.log(
         language +
-          ': upgrade prompt/manual check/cache, auto-read visible Tibo only, new messages, single-flight, failed writes, compact menu labels/actions/reuse passed',
+          ': full compact/header drag regions, click threshold/suppression/recovery, upgrade prompt/manual check/cache, Tibo auto-read, compact menu passed',
       );
       await page.close();
     }
