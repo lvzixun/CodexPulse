@@ -486,7 +486,7 @@ dependencies = [
 
 [[package]]
 name = "codexpulse"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "base64 0.22.1",
  "block2",
@@ -501,6 +501,7 @@ dependencies = [
  "objc2-service-management",
  "plist",
  "pulse-core",
+ "semver",
  "serde",
  "serde_json",
  "sha2",
@@ -2915,7 +2916,7 @@ dependencies = [
 
 [[package]]
 name = "pulse-core"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "chrono",
  "chrono-tz",

@@ -29,6 +29,10 @@ On **macOS**, click the menu bar icon to open details. Both platforms share the 
 - **Independent refresh:** configure automatic or manual refresh and intervals separately for account limits and Codex Resets messages, or refresh immediately. Manual mode shows cached data at startup and makes no background requests for that group. Translation runs only when clicked.
 - **On-demand collection:** on Windows, automatic account requests require expanded, visible details; the compact window makes no account requests. macOS runs once at startup, then on schedule while the panel is visible. Reopening refreshes only when the cache is due. Local log collection and public message refresh run independently.
 
+## App updates
+
+Go to **Settings → App updates → Check for updates**. Expanded, visible panels also check automatically and cache successful results for 24 hours. Compact and hidden windows do not check automatically. An upgrade prompt opens the GitHub download page; download and install the new package there. The repository is public, so gh and GitHub login are not required. Failed checks back off independently of account and news refreshes.
+
 ## Data and metrics
 
 - **Scope:** local statistics cover readable Codex logs; account lifetime totals come from the server and are labeled separately. Subagents are excluded from session lists and counts; their tokens and costs remain in total usage.

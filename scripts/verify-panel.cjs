@@ -12,13 +12,19 @@ const boot = String.raw`
 import {mockIPC,mockWindows} from '__TAURI_API__/mocks.js';
 window.isTauri=true;
 mockWindows('pulse');
-const state=window.__panelTest={data:null,view:null,shown:true,reads:[],actions:[],menus:[],popups:[],closed:[],fail:false,hold:false,release:null};
+const state=window.__panelTest={data:null,view:null,shown:true,reads:[],actions:[],menus:[],popups:[],closed:[],fail:false,hold:false,release:null,checks:[],upgrades:0};
 let emit;
 mockIPC(async(cmd,args)=>{
  if(cmd==='get_ui_language')return new URLSearchParams(location.search).get('language')||'zh';
  if(cmd==='get_snapshot')return structuredClone(state.data);
  if(cmd==='get_view_state')return structuredClone(state.view);
  if(cmd==='remember_view')return;
+ if(cmd==='get_startup_status')return 'disabled';
+ if(cmd==='check_updates'){
+  state.checks.push(args.manual);
+  return {current_version:'0.1.7',latest_version:'0.1.8',update_available:true,checked_at:new Date().toISOString(),next_check_at:Date.now()/1000+86400,status:'available'};
+ }
+ if(cmd==='open_app_release'){state.upgrades++;return}
  if(cmd==='plugin:window|is_visible')return state.shown;
  if(cmd==='read_news'){
   state.reads.push([...args.keys]);
@@ -106,6 +112,29 @@ await import('/src/main.ts');
           throw e;
         });
       await page.waitForTimeout(150);
+      await page.locator('.app-update-banner').waitFor();
+      assert.deepEqual(await page.evaluate(() => __panelTest.checks), [false]);
+      await page.locator('.app-update-banner button').first().click();
+      await page.waitForFunction(() => __panelTest.upgrades === 1);
+      await page.locator('.app-update-banner button').last().click();
+      assert.equal(await page.locator('.app-update-banner').count(), 0);
+      await page
+        .getByRole('button', {
+          name: language === 'zh' ? '打开设置' : 'Open settings',
+          exact: true,
+        })
+        .click();
+      await page
+        .getByRole('button', {
+          name: language === 'zh' ? '检查更新' : 'Check for updates',
+          exact: true,
+        })
+        .click();
+      await page.waitForFunction(() => __panelTest.checks.length === 2);
+      assert.deepEqual(await page.evaluate(() => __panelTest.checks), [false, true]);
+      await page.getByRole('button', { name: /升级到 v0.1.8|Upgrade to v0.1.8/ }).click();
+      await page.waitForFunction(() => __panelTest.upgrades === 2);
+      await page.locator('.cp-tabs button').first().click();
       assert.equal(
         await page.evaluate(() => __panelTest.reads.length),
         0,
@@ -241,10 +270,15 @@ await import('/src/main.ts');
           .handler.onmessage('compact-exit'),
       );
       assert.deepEqual(await page.evaluate(() => __panelTest.actions), ['expand', 'hide', 'exit']);
+      assert.deepEqual(
+        await page.evaluate(() => __panelTest.checks),
+        [false, true],
+        'Compact/hidden/reopening must reuse the update cache',
+      );
       assert.deepEqual(errors, []);
       console.log(
         language +
-          ': auto-read visible Tibo only, new messages, single-flight, failed writes, compact menu labels/actions/reuse passed',
+          ': upgrade prompt/manual check/cache, auto-read visible Tibo only, new messages, single-flight, failed writes, compact menu labels/actions/reuse passed',
       );
       await page.close();
     }

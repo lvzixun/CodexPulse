@@ -17,8 +17,18 @@
     rememberView,
     defaultSessionQuery,
     readNews,
+    checkAppUpdates,
+    openAppRelease,
   } from './lib/ipc';
-  import type { Settings, SessionPageRequest, ModelPageRequest, Snapshot } from './lib/types';
+  import type {
+    Settings,
+    SessionPageRequest,
+    ModelPageRequest,
+    Snapshot,
+    AppUpdateInfo,
+  } from './lib/types';
+  import { version as appVersion } from '../package.json';
+  import AppUpdates from './components/AppUpdates.svelte';
   import QuotaCard from './components/QuotaCard.svelte';
   import NewsPane from './components/NewsPane.svelte';
   import Icon from './components/Icon.svelte';
@@ -75,6 +85,16 @@
   let documentVisible = $state(!document.hidden);
   let newsReadPending = $state(false);
   let newsReadAttempt = '';
+  let appUpdate = $state<AppUpdateInfo>({
+    current_version: appVersion,
+    latest_version: null,
+    update_available: false,
+    checked_at: null,
+    next_check_at: 0,
+    status: 'idle',
+  });
+  let updateBusy = $state(false);
+  let dismissedUpdate = $state<string | null>(null);
   let compactMenu: Menu | null = null;
   let compactMenuItems: MenuItem[] = [];
   let compactMenuLocale = '';
@@ -199,6 +219,32 @@
       error = String(e);
     }
   }
+  async function loadAppUpdate(manual = false) {
+    if (!native || updateBusy) return;
+    updateBusy = true;
+    try {
+      appUpdate = await checkAppUpdates(manual);
+    } catch {
+      appUpdate = { ...appUpdate, status: 'network_error', next_check_at: Date.now() / 1000 + 900 };
+    } finally {
+      updateBusy = false;
+    }
+  }
+  function openUpgrade() {
+    void openAppRelease().catch((e) => (error = String(e)));
+  }
+  $effect(() => {
+    if (
+      native &&
+      viewReady &&
+      mode === 'details' &&
+      windowVisible &&
+      documentVisible &&
+      !updateBusy &&
+      now / 1000 >= appUpdate.next_check_at
+    )
+      void loadAppUpdate();
+  });
   $effect(() => {
     if (!viewReady || mode !== 'details' || page !== 'news' || !windowVisible || !documentVisible) {
       newsReadAttempt = '';
@@ -607,6 +653,16 @@
             >{/if}</button
         >{/each}
     </nav>
+    {#if appUpdate.update_available && dismissedUpdate !== appUpdate.latest_version}
+      <AppUpdates
+        info={appUpdate}
+        busy={updateBusy}
+        check={() => void loadAppUpdate(true)}
+        open={openUpgrade}
+        banner
+        dismiss={() => (dismissedUpdate = appUpdate.latest_version)}
+      />
+    {/if}
     <div
       class="cp-body"
       bind:this={content}
@@ -807,6 +863,12 @@
           <span>{$t('显示与数据源')}</span><small>{$t('本地设置')}</small>
         </div>
         <StartupSettings windows={floatingSupported} />
+        <AppUpdates
+          info={appUpdate}
+          busy={updateBusy}
+          check={() => void loadAppUpdate(true)}
+          open={openUpgrade}
+        />
         <section oninput={() => (settingsDirty = true)} onchange={() => (settingsDirty = true)}>
           <label class="cp-setting"
             ><span>{$t('语言')}<small class="cp-setting-hint">{$t('自动保存')}</small></span>

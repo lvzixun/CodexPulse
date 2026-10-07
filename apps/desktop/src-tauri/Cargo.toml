@@ -26,6 +26,7 @@ ureq = { version = "3.4", default-features = false, features = ["rustls", "socks
 base64 = "0.22"
 toml = "1"
 url = "2"
+semver = "1"
 tauri-plugin-opener = "2"
 
 [dev-dependencies]

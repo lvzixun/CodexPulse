@@ -17,11 +17,15 @@
 
 Windows 提供托盘和一行小浮窗，点击展开详情；macOS 点击菜单栏图标打开面板。
 
+设置中可检查更新，发现新版后提供下载入口。
+
 <a href="docs/screenshots/compact-zh.png"><img src="docs/screenshots/compact-zh.png" alt="Windows 小浮窗：工作状态、模型、速度与重置标记" width="184" /></a>
 
 <a href="docs/screenshots/overview-zh.png"><img src="docs/screenshots/overview-zh.png" alt="CodexPulse 总览" width="380" /></a>
 
-示例数据，点击查看高清原图。更多截图：[模型](docs/screenshots/models-zh.png) · [Sessions](docs/screenshots/sessions-zh.png) · [Tibo](docs/screenshots/tibo-zh.png)。
+<a href="docs/screenshots/tibo-zh.png"><img src="docs/screenshots/tibo-zh.png" alt="Tibo 重置历史与 28 天挑战" width="380" /></a>
+
+示例数据，点击查看高清原图。更多截图：[模型](docs/screenshots/models-zh.png) · [Sessions](docs/screenshots/sessions-zh.png)。
 
 ## 安装
 

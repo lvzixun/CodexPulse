@@ -1,3 +1,11 @@
+export interface AppUpdateInfo {
+  current_version: string;
+  latest_version: string | null;
+  update_available: boolean;
+  checked_at: string | null;
+  next_check_at: number;
+  status: string;
+}
 export interface RefreshConfig {
   mode: 'auto' | 'manual';
   interval_seconds: number;

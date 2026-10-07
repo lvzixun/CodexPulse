@@ -17,11 +17,15 @@ Track Codex account limits, work status, token usage, and reset updates on your 
 
 Windows offers a tray icon and a one-line floating window; click to expand. On macOS, click the menu bar icon.
 
+Settings includes update checks and a download link when a newer version is available.
+
 <a href="docs/screenshots/compact-en.png"><img src="docs/screenshots/compact-en.png" alt="Windows compact window: work status, model, speed, and reset marker" width="184" /></a>
 
 <a href="docs/screenshots/overview-en.png"><img src="docs/screenshots/overview-en.png" alt="CodexPulse Overview" width="380" /></a>
 
-Sample data; click for full-resolution images. More screenshots: [Models](docs/screenshots/models-en.png) · [Sessions](docs/screenshots/sessions-en.png) · [Tibo](docs/screenshots/tibo-en.png).
+<a href="docs/screenshots/tibo-en.png"><img src="docs/screenshots/tibo-en.png" alt="Tibo reset history and 28-day challenge" width="380" /></a>
+
+Sample data; click for full-resolution images. More screenshots: [Models](docs/screenshots/models-en.png) · [Sessions](docs/screenshots/sessions-en.png).
 
 ## Install
 

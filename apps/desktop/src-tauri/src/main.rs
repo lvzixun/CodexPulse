@@ -17,11 +17,25 @@ mod refresh;
 mod rpc;
 mod source_config;
 mod startup;
+mod updates;
 mod window_lifecycle;
 
 use backend::{Backend, Settings, Snapshot};
 use tauri::{Manager, State};
 use tauri_plugin_opener::OpenerExt;
+
+#[tauri::command]
+async fn check_updates(manual: bool, app: tauri::AppHandle) -> Result<updates::Info, String> {
+    tauri::async_runtime::spawn_blocking(move || app.state::<updates::Service>().check(manual))
+        .await
+        .map_err(|_| "更新检查失败".to_string())?
+}
+#[tauri::command]
+fn open_app_release(app: tauri::AppHandle) -> Result<(), String> {
+    app.opener()
+        .open_url(updates::RELEASES_URL, None::<&str>)
+        .map_err(|_| "无法打开下载页面".into())
+}
 
 #[tauri::command]
 fn get_ui_language(app: tauri::AppHandle, state: State<'_, Backend>) -> &'static str {
@@ -303,9 +317,12 @@ fn main() {
             copy_diagnostics,
             open_source,
             get_view_state,
-            remember_view
+            remember_view,
+            check_updates,
+            open_app_release
         ])
         .setup(|app| {
+            app.manage(updates::Service::default());
             app.manage(language::Current(std::sync::Mutex::new(
                 language::system_language(),
             )));
