@@ -18,15 +18,20 @@
 - Svelte 检查 0 错误 / 0 警告；15 项 Node 测试通过，覆盖中英文倒计时、过期、新重置、无效窗口。
 - 2026-10-07 公开接口只读探针：状态及历史均 HTTP 200，状态 819 B、历史 57 条；不输出凭据或消息正文。
 
-## macOS 产物
+## 合并与发布基线
 
-通用 App 包含 `x86_64 arm64`；严格 ad-hoc 签名检查通过。只读挂载 DMG 后 App 的 4 个文件与发布清单一致，Applications 链接正确。`~/Applications/CodexPulse.app` 已更新并与发布 App 完全一致。
+首次原生验收使用未发布的 0.1.4 构建。推送时发现远端已新增 Windows 对齐提交且占用 v0.1.4 标签；未覆盖远端，重放本次修改至 `a16cdcd` 后以 0.1.5 发布。保留远端 Windows 登录启动、诊断、详情可见性调度和当前模型速度改进；macOS 启动首轮账户及后续隐藏暂停策略保留。合并后重新完成 Rust workspace、Clippy 和 15 项前端测试。发布源代码为 `6455382`。
 
-- DMG：`CodexPulse_0.1.4_universal.dmg`，12,198,417 B。
-- SHA-256：`a7cbcc1af5871771cae00ca70f084b31c2131052bf1c967c34fbd5d84b34ea38`。
-- 原生验证平台：Apple Silicon；最低部署目标 macOS 12，未完成 Intel 实机验收。
+## 最终 macOS 产物
 
-## 原生验收（2026-10-07）
+正式通用 App 包含 `x86_64 arm64`，严格 ad-hoc 签名检查通过。只读挂载 DMG 后 App 的 4 个文件与发布清单一致，Applications 链接正确。本机 `~/Applications/CodexPulse.app` 已更新为同一发布构建，并启动验证总览观察及截止时间可见。
+
+- `CodexPulse_0.1.5_universal.dmg`：12,203,848 B。
+- SHA-256：`62ce319d4ec9ef7d7bca55c7e1cd1ec3ccaf54110a8c69dcb4dc190270a87e61`。
+- [v0.1.5 Release](https://github.com/lvzixun/CodexPulse/releases/tag/v0.1.5) 已发布，说明仅中文；GitHub DMG / 校验文件的大小与 SHA-256 摘要均和本地一致。
+- 原生验证平台 Apple Silicon；未完成 Intel 实机验收。macOS 最低部署目标 12，仍无 Developer ID / 公证。
+
+## 合并前原生验收（2026-10-07）
 
 正式通用包第一次手动请求仍遇到 HTTP 403；遵循原有手动间隔后重试，09:45:11 发起、09:45:16 状态 / 历史和挑战均已 connected。未改证书校验、代理或请求凭据；不宣称彻底解决站点偶发拒绝。
 
@@ -35,4 +40,8 @@
 - 总览额度后显示同一观察；“下一次已确认重置”仍为“尚未公布”，两者未混淆。
 - 未修改用户的中文 / 深色 / 毛玻璃选择或两组自动 5 分钟刷新设置。验收 JSON 只留状态、公共时间和检查结果，不留账户资料、凭据或会话内容。
 
-发布与编译目录清理在完成后补齐。
+## 流水线与清理
+
+首次 tag 构建的 macOS 测试通过，但固定 Rust 工具链未安装 Clippy，检查步骤失败。远端同步补齐组件并更新到 1.97.1，重新使用新工作流定义 checkout `v0.1.5`；未移动发布标签，也不修改产品代码来绕过检查。后续流水线：[37559398430](https://github.com/lvzixun/CodexPulse/actions/runs/37559398430)。本机 workspace / Clippy / Svelte / 15 项前端检查已通过；后续 main 的独立速度修正也在本机重新完成 workspace / Clippy，但不混入本次已冻结的发布包。
+
+验证并保留产物后删除 Rust target 编译目录及未发布的合并前验证 App / DMG，合计约 5.32 GiB 分配空间；观察系统可用空间增加约 5.09 GB。源码、真实用户数据、已安装应用和已发布版本产物保留。清理后不重新编译；脱敏验收和清理 JSON 保留在忽略的 `releases/v0.1.5`。
