@@ -1,5 +1,9 @@
 # Usage and development
 
+## App updates
+
+Opening details checks for updates automatically. New versions download in the background and are signature-verified. Click **Restart and update** to install and relaunch; Settings also offers a manual check. Install 0.1.14 once to enable this flow for future updates.
+
 [Back to README](../README.en.md) · [中文](guide.md)
 
 ## Install and open

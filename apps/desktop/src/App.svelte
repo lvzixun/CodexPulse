@@ -19,6 +19,7 @@
     readNews,
     checkAppUpdates,
     openAppRelease,
+    installAppUpdate,
   } from './lib/ipc';
   import type {
     Settings,
@@ -92,6 +93,9 @@
     checked_at: null,
     next_check_at: 0,
     status: 'idle',
+    downloaded_bytes: 0,
+    total_bytes: null,
+    revision: 0,
   });
   let updateBusy = $state(false);
   let dismissedUpdate = $state<string | null>(null);
@@ -223,7 +227,8 @@
     if (!native || updateBusy) return;
     updateBusy = true;
     try {
-      appUpdate = await checkAppUpdates(manual);
+      const next = await checkAppUpdates(manual);
+      if (next.revision >= appUpdate.revision) appUpdate = next;
     } catch {
       appUpdate = { ...appUpdate, status: 'network_error', next_check_at: Date.now() / 1000 + 900 };
     } finally {
@@ -233,6 +238,17 @@
   function openUpgrade() {
     void openAppRelease().catch((e) => (error = String(e)));
   }
+  async function applyUpgrade() {
+    if (updateBusy || appUpdate.status !== 'ready') return;
+    updateBusy = true;
+    try {
+      await installAppUpdate();
+    } catch (e) {
+      error = String(e);
+    } finally {
+      updateBusy = false;
+    }
+  }
   $effect(() => {
     if (
       native &&
@@ -241,6 +257,7 @@
       windowVisible &&
       documentVisible &&
       !updateBusy &&
+      !['downloading', 'ready', 'installing'].includes(appUpdate.status) &&
       now / 1000 >= appUpdate.next_check_at
     )
       void loadAppUpdate();
@@ -491,6 +508,10 @@
     clockVisible(windowVisible && documentVisible);
     const subscriptions = subscriptionGroup([
       () =>
+        onEvent<AppUpdateInfo>('app-update', (next) => {
+          if (!disposed && next.revision >= appUpdate.revision) appUpdate = next;
+        }),
+      () =>
         onEvent('snapshot-changed', () => {
           if (!disposed && !document.hidden) void refresh();
         }),
@@ -711,6 +732,7 @@
         busy={updateBusy}
         check={() => void loadAppUpdate(true)}
         open={openUpgrade}
+        install={() => void applyUpgrade()}
         banner
         dismiss={() => (dismissedUpdate = appUpdate.latest_version)}
       />
@@ -920,6 +942,7 @@
           busy={updateBusy}
           check={() => void loadAppUpdate(true)}
           open={openUpgrade}
+          install={() => void applyUpgrade()}
         />
         <section oninput={() => (settingsDirty = true)} onchange={() => (settingsDirty = true)}>
           <label class="cp-setting"

@@ -28,9 +28,11 @@ toml = "1"
 url = "2"
 semver = "1"
 tauri-plugin-opener = "2"
+tauri-plugin-updater = "2"
 
 [dev-dependencies]
 tempfile.workspace = true
+minisign-verify = "0.2.5"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_System_Registry", "Win32_UI_WindowsAndMessaging", "Win32_UI_Accessibility", "Win32_Globalization", "Win32_Security", "Win32_System_Memory", "Win32_System_DataExchange"] }

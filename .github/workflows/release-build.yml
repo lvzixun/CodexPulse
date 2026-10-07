@@ -31,11 +31,16 @@ jobs:
           - os: windows-latest
             artifact: windows-x64
             args: ''
-            path: target/release/bundle/nsis/*.exe
+            path: |
+              target/release/bundle/nsis/*.exe
+              target/release/bundle/nsis/*.exe.sig
           - os: macos-latest
             artifact: macos-universal
             args: '--target universal-apple-darwin'
-            path: target/universal-apple-darwin/release/bundle/dmg/*.dmg
+            path: |
+              target/universal-apple-darwin/release/bundle/dmg/*.dmg
+              target/universal-apple-darwin/release/bundle/macos/*.app.tar.gz
+              target/universal-apple-darwin/release/bundle/macos/*.app.tar.gz.sig
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -53,9 +58,13 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
       - run: node --test apps/desktop/test/*.test.ts
+      - run: node --test scripts/release-manifest.test.cjs
       - run: cargo test --workspace --locked
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: pnpm build ${{ matrix.args }}
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ''
       - name: Verify Windows x64 application and installer versions
         if: runner.os == 'Windows'
         shell: pwsh
@@ -84,6 +93,14 @@ jobs:
           APP=target/universal-apple-darwin/release/bundle/macos/CodexPulse.app
           codesign --verify --deep --strict "$APP"
           lipo "$APP/Contents/MacOS/codexpulse" -verify_arch arm64 x86_64
+      - name: Verify updater package signature
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            cargo run --release --locked -p codexpulse --example verify-update -- target/release/bundle/nsis/*.exe
+          else
+            cargo run --release --locked -p codexpulse --example verify-update -- target/universal-apple-darwin/release/bundle/macos/*.app.tar.gz
+          fi
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ${{ matrix.artifact }}

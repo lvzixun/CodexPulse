@@ -17,7 +17,7 @@
 
 Windows 提供托盘和一行小浮窗，点击展开详情；macOS 点击菜单栏图标打开面板。
 
-设置中可检查更新，发现新版后提供下载入口。
+发现新版后自动下载并验证签名，点击“重启并更新”即可安装，无需打开浏览器。
 
 <a href="docs/screenshots/compact-zh.png"><img src="docs/screenshots/compact-zh.png" alt="Windows 小浮窗：工作状态、模型、速度与重置标记" width="184" /></a>
 
@@ -29,7 +29,7 @@ Windows 提供托盘和一行小浮窗，点击展开详情；macOS 点击菜单
 
 ## 安装
 
-- **Windows 10 / 11 x64**：下载 `x64-setup.exe` 安装，WebView2 可由安装器按需安装。
+- **Windows 10 / 11 x64**：下载 `x64-setup.exe` 安装。缺少 WebView2 时，安装器会自动联网安装。
 - **macOS 12+**：下载通用 `.dmg`，拖到 Applications，支持 Apple Silicon / Intel。
 
 Windows 安装包未签名；macOS 为 ad-hoc 签名，尚未公证。

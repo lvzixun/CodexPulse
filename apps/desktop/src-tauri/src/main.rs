@@ -26,9 +26,17 @@ use tauri_plugin_opener::OpenerExt;
 
 #[tauri::command]
 async fn check_updates(manual: bool, app: tauri::AppHandle) -> Result<updates::Info, String> {
-    tauri::async_runtime::spawn_blocking(move || app.state::<updates::Service>().check(manual))
+    let handle = app.clone();
+    tauri::async_runtime::spawn_blocking(move || handle.state::<updates::Service>().check(manual))
         .await
-        .map_err(|_| "更新检查失败".to_string())?
+        .map_err(|_| "更新检查失败".to_string())??;
+    app.state::<updates::Service>().prepare(&app)
+}
+#[tauri::command]
+async fn install_app_update(app: tauri::AppHandle) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || app.state::<updates::Service>().install(&app))
+        .await
+        .map_err(|_| "安装更新失败".to_string())?
 }
 #[tauri::command]
 fn open_app_release(app: tauri::AppHandle) -> Result<(), String> {
@@ -291,6 +299,7 @@ async fn copy_diagnostics(
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_single_instance::init(|app, args, _| {
             if !args.iter().any(|arg| arg == "--startup") {
                 platform::trace_window(app, window_lifecycle::Event::Reopen, None);
@@ -319,6 +328,7 @@ fn main() {
             get_view_state,
             remember_view,
             check_updates,
+            install_app_update,
             open_app_release
         ])
         .setup(|app| {

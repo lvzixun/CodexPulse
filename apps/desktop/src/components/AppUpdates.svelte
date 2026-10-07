@@ -6,6 +6,7 @@
     busy,
     check,
     open,
+    install,
     banner = false,
     dismiss = () => {},
   }: {
@@ -13,26 +14,51 @@
     busy: boolean;
     check: () => void;
     open: () => void;
+    install: () => void;
     banner?: boolean;
     dismiss?: () => void;
   } = $props();
+  const working = $derived(['downloading', 'installing'].includes(info.status));
+  const progress = $derived(
+    info.total_bytes
+      ? Math.min(100, Math.floor((info.downloaded_bytes / info.total_bytes) * 100)) + '%'
+      : (info.downloaded_bytes / 1048576).toFixed(1) + ' MB',
+  );
   const status = $derived(
-    info.status === 'current'
-      ? $t('已是最新版本')
-      : info.status === 'available'
-        ? $t('发现新版本 v{version}', { version: info.latest_version ?? '' })
-        : info.status === 'rate_limited'
-          ? $t('检查过于频繁，稍后重试')
-          : info.status === 'idle'
-            ? $t('尚未检查')
-            : $t('暂时无法检查更新，请稍后重试'),
+    info.status === 'downloading'
+      ? $t('正在下载更新 {progress}', { progress })
+      : info.status === 'ready'
+        ? $t('更新已就绪，重启即可安装')
+        : info.status === 'installing'
+          ? $t('正在安装，即将重新启动…')
+          : info.status === 'download_error'
+            ? $t('下载或验证失败，稍后重试')
+            : info.status === 'current'
+              ? $t('已是最新版本')
+              : info.status === 'available'
+                ? $t('发现新版本 v{version}', { version: info.latest_version ?? '' })
+                : info.status === 'rate_limited'
+                  ? $t('检查过于频繁，稍后重试')
+                  : info.status === 'idle'
+                    ? $t('尚未检查')
+                    : $t('暂时无法检查更新，请稍后重试'),
   );
 </script>
 
 {#if banner}
   <aside class="app-update-banner" role="status">
-    <span>{$t('发现新版本 v{version}', { version: info.latest_version ?? '' })}</span>
-    <button class="cp-textbutton" onclick={open}>{$t('升级')}</button>
+    <span>{status}</span>
+    {#if info.status === 'ready'}<button class="cp-textbutton" disabled={busy} onclick={install}
+        >{$t('重启并更新')}</button
+      >{/if}
+    {#if info.status === 'download_error'}<button
+        class="cp-textbutton"
+        disabled={busy}
+        onclick={check}>{$t('重试')}</button
+      >{/if}
+    {#if !working}<button class="cp-textbutton" onclick={open} aria-label={$t('查看发布说明')}
+        >{$t('发布说明')}</button
+      >{/if}
     <button class="cp-textbutton" onclick={dismiss} aria-label={$t('稍后提醒')}>×</button>
   </aside>
 {:else}
@@ -42,7 +68,7 @@
   </div>
   <div class="cp-setting app-update-setting">
     <span
-      >{busy ? $t('正在检查更新…') : status}
+      >{busy && !working && info.status !== 'ready' ? $t('正在检查更新…') : status}
       {#if info.checked_at}<small class="cp-setting-hint">
           {$t('上次检查：{time}', {
             time: new Date(info.checked_at).toLocaleString($locale === 'zh' ? 'zh-CN' : 'en-US', {
@@ -54,10 +80,17 @@
           })}
         </small>{/if}
     </span>
-    <button class="cp-textbutton" disabled={busy} onclick={check}>{$t('检查更新')}</button>
+    <button
+      class="cp-textbutton"
+      disabled={busy || working || info.status === 'ready'}
+      onclick={check}>{$t('检查更新')}</button
+    >
   </div>
+  {#if info.status === 'ready'}<button class="cp-textbutton" disabled={busy} onclick={install}
+      >{$t('重启并更新')}</button
+    >{/if}
   {#if info.update_available}<button class="cp-textbutton" onclick={open}
-      >{$t('升级到 v{version}', { version: info.latest_version ?? '' })}</button
+      >{$t('查看发布说明')}</button
     >{/if}
 {/if}
 

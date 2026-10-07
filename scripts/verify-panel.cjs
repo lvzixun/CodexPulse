@@ -12,7 +12,7 @@ const boot = String.raw`
 import {mockIPC,mockWindows} from '__TAURI_API__/mocks.js';
 window.isTauri=true;
 mockWindows('pulse');
-const state=window.__panelTest={data:null,view:null,shown:true,reads:[],actions:[],menus:[],popups:[],closed:[],fail:false,hold:false,release:null,checks:[],upgrades:0,drags:0};
+const state=window.__panelTest={data:null,view:null,shown:true,reads:[],actions:[],menus:[],popups:[],closed:[],fail:false,hold:false,release:null,checks:[],upgrades:0,installs:0,updateRevision:0,drags:0};
 let emit;
 mockIPC(async(cmd,args)=>{
  if(cmd==='get_ui_language')return new URLSearchParams(location.search).get('language')||'zh';
@@ -22,7 +22,15 @@ mockIPC(async(cmd,args)=>{
  if(cmd==='get_startup_status')return 'disabled';
  if(cmd==='check_updates'){
   state.checks.push(args.manual);
-  return {current_version:'0.1.10',latest_version:'0.1.11',update_available:true,checked_at:new Date().toISOString(),next_check_at:Date.now()/1000+86400,status:'available'};
+  return state.updateInfo('available');
+ }
+ if(cmd==='install_app_update'){
+  state.installs++;
+  if(state.installs===1){await state.update('ready');throw Error('Installation failed')}
+  await state.update('installing');
+  await new Promise(resolve=>state.finishInstall=resolve);
+  await state.update('ready');
+  return;
  }
  if(cmd==='open_app_release'){state.upgrades++;return}
  if(cmd==='plugin:window|is_visible')return state.shown;
@@ -54,6 +62,8 @@ mockIPC(async(cmd,args)=>{
  throw Error('Unexpected mock IPC: '+cmd);
 },{shouldMockEvents:true});
 ({emit}=await import('__TAURI_API__/event.js'));
+state.updateInfo=(status)=>({current_version:'0.1.14',latest_version:'0.1.15',update_available:true,checked_at:new Date().toISOString(),next_check_at:Date.now()/1000+86400,status,revision:++state.updateRevision,downloaded_bytes:25,total_bytes:100});
+state.update=async(status)=>emit('app-update',state.updateInfo(status));
 const {empty}=await import('/src/lib/ipc.ts');
 const {previewSnapshot,previewView}=await import('/src/lib/readme-preview.ts');
 state.data=previewSnapshot(empty);
@@ -139,8 +149,30 @@ await import('/src/main.ts');
         .click();
       await page.waitForFunction(() => __panelTest.checks.length === 2);
       assert.deepEqual(await page.evaluate(() => __panelTest.checks), [false, true]);
-      await page.getByRole('button', { name: /升级到 v0.1.11|Upgrade to v0.1.11/ }).click();
+      await page.getByRole('button', { name: /查看发布说明|View release notes/ }).click();
       await page.waitForFunction(() => __panelTest.upgrades === 2);
+      await page.evaluate(() => __panelTest.update('downloading'));
+      await page.getByText(/正在下载更新 25%|Downloading update 25%/).waitFor();
+      assert.equal(
+        await page.getByRole('button', { name: /检查更新|Check for updates/ }).isDisabled(),
+        true,
+      );
+      assert.equal(
+        await page.getByRole('button', { name: /重启并更新|Restart and update/ }).count(),
+        0,
+      );
+      await page.evaluate(() => __panelTest.update('ready'));
+      await page.getByRole('button', { name: /重启并更新|Restart and update/ }).click();
+      await page.getByText('Installation failed', { exact: true }).waitFor();
+      await page.getByRole('button', { name: /重启并更新|Restart and update/ }).click();
+      await page.getByText(/正在安装，即将重新启动…|Installing and restarting…/).waitFor();
+      assert.equal(await page.evaluate(() => __panelTest.installs), 2);
+      assert.equal(
+        await page.getByRole('button', { name: /重启并更新|Restart and update/ }).count(),
+        0,
+      );
+      await page.evaluate(() => __panelTest.finishInstall());
+      await page.getByRole('button', { name: /重启并更新|Restart and update/ }).waitFor();
       assert.equal(
         await page.evaluate(() => __panelTest.drags),
         2,

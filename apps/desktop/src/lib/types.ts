@@ -5,6 +5,9 @@ export interface AppUpdateInfo {
   checked_at: string | null;
   next_check_at: number;
   status: string;
+  downloaded_bytes: number;
+  total_bytes: number | null;
+  revision: number;
 }
 export interface RefreshConfig {
   mode: 'auto' | 'manual';

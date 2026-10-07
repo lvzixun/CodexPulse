@@ -17,7 +17,7 @@ Track Codex account limits, work status, token usage, and reset updates on your 
 
 Windows offers a tray icon and a one-line floating window; click to expand. On macOS, click the menu bar icon.
 
-Settings includes update checks and a download link when a newer version is available.
+New updates download automatically and are signature-verified. Click “Restart and update” to install without opening a browser.
 
 <a href="docs/screenshots/compact-en.png"><img src="docs/screenshots/compact-en.png" alt="Windows compact window: work status, model, speed, and reset marker" width="184" /></a>
 

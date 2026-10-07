@@ -2,9 +2,11 @@
 use semver::Version;
 use serde::{Deserialize, Serialize};
 use std::{sync::Mutex, time::Duration};
+use tauri::{Emitter, Manager};
+use tauri_plugin_updater::{Update, UpdaterExt};
 
 pub const RELEASES_URL: &str = "https://github.com/lvzixun/CodexPulse/releases/latest";
-const API_URL: &str = "https://api.github.com/repos/lvzixun/CodexPulse/releases/latest";
+const API_URL: &str = "https://github.com/lvzixun/CodexPulse/releases/latest/download/latest.json";
 const DAY: i64 = 86400;
 
 #[derive(Clone, Debug, Serialize)]
@@ -15,6 +17,9 @@ pub struct Info {
     pub checked_at: Option<String>,
     pub next_check_at: i64,
     pub status: String,
+    pub downloaded_bytes: u64,
+    pub total_bytes: Option<u64>,
+    pub revision: u64,
 }
 impl Default for Info {
     fn default() -> Self {
@@ -25,6 +30,9 @@ impl Default for Info {
             checked_at: None,
             next_check_at: 0,
             status: "idle".into(),
+            downloaded_bytes: 0,
+            total_bytes: None,
+            revision: 0,
         }
     }
 }
@@ -33,14 +41,19 @@ struct Cache {
     info: Info,
     last_attempt: i64,
     blocked_until: i64,
+    prepared: Option<(Update, Vec<u8>)>,
 }
 impl Cache {
     fn due(&self, now: i64, manual: bool) -> bool {
-        now >= self.blocked_until
+        !matches!(
+            self.info.status.as_str(),
+            "downloading" | "ready" | "installing"
+        ) && now >= self.blocked_until
             && (self.last_attempt == 0 || now >= self.last_attempt.saturating_add(60))
             && (manual || now >= self.info.next_check_at)
     }
     fn finish(&mut self, result: Result<Version, Failure>, now: i64) {
+        self.info.revision += 1;
         self.last_attempt = now;
         self.info.checked_at = chrono::DateTime::from_timestamp(now, 0).map(|t| t.to_rfc3339());
         match result {
@@ -79,6 +92,127 @@ impl Service {
         }
         Ok(cache.info.clone())
     }
+
+    // Reserve before spawning so concurrent checks and recreated WebViews share one download.
+    pub fn prepare(&self, app: &tauri::AppHandle) -> Result<Info, String> {
+        let mut cache = self.0.lock().map_err(|_| "更新状态不可用")?;
+        if cache.info.status == "available" {
+            cache.info.status = "downloading".into();
+            cache.info.revision += 1;
+            cache.info.downloaded_bytes = 0;
+            cache.info.total_bytes = None;
+            let app = app.clone();
+            tauri::async_runtime::spawn(async move {
+                let service = app.state::<Service>();
+                if service.download(&app).await.is_err() {
+                    service.publish(&app, |cache| {
+                        cache.info.status = "download_error".into();
+                        let now = chrono::Utc::now().timestamp();
+                        cache.blocked_until = now.saturating_add(900);
+                        cache.info.next_check_at = cache.blocked_until;
+                    });
+                }
+            });
+        }
+        Ok(cache.info.clone())
+    }
+
+    fn publish(&self, app: &tauri::AppHandle, change: impl FnOnce(&mut Cache)) {
+        if let Ok(mut cache) = self.0.lock() {
+            change(&mut cache);
+            cache.info.revision += 1;
+            let _ = app.emit("app-update", cache.info.clone());
+        }
+    }
+
+    async fn download(&self, app: &tauri::AppHandle) -> Result<(), ()> {
+        let exit_app = app.clone();
+        let updater = app
+            .updater_builder()
+            .timeout(Duration::from_secs(15))
+            .on_before_exit(move || {
+                // Windows updater exits directly after starting NSIS; flush collectors first.
+                exit_app.state::<crate::backend::Backend>().shutdown();
+                exit_app.cleanup_before_exit();
+            })
+            .build()
+            .map_err(|_| ())?;
+        let Some(mut update) = updater.check().await.map_err(|_| ())? else {
+            self.publish(app, |cache| {
+                cache.info.update_available = false;
+                cache.info.status = "current".into();
+            });
+            return Ok(());
+        };
+        if !safe_download(&update.download_url) {
+            return Err(());
+        }
+        update.timeout = Some(Duration::from_secs(600));
+        self.publish(app, |cache| {
+            cache.info.latest_version = Some(update.version.clone())
+        });
+        let mut downloaded = 0u64;
+        let mut last = std::time::Instant::now();
+        let bytes = update
+            .download(
+                |chunk, total| {
+                    downloaded = downloaded.saturating_add(chunk as u64);
+                    if last.elapsed() >= Duration::from_millis(250) {
+                        self.publish(app, |cache| {
+                            cache.info.downloaded_bytes = downloaded;
+                            cache.info.total_bytes = total;
+                        });
+                        last = std::time::Instant::now();
+                    }
+                },
+                || {},
+            )
+            .await
+            .map_err(|_| ())?;
+        // download() verifies the mandatory signature before exposing bytes to installation.
+        self.publish(app, |cache| {
+            cache.info.downloaded_bytes = bytes.len() as u64;
+            cache.info.total_bytes = Some(bytes.len() as u64);
+            cache.prepared = Some((update, bytes));
+            cache.info.status = "ready".into();
+        });
+        Ok(())
+    }
+
+    pub fn install(&self, app: &tauri::AppHandle) -> Result<(), String> {
+        let prepared = {
+            let mut cache = self.0.lock().map_err(|_| "更新状态不可用")?;
+            if cache.info.status != "ready" {
+                return Err("更新尚未准备完成".into());
+            }
+            let prepared = cache.prepared.take().ok_or("更新尚未准备完成")?;
+            cache.info.status = "installing".into();
+            cache.info.revision += 1;
+            let _ = app.emit("app-update", cache.info.clone());
+            prepared
+        };
+        if prepared.0.install(&prepared.1).is_err() {
+            self.publish(app, |cache| {
+                cache.prepared = Some(prepared);
+                cache.info.status = "ready".into();
+            });
+            return Err("安装更新失败，请重试或前往发布页下载".into());
+        }
+        // Windows NSIS relaunches automatically; on macOS replacement returns here.
+        #[cfg(not(windows))]
+        app.restart();
+        #[cfg(windows)]
+        Ok(())
+    }
+}
+fn safe_download(url: &url::Url) -> bool {
+    url.scheme() == "https"
+        && url.host_str() == Some("github.com")
+        && url
+            .path()
+            .starts_with("/lvzixun/CodexPulse/releases/download/")
+        && url.username().is_empty()
+        && url.password().is_none()
 }
 #[derive(Debug)]
 struct Failure {
@@ -90,20 +224,18 @@ fn failure(status: &'static str) -> Failure {
 }
 #[derive(Deserialize)]
 struct Release {
-    tag_name: String,
-    draft: bool,
-    prerelease: bool,
+    version: String,
 }
 fn release_version(body: &str) -> Result<Version, Failure> {
     let release: Release = serde_json::from_str(body).map_err(|_| failure("invalid_response"))?;
     let version = Version::parse(
         release
-            .tag_name
+            .version
             .strip_prefix('v')
-            .unwrap_or(&release.tag_name),
+            .unwrap_or(&release.version),
     )
     .map_err(|_| failure("invalid_response"))?;
-    if release.draft || release.prerelease || !version.pre.is_empty() {
+    if !version.pre.is_empty() {
         return Err(failure("invalid_response"));
     }
     Ok(version)
@@ -120,8 +252,7 @@ fn fetch(url: &str) -> Result<Version, Failure> {
             "User-Agent",
             concat!("CodexPulse/", env!("CARGO_PKG_VERSION")),
         )
-        .header("Accept", "application/vnd.github+json")
-        .header("X-GitHub-Api-Version", "2022-11-28")
+        .header("Accept", "application/json")
         .call()
         .map_err(|_| failure("network_error"))?;
     let status = response.status().as_u16();
@@ -161,7 +292,7 @@ fn fetch(url: &str) -> Result<Version, Failure> {
 mod tests {
     use super::*;
     fn release(tag: &str) -> String {
-        serde_json::json!({"tag_name":tag,"draft":false,"prerelease":false}).to_string()
+        serde_json::json!({"version":tag}).to_string()
     }
     #[test]
     fn compares_stable_versions_numerically() {
@@ -183,11 +314,31 @@ mod tests {
             "{}".into(),
             release("latest"),
             release("v1.0.0-beta.1"),
-            r#"{"tag_name":"v1.0.0","draft":true,"prerelease":false}"#.into(),
-            r#"{"tag_name":"v1.0.0","draft":false,"prerelease":true}"#.into(),
+            r#"{"version":123}"#.into(),
         ] {
             assert!(release_version(&body).is_err());
         }
+    }
+    #[test]
+    fn staged_update_never_downloads_twice_or_checks_while_installing() {
+        let mut cache = Cache::default();
+        for status in ["downloading", "ready", "installing"] {
+            cache.info.status = status.into();
+            assert!(!cache.due(999999, true));
+            assert!(!cache.due(999999, false));
+        }
+        for url in [
+            "http://github.com/lvzixun/CodexPulse/releases/download/v1/a.exe",
+            "https://github.com/other/repo/releases/download/v1/a.exe",
+            "https://example.com/a.exe",
+        ] {
+            assert!(!safe_download(&url.parse().unwrap()));
+        }
+        assert!(safe_download(
+            &"https://github.com/lvzixun/CodexPulse/releases/download/v1/a.exe"
+                .parse()
+                .unwrap()
+        ));
     }
     #[test]
     fn caches_checks_and_honors_retry_even_when_manual() {

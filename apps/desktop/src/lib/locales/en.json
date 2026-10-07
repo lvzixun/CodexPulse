@@ -519,5 +519,15 @@
   "更新状态不可用": "Update status unavailable",
   "站点要求访问验证": "The site requires access verification",
   "重置历史 ·": "Reset history ·",
-  "无法读取 Codex .env 代理配置": "Unable to read Codex .env proxy configuration"
+  "无法读取 Codex .env 代理配置": "Unable to read Codex .env proxy configuration",
+  "正在下载更新 {progress}": "Downloading update {progress}",
+  "更新已就绪，重启即可安装": "Update ready to install on restart",
+  "正在安装，即将重新启动…": "Installing and restarting…",
+  "下载或验证失败，稍后重试": "Download or verification failed. Try again later.",
+  "重启并更新": "Restart and update",
+  "查看发布说明": "View release notes",
+  "发布说明": "Release notes",
+  "安装更新失败，请重试或前往发布页下载": "Installation failed. Retry or download from the release page.",
+  "安装更新失败": "Update installation failed",
+  "更新尚未准备完成": "Update is not ready yet"
 }
