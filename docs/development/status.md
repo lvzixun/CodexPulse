@@ -1,8 +1,8 @@
 # 实施状态
 
-## 0.1.16 浮窗定时跳位（本机修复候选）
+## 0.1.16 浮窗定时跳位（双平台正式发布）
 
-Windows 定时边界校正改为仅在显示器工作区或缩放变化时执行，详见 [修复记录](floating-position-0.1.16.md)。用户已确认本机 0.1.16 收起浮窗“没有再挪动”。本轮不创建正式 Release。
+Windows 定时边界校正改为仅在显示器工作区或缩放变化时执行，详见 [修复与发布记录](floating-position-0.1.16.md)。用户已确认本机 0.1.16 收起浮窗“没有再挪动”。[Windows x64 / macOS Universal 正式版](https://github.com/lvzixun/CodexPulse/releases/tag/v0.1.16) 已发布，双平台 CI、更新签名、服务端资产校验及匿名 HTTPS 更新清单检查通过。本机使用 CI 正式安装器完成静默替换和自动重启；macOS 本轮无实机升级验收。未生成 target/debug。
 
 ## 0.1.15 应用内更新（双平台正式发布）
 
