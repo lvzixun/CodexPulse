@@ -78,8 +78,12 @@ impl ParserState {
             if let Some(session) = self.session.as_mut() {
                 session.output_rate = None;
             }
-            self.rate_started_at = None;
-            self.rate_output = None;
+            // task_started can precede the first model context. Keep its fresh
+            // clock until output arrives, but never attribute old output to a new model.
+            if self.rate_output != Some(0) {
+                self.rate_started_at = None;
+                self.rate_output = None;
+            }
         }
         self.model = model;
         if let Some(session) = self.session.as_mut() {

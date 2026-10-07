@@ -61,6 +61,29 @@ fn usage(p: &mut ParserState, c: Value, last: Value, ts: &str) -> Option<UsageFa
     ))
     .fact
 }
+#[test]
+fn model_context_after_task_start_preserves_first_output_speed() {
+    let mut p = state("first-output");
+    p.parse(&row(
+        "event_msg",
+        json!({"type":"task_started","turn_id":"turn"}),
+        "2026-10-01T00:00:00Z",
+    ));
+    model(&mut p, "new-model");
+    usage(
+        &mut p,
+        counts(100, 0, 20),
+        counts(100, 0, 20),
+        "2026-10-01T00:00:02Z",
+    )
+    .unwrap();
+    let rate = p.session.as_ref().unwrap().output_rate.as_ref().unwrap();
+    assert_eq!(rate.output_tokens, 20);
+    assert_eq!(rate.elapsed_ms, 2000);
+    model(&mut p, "another-model");
+    assert!(p.session.as_ref().unwrap().output_rate.is_none());
+    assert!(p.rate_started_at.is_none());
+}
 fn cursor(state: ParserState, source: &str) -> FileCursor {
     FileCursor {
         source_id: source.into(),
