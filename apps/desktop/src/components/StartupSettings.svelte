@@ -6,6 +6,8 @@
   import { getStartupStatus, setStartupEnabled, openStartupSettings, onEvent } from '../lib/ipc';
   import { subscriptionGroup } from '../lib/subscriptions';
 
+  let { windows = false }: { windows?: boolean } = $props();
+
   let status = $state<StartupStatus>('unavailable');
   let busy = $state(true);
   let error = $state('');
@@ -14,10 +16,14 @@
   const checked = $derived(status === 'enabled' || status === 'requires_approval');
   const hint = $derived(
     status === 'requires_approval'
-      ? $t('待系统允许，请在登录项中确认')
+      ? windows
+        ? $t('已被系统禁用，请在启动应用中允许')
+        : $t('待系统允许，请在登录项中确认')
       : status === 'unavailable'
         ? $t('系统暂无法识别此应用的登录项')
-        : $t('登录后仅显示菜单栏图标 · 自动保存'),
+        : windows
+          ? $t('登录后沿用托盘与浮窗设置 · 自动保存')
+          : $t('登录后仅显示菜单栏图标 · 自动保存'),
   );
 
   async function refresh() {
@@ -109,7 +115,7 @@
   </label>
   {#if status === 'requires_approval'}
     <button class="cp-textbutton" onclick={() => void openSettings()}
-      >{$t('打开系统登录项设置')}</button
+      >{windows ? $t('打开系统启动应用设置') : $t('打开系统登录项设置')}</button
     >
   {/if}
   {#if error}<p class="cp-note" role="alert">{localizeError(error, $locale)}</p>{/if}

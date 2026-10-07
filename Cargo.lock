@@ -486,7 +486,7 @@ dependencies = [
 
 [[package]]
 name = "codexpulse"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "base64 0.22.1",
  "block2",
@@ -2915,7 +2915,7 @@ dependencies = [
 
 [[package]]
 name = "pulse-core"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "chrono",
  "chrono-tz",

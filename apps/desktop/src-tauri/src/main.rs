@@ -266,8 +266,9 @@ async fn copy_diagnostics(
     let text = diagnostic_text(&state, &host)?;
     let clipboard_text = text.clone();
     let (tx, rx) = tokio::sync::oneshot::channel();
+    let clipboard_app = app.clone();
     app.run_on_main_thread(move || {
-        let _ = tx.send(diagnostics::copy(&clipboard_text));
+        let _ = tx.send(diagnostics::copy(&clipboard_app, &clipboard_text));
     })
     .map_err(|_| "剪贴板服务不可用")?;
     rx.await.map_err(|_| "剪贴板服务已停止")??;
@@ -276,8 +277,11 @@ async fn copy_diagnostics(
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_single_instance::init(|app, _, _| {
-            platform::show_details(app, None)
+        .plugin(tauri_plugin_single_instance::init(|app, args, _| {
+            if !args.iter().any(|arg| arg == "--startup") {
+                platform::trace_window(app, window_lifecycle::Event::Reopen, None);
+                platform::show_details(app, None);
+            }
         }))
         .invoke_handler(tauri::generate_handler![
             get_ui_language,
@@ -306,7 +310,6 @@ fn main() {
                 language::system_language(),
             )));
             app.manage(platform::WindowHost::default());
-            #[cfg(target_os = "macos")]
             if let Ok(directory) = app.path().app_log_dir() {
                 app.state::<platform::WindowHost>()
                     .lifecycle

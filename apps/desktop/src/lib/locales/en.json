@@ -484,5 +484,11 @@
   "重试": "Retry",
   "已请求刷新": "Refresh requested",
   "· 下次尝试 {_0}": "· Next attempt at {_0}",
-  "已安排重试，预计 {_0} 再次尝试": "Retry scheduled for {_0}"
+  "已安排重试，预计 {_0} 再次尝试": "Retry scheduled for {_0}",
+  "已被系统禁用，请在启动应用中允许": "Disabled by Windows. Allow it in Startup apps.",
+  "登录后沿用托盘与浮窗设置 · 自动保存": "Uses your tray and floating window preferences \u00b7 Saved automatically",
+  "打开系统启动应用设置": "Open Windows Startup apps",
+  "无法打开系统启动应用设置": "Unable to open Windows Startup apps",
+  "无法修改登录启动，请检查系统启动应用设置": "Unable to change login startup. Check Windows Startup apps.",
+  "登录启动配置不属于 CodexPulse": "The startup entry does not belong to CodexPulse"
 }

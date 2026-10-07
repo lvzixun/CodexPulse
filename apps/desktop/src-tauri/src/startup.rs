@@ -4,15 +4,15 @@ use serde::Serialize;
 #[derive(Clone, Copy, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Status {
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(windows, target_os = "macos")))]
     Unsupported,
-    #[cfg(target_os = "macos")]
+    #[cfg(any(windows, target_os = "macos"))]
     Disabled,
-    #[cfg(target_os = "macos")]
+    #[cfg(any(windows, target_os = "macos"))]
     Enabled,
-    #[cfg(target_os = "macos")]
+    #[cfg(any(windows, target_os = "macos"))]
     RequiresApproval,
-    #[cfg(target_os = "macos")]
+    #[cfg(any(windows, target_os = "macos"))]
     Unavailable,
 }
 
@@ -21,7 +21,12 @@ pub fn update(app: &tauri::AppHandle, enabled: Option<bool>) -> Result<Status, S
     {
         macos::update(app, enabled)
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(windows)]
+    {
+        let _ = app;
+        windows::update(enabled)
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
     {
         let _ = (app, enabled);
         Ok(Status::Unsupported)
@@ -29,14 +34,30 @@ pub fn update(app: &tauri::AppHandle, enabled: Option<bool>) -> Result<Status, S
 }
 
 pub fn open_settings() -> Result<(), String> {
-    #[cfg(target_os = "macos")]
-    if macos::modern() {
-        // Called on the AppKit main thread, after an explicit UI action.
-        unsafe { objc2_service_management::SMAppService::openSystemSettingsLoginItems() };
-        return Ok(());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        std::process::Command::new("explorer.exe")
+            .arg("ms-settings:startupapps")
+            .creation_flags(0x08000000)
+            .spawn()
+            .map_err(|_| "无法打开系统启动应用设置")?;
+        Ok(())
     }
-    Err("当前系统不支持此登录项入口".into())
+    #[cfg(not(windows))]
+    {
+        #[cfg(target_os = "macos")]
+        if macos::modern() {
+            // Called on the AppKit main thread, after an explicit UI action.
+            unsafe { objc2_service_management::SMAppService::openSystemSettingsLoginItems() };
+            return Ok(());
+        }
+        Err("当前系统不支持此登录项入口".into())
+    }
 }
+
+#[cfg(windows)]
+mod windows;
 
 #[cfg(target_os = "macos")]
 mod macos {

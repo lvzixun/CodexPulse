@@ -757,7 +757,7 @@
         <div class="cp-sectionhead">
           <span>{$t('显示与数据源')}</span><small>{$t('本地设置')}</small>
         </div>
-        {#if !floatingSupported}<StartupSettings />{/if}
+        <StartupSettings windows={floatingSupported} />
         <section oninput={() => (settingsDirty = true)} onchange={() => (settingsDirty = true)}>
           <label class="cp-setting"
             ><span>{$t('语言')}<small class="cp-setting-hint">{$t('自动保存')}</small></span>
@@ -928,7 +928,7 @@
               {time(source.last_read)}
             </p>
           </div>{:else}<p class="cp-note">{$t('等待来源探测')}</p>{/each}
-        {#if !floatingSupported}<DiagnosticsPanel />{/if}
+        <DiagnosticsPanel />
       {/if}
     </div>
     <footer class="cp-footer">
