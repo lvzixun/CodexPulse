@@ -407,8 +407,10 @@ main[data-theme='light'] .accent-swatch {
   font-size: 12px;
 }
 .cp-tabs button[aria-pressed='true'] {
+  background: var(--accent-bg);
   background: color-mix(in srgb, var(--cp-accent) 16%, var(--cp-solid));
   color: var(--cp-accent);
+  box-shadow: inset 0 0 0 1px var(--cp-accent);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--cp-accent) 35%, transparent);
   font-weight: 650;
 }
