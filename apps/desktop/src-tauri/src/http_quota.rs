@@ -15,7 +15,7 @@ use std::{
 pub const PROFILE_URL: &str = "https://chatgpt.com/backend-api/wham/profiles/me";
 pub const USAGE_URL: &str = "https://chatgpt.com/backend-api/wham/usage";
 pub const RESET_CREDITS_URL: &str = "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits";
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct Scope {
     pub source_id: String,
     pub home: PathBuf,
@@ -138,6 +138,13 @@ fn bypass(value: &str, host: &str) -> bool {
     })
 }
 fn proxy_config(content: &[u8], windows: bool) -> Result<(Option<ureq::Proxy>, String), Failure> {
+    proxy_config_for_host(content, windows, "chatgpt.com")
+}
+fn proxy_config_for_host(
+    content: &[u8],
+    windows: bool,
+    host: &str,
+) -> Result<(Option<ureq::Proxy>, String), Failure> {
     let env = env_values(content)?;
     let value = |keys: &[&str]| -> Option<(String, bool)> {
         keys.iter()
@@ -150,7 +157,7 @@ fn proxy_config(content: &[u8], windows: bool) -> Result<(Option<ureq::Proxy>, S
                     .map(|s| (s, false))
             })
     };
-    if value(&["NO_PROXY", "no_proxy"]).is_some_and(|(s, _)| bypass(&s, "chatgpt.com")) {
+    if value(&["NO_PROXY", "no_proxy"]).is_some_and(|(s, _)| bypass(&s, host)) {
         return Ok((None, "no_proxy".into()));
     }
     let Some((proxy, local)) = value(&[
@@ -170,6 +177,15 @@ fn proxy_config(content: &[u8], windows: bool) -> Result<(Option<ureq::Proxy>, S
         Some(ureq::Proxy::new(proxy.trim()).map_err(|_| Failure::from("proxy_config_invalid"))?),
         if local { "codex_env" } else { "process_env" }.into(),
     ))
+}
+// Public feeds reuse only routing configuration, never account credentials.
+pub fn public_proxy(scopes: &[Scope], host: &str) -> Result<Option<ureq::Proxy>, Failure> {
+    let Some(scope) = scopes.first() else {
+        return Ok(ureq::Proxy::try_from_env());
+    };
+    let content = bytes(&scope.home.join(".env"), true)
+        .map_err(|_| Failure::from("proxy_config_unreadable"))?;
+    proxy_config_for_host(&content, scope.wsl.is_none(), host).map(|(proxy, _)| proxy)
 }
 pub fn load(scope: &Scope) -> Result<Credentials, Failure> {
     let config = bytes(&scope.home.join("config.toml"), true)?;
@@ -668,6 +684,65 @@ mod tests {
         );
         assert!(bypass("*.example.com", "a.example.com"));
         assert!(!bypass("example.com", "badexample.com"));
+    }
+    #[test]
+    fn public_proxy_reads_routing_without_auth_and_uses_the_destination_host() {
+        let dir = tempfile::tempdir().unwrap();
+        let scope = Scope {
+            source_id: "test".into(),
+            home: dir.path().into(),
+            wsl: None,
+        };
+        let env = dir.path().join(".env");
+        std::fs::write(
+            &env,
+            "HTTPS_PROXY=http://127.0.0.1:8080\nNO_PROXY=chatgpt.com",
+        )
+        .unwrap();
+        assert_eq!(
+            public_proxy(std::slice::from_ref(&scope), "codex-resets.com")
+                .unwrap()
+                .unwrap()
+                .port(),
+            8080
+        );
+        assert!(
+            public_proxy(std::slice::from_ref(&scope), "chatgpt.com")
+                .unwrap()
+                .is_none()
+        );
+        std::fs::write(
+            &env,
+            "HTTPS_PROXY=socks5://127.0.0.1:9999\nNO_PROXY=.codex-resets.com",
+        )
+        .unwrap();
+        assert!(
+            public_proxy(std::slice::from_ref(&scope), "api.codex-resets.com")
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(
+            public_proxy(std::slice::from_ref(&scope), "codex-resets.com")
+                .unwrap()
+                .unwrap()
+                .port(),
+            9999
+        );
+        std::fs::write(&env, "HTTPS_PROXY=bad://host").unwrap();
+        assert_eq!(
+            public_proxy(std::slice::from_ref(&scope), "codex-resets.com")
+                .unwrap_err()
+                .code,
+            "proxy_config_invalid"
+        );
+        // Each request reloads edits; no proxy URL or auth file is cached.
+        std::fs::write(&env, "HTTPS_PROXY=\n").unwrap();
+        assert!(
+            public_proxy(std::slice::from_ref(&scope), "codex-resets.com")
+                .unwrap()
+                .is_none()
+        );
+        assert!(!dir.path().join("auth.json").exists());
     }
     #[test]
     fn direct_request_headers_windows_and_additional_buckets() {

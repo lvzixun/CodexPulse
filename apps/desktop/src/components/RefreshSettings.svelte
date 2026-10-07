@@ -47,6 +47,7 @@
     account_mismatch: $t('接口账号与凭据不符'),
     credentials_changed: $t('账号或凭据已变化，旧结果已丢弃'),
     proxy_config_invalid: $t('Codex .env 代理配置无效'),
+    proxy_config_unreadable: $t('无法读取 Codex .env 代理配置'),
     http_429: $t('服务端限流'),
     http_403: $t('接口拒绝访问'),
     site_verification_required: $t('站点要求访问验证'),

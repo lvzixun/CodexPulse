@@ -296,6 +296,8 @@ impl Backend {
         let network_sender = rpc_sender.clone();
         let replies = sender.clone();
         let network_app = app.clone();
+        let public_scopes = Arc::new(RwLock::new(Vec::<crate::http_quota::Scope>::new()));
+        let worker_public_scopes = public_scopes.clone();
         thread::Builder::new()
             .name("pulse-network".into())
             .spawn(move || {
@@ -303,7 +305,12 @@ impl Backend {
                 while !worker_stop.load(Ordering::Relaxed) {
                     match rpc_receiver.recv_timeout(Duration::from_millis(300)) {
                         Ok(NetworkRequest::Translation(keys, reply)) => {
-                            let _ = reply.send(translator.translate(&keys));
+                            let scopes = worker_public_scopes.read().map(|s| s.clone());
+                            let result = match scopes {
+                                Ok(scopes) => translator.translate(&keys, &scopes),
+                                Err(_) => Err("消息网络配置暂不可用".into()),
+                            };
+                            let _ = reply.send(result);
                         }
                         Ok(NetworkRequest::News(generation, feed, interval, manual)) => {
                             let cancelled = || {
@@ -313,7 +320,11 @@ impl Backend {
                             let feed = if cancelled() {
                                 *feed
                             } else {
-                                crate::news::fetch(*feed, interval, manual, &cancelled)
+                                let scopes = worker_public_scopes
+                                    .read()
+                                    .unwrap_or_else(|error| error.into_inner())
+                                    .clone();
+                                crate::news::fetch(*feed, interval, manual, &cancelled, &scopes)
                             };
                             if !worker_stop.load(Ordering::Relaxed) {
                                 let _ = replies.send(Message::News(generation, Box::new(feed)));
@@ -1072,6 +1083,20 @@ impl Backend {
                         }
                     }
                     let now = Utc::now().timestamp();
+                    // Only enabled, available sources enter the public routing
+                    // context. In particular, never read a stopped WSL home.
+                    if dirty {
+                        let next = sources
+                            .iter()
+                            .filter(|s| s.available())
+                            .map(scope)
+                            .collect();
+                        if let Ok(mut current) = public_scopes.write()
+                            && *current != next
+                        {
+                            *current = next;
+                        }
+                    }
                     let quota_block = sources
                         .iter()
                         .filter(|s| s.available())

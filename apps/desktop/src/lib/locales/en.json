@@ -518,5 +518,6 @@
   "更新检查失败": "Update check failed",
   "更新状态不可用": "Update status unavailable",
   "站点要求访问验证": "The site requires access verification",
-  "重置历史 ·": "Reset history ·"
+  "重置历史 ·": "Reset history ·",
+  "无法读取 Codex .env 代理配置": "Unable to read Codex .env proxy configuration"
 }

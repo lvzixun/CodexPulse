@@ -76,23 +76,23 @@ pub struct Translator {
     next_attempt: i64,
 }
 impl Translator {
-    pub fn translate(&mut self, keys: &[String]) -> Result<String, String> {
+    pub fn translate(
+        &mut self,
+        keys: &[String],
+        scopes: &[crate::http_quota::Scope],
+    ) -> Result<String, String> {
         let now = chrono::Utc::now().timestamp();
         let mut failure = None;
         if now >= self.next_attempt {
-            let agent: ureq::Agent = ureq::Agent::config_builder()
-                .tls_config(crate::http_quota::tls_config())
-                .timeout_global(Some(Duration::from_secs(10)))
-                .http_status_as_error(false)
-                .max_redirects(0)
-                .build()
-                .into();
-            match fetch_resource(
-                &agent,
-                "https://codex-resets.com/zh-CN",
-                &self.cache,
-                Resource::Translation,
-            ) {
+            let result = public_agent(scopes).and_then(|agent| {
+                fetch_resource(
+                    &agent,
+                    "https://codex-resets.com/zh-CN",
+                    &self.cache,
+                    Resource::Translation,
+                )
+            });
+            match result {
                 Ok((cache, wait)) => {
                     self.cache = cache;
                     self.next_attempt = now.saturating_add(wait.max(300));
@@ -373,20 +373,35 @@ impl Feed {
         }
     }
 }
-pub fn fetch(old: Feed, interval: u64, manual: bool, cancelled: &dyn Fn() -> bool) -> Feed {
-    let agent: ureq::Agent = ureq::Agent::config_builder()
+fn public_agent(scopes: &[crate::http_quota::Scope]) -> Result<ureq::Agent, FetchError> {
+    let proxy = crate::http_quota::public_proxy(scopes, "codex-resets.com")
+        .map_err(|error| (error.code, 300))?;
+    Ok(ureq::Agent::config_builder()
         .tls_config(crate::http_quota::tls_config())
+        .proxy(proxy)
         .timeout_global(Some(Duration::from_secs(10)))
         .http_status_as_error(false)
         .max_redirects(0)
         .build()
-        .into();
+        .into())
+}
+pub fn fetch(
+    old: Feed,
+    interval: u64,
+    manual: bool,
+    cancelled: &dyn Fn() -> bool,
+    scopes: &[crate::http_quota::Scope],
+) -> Feed {
+    let agent = public_agent(scopes);
     fetch_using(
         old,
         interval,
         manual,
         cancelled,
-        |url, cache, resource, timeout| fetch_resource_until(&agent, url, cache, resource, timeout),
+        |url, cache, resource, timeout| match &agent {
+            Ok(agent) => fetch_resource_until(agent, url, cache, resource, timeout),
+            Err(error) => Err(error.clone()),
+        },
     )
 }
 fn fetch_using(
@@ -921,6 +936,61 @@ mod tests {
             .timeout_global(Some(Duration::from_secs(3)))
             .build()
             .into()
+    }
+
+    #[test]
+    fn public_requests_use_codex_proxy_without_account_headers() {
+        let (proxy_url, server) = serve(
+            "HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".into(),
+        );
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join(".env"),
+            format!("HTTPS_PROXY={proxy_url}\n"),
+        )
+        .unwrap();
+        let scope = crate::http_quota::Scope {
+            source_id: "public-test".into(),
+            home: dir.path().into(),
+            wsl: None,
+        };
+        let agent = public_agent(&[scope]).unwrap();
+        assert!(
+            fetch_resource(
+                &agent,
+                "https://codex-resets.com/api/v1/status",
+                &Cache::default(),
+                Resource::Json
+            )
+            .is_err()
+        );
+        let request = server.join().unwrap().to_ascii_lowercase();
+        assert!(request.starts_with("connect codex-resets.com:443 "));
+        assert!(!request.contains("authorization:"));
+        assert!(!request.contains("chatgpt-account-id"));
+        assert!(!dir.path().join("auth.json").exists());
+    }
+
+    #[test]
+    fn invalid_public_proxy_keeps_cached_feed_and_uses_normal_failure_wait() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join(".env"), "HTTPS_PROXY=invalid://proxy\n").unwrap();
+        let scope = crate::http_quota::Scope {
+            source_id: "test".into(),
+            home: dir.path().into(),
+            wsl: None,
+        };
+        let old = Feed {
+            items: status_items(&public_status("cached").body.unwrap()).unwrap(),
+            ..Feed::default()
+        };
+        let expected = old.items.clone();
+        let now = chrono::Utc::now().timestamp();
+        let result = fetch(old, 300, true, &|| false, &[scope]);
+        assert_eq!(result.status, "proxy_config_invalid");
+        assert_eq!(result.challenge_status, "proxy_config_invalid");
+        assert_eq!(result.items, expected);
+        assert!(result.next_attempt >= now + 300);
     }
 
     #[test]
