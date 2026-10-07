@@ -65,6 +65,8 @@ pub struct WindowHost {
     #[cfg(target_os = "macos")]
     pub deactivate_observer: std::sync::atomic::AtomicUsize,
     maintenance: Mutex<Instant>,
+    #[cfg(windows)]
+    work_areas: Mutex<crate::geometry::WorkAreas>,
     release_pending: std::sync::atomic::AtomicBool,
 }
 impl Default for WindowHost {
@@ -83,6 +85,8 @@ impl Default for WindowHost {
             #[cfg(target_os = "macos")]
             deactivate_observer: std::sync::atomic::AtomicUsize::new(0),
             maintenance: Mutex::new(Instant::now()),
+            #[cfg(windows)]
+            work_areas: Mutex::new(crate::geometry::WorkAreas::default()),
             release_pending: std::sync::atomic::AtomicBool::new(false),
         }
     }
@@ -275,6 +279,10 @@ fn position_floating(app: &tauri::AppHandle, w: &tauri::WebviewWindow, compact: 
         .and_then(|a| a.clone())
         .or_else(|| settings(app).compact_anchor);
     let monitors = areas(app);
+    #[cfg(windows)]
+    if let Ok(mut previous) = host.work_areas.lock() {
+        previous.changed(&monitors);
+    }
     if let Some(area) = crate::geometry::choose(&monitors, anchor.as_ref()) {
         let p = area.place(
             anchor.as_ref(),
@@ -290,8 +298,14 @@ fn position_floating(app: &tauri::AppHandle, w: &tauri::WebviewWindow, compact: 
             p.height
                 .min(((if compact { 36.0 } else { 240.0 }) * area.scale) as u32),
         )));
-        let _ = w.set_size(tauri::PhysicalSize::new(p.width, p.height));
-        let _ = w.set_position(tauri::PhysicalPosition::new(p.x, p.y));
+        let size = tauri::PhysicalSize::new(p.width, p.height);
+        if w.inner_size().ok() != Some(size) {
+            let _ = w.set_size(size);
+        }
+        let position = tauri::PhysicalPosition::new(p.x, p.y);
+        if w.outer_position().ok() != Some(position) {
+            let _ = w.set_position(position);
+        }
     }
 }
 pub fn moved(app: &tauri::AppHandle, position: tauri::PhysicalPosition<i32>) {
@@ -415,6 +429,10 @@ pub fn release_hidden(app: &tauri::AppHandle) {
     }
 }
 pub fn setup(app: &tauri::App, settings: &Settings) -> Result<(), Box<dyn std::error::Error>> {
+    #[cfg(windows)]
+    if let Ok(mut previous) = app.state::<WindowHost>().work_areas.lock() {
+        previous.changed(&areas(app.handle()));
+    }
     let language = crate::language::effective(&settings.language);
     *app.state::<WindowHost>()
         .anchor
@@ -588,6 +606,16 @@ fn show_details_now(app: &tauri::AppHandle, page: Option<&str>) {
 }
 pub fn correct_bounds(app: &tauri::AppHandle) {
     if let Some(w) = app.get_webview_window("pulse") {
+        let monitors = areas(app);
+        #[cfg(windows)]
+        if !app
+            .state::<WindowHost>()
+            .work_areas
+            .lock()
+            .is_ok_and(|mut previous| previous.changed(&monitors))
+        {
+            return;
+        }
         let compact = app
             .state::<WindowHost>()
             .view
@@ -596,7 +624,7 @@ pub fn correct_bounds(app: &tauri::AppHandle) {
         // Only relocate when current bounds are out of a work area. Detail drag position
         // remains valid while visible; compact restoration still uses its saved anchor.
         if let (Ok(p), Ok(size)) = (w.outer_position(), w.outer_size()) {
-            let valid = areas(app).iter().any(|a| {
+            let valid = monitors.iter().any(|a| {
                 p.x >= a.x
                     && p.y >= a.y
                     && p.x as i64 + size.width as i64 <= a.x as i64 + a.width as i64

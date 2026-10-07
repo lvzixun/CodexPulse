@@ -18,7 +18,7 @@ impl Anchor {
             && self.monitor.as_ref().is_none_or(|s| s.len() <= 512)
     }
 }
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Area {
     pub monitor: Option<String>,
     pub x: i32,
@@ -33,6 +33,27 @@ pub struct Placement {
     pub y: i32,
     pub width: u32,
     pub height: u32,
+}
+#[cfg(any(windows, test))]
+#[derive(Default)]
+pub struct WorkAreas(Option<Vec<Area>>);
+#[cfg(any(windows, test))]
+impl WorkAreas {
+    /// Polling is for display/taskbar changes, not periodically snapping a dragged window.
+    /// Ignore a failed/empty enumeration and establish the initial baseline without moving.
+    pub fn changed(&mut self, areas: &[Area]) -> bool {
+        if areas.is_empty() {
+            return false;
+        }
+        // Monitor enumeration order alone is not a display configuration change.
+        let changed = self.0.as_ref().is_some_and(|previous| {
+            previous.len() != areas.len() || previous.iter().any(|area| !areas.contains(area))
+        });
+        if changed || self.0.is_none() {
+            self.0 = Some(areas.to_vec());
+        }
+        changed
+    }
 }
 impl Area {
     pub fn place(&self, anchor: Option<&Anchor>, logical_size: (f64, f64)) -> Placement {
@@ -104,6 +125,40 @@ mod tests {
             height: 1040,
             scale,
         }
+    }
+    #[test]
+    fn maintenance_does_not_snap_a_window_on_an_unchanged_desktop() {
+        let areas = [screen("left", 1.25), screen("right", 1.5)];
+        let mut previous = WorkAreas::default();
+        assert!(!previous.changed(&areas));
+        for _ in 0..120 {
+            assert!(!previous.changed(&areas));
+        }
+        assert!(!previous.changed(&[areas[1].clone(), areas[0].clone()]));
+    }
+    #[test]
+    fn real_work_area_disconnect_and_scale_changes_are_detected_once() {
+        let mut areas = vec![screen("left", 1.0), screen("right", 1.25)];
+        let mut previous = WorkAreas::default();
+        assert!(!previous.changed(&areas));
+        areas[0].height -= 40; // Taskbar / work-area change.
+        assert!(previous.changed(&areas));
+        assert!(!previous.changed(&areas));
+        areas[0].scale = 1.5;
+        assert!(previous.changed(&areas));
+        assert!(!previous.changed(&areas));
+        areas.pop();
+        assert!(previous.changed(&areas));
+        assert!(!previous.changed(&areas));
+    }
+    #[test]
+    fn transient_empty_monitor_results_do_not_move_or_forget_the_window() {
+        let areas = [screen("left", 1.25)];
+        let mut previous = WorkAreas::default();
+        assert!(!previous.changed(&[]));
+        assert!(!previous.changed(&areas));
+        assert!(!previous.changed(&[]));
+        assert!(!previous.changed(&areas));
     }
     #[test]
     fn dpi_change_preserves_logical_edge_distance() {
