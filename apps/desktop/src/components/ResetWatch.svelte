@@ -8,12 +8,10 @@
     news,
     now,
     compact = false,
-    acknowledge = async () => {},
   }: {
     news: Snapshot['news'];
     now: number;
     compact?: boolean;
-    acknowledge?: (keys?: string[]) => Promise<void>;
   } = $props();
   const watch = $derived(activeResetWatch(news, now));
   const entry = $derived(
@@ -52,6 +50,5 @@
         {entry}
         {now}
         unread={(news.unread_keys ?? []).includes(newsKey(watch.item))}
-        onread={() => void acknowledge([newsKey(watch.item)])}
       />{/if}
   </section>{/if}

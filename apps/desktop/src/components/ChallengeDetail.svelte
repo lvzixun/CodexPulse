@@ -10,12 +10,10 @@
     news,
     now,
     back,
-    acknowledge,
   }: {
     news: Snapshot['news'];
     now: number;
     back: () => void;
-    acknowledge: (keys?: string[]) => Promise<void>;
   } = $props();
   const entries = $derived(new Map(newsEntries(news, $locale).map((e) => [e.key, e])));
   const currentDate = $derived(news.challenge ? localDay(now, news.challenge.timezone) : '');
@@ -39,12 +37,7 @@
         {#each record.entries as entry}
           {@const key = challengeKey(news, record.day, entry)}
           {@const row = entries.get(key)}
-          {#if row}<NewsCard
-              entry={row}
-              {now}
-              unread={news.unread_keys.includes(key)}
-              onread={() => void acknowledge([key])}
-            />{/if}
+          {#if row}<NewsCard entry={row} {now} unread={news.unread_keys.includes(key)} />{/if}
         {:else}<p class="cp-note">
             {record.date > currentDate ? $t('尚未到这一天') : $t('暂无公布记录')}
           </p>{/each}

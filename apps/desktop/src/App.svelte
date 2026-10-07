@@ -3,6 +3,8 @@
 
   import { onMount, tick } from 'svelte';
   import { getCurrentWindow } from '@tauri-apps/api/window';
+  import { Menu, MenuItem } from '@tauri-apps/api/menu';
+  import { LogicalPosition } from '@tauri-apps/api/dpi';
   import {
     empty,
     native,
@@ -69,6 +71,15 @@
   let settings = $state<Settings>(copySettings(empty.settings));
   let path = $state('');
   let viewReady = $state(false);
+  let windowVisible = $state(!native);
+  let documentVisible = $state(!document.hidden);
+  let newsReadPending = $state(false);
+  let newsReadAttempt = '';
+  let compactMenu: Menu | null = null;
+  let compactMenuItems: MenuItem[] = [];
+  let compactMenuLocale = '';
+  let compactMenuBusy = false;
+  let compactMenuDisposed = false;
   let glassSupported = $state(!native);
   let floatingSupported = $state(true);
   let scroll = $state<Record<string, number>>({});
@@ -180,7 +191,7 @@
       : null,
   );
   const importantUnread = $derived(data.news.important_unread ?? 0);
-  async function acknowledgeNews(keys: string[] = [...unreadKeys]) {
+  async function acknowledgeNews(keys: string[]) {
     try {
       await readNews(keys);
       await refresh();
@@ -188,6 +199,23 @@
       error = String(e);
     }
   }
+  $effect(() => {
+    if (!viewReady || mode !== 'details' || page !== 'news' || !windowVisible || !documentVisible) {
+      newsReadAttempt = '';
+      return;
+    }
+    const keys = [...unreadKeys].slice(0, 256);
+    const revision = JSON.stringify([data.news.last_success, data.news.last_attempt, keys]);
+    if (!keys.length || newsReadPending || newsReadAttempt === revision) return;
+    // Wait until this snapshot is rendered. Only acknowledge its keys, so messages
+    // arriving while the write is pending remain eligible for the next pass.
+    const timer = setTimeout(() => {
+      newsReadAttempt = revision;
+      newsReadPending = true;
+      void acknowledgeNews(keys).finally(() => (newsReadPending = false));
+    }, 0);
+    return () => clearTimeout(timer);
+  });
   async function togglePin() {
     try {
       await saveSettings({ ...data.settings, always_on_top: !data.settings.always_on_top });
@@ -313,6 +341,46 @@
   function drag(e: PointerEvent) {
     if (native && e.button === 0) void getCurrentWindow().startDragging();
   }
+  async function closeCompactMenu() {
+    const resources = [...compactMenuItems, ...(compactMenu ? [compactMenu] : [])];
+    compactMenuItems = [];
+    compactMenu = null;
+    await Promise.all(resources.map((resource) => resource.close().catch(() => {})));
+  }
+  async function compactContextMenu(event: MouseEvent) {
+    if (mode !== 'compact' || !floatingSupported) return;
+    event.preventDefault();
+    if (!native || compactMenuBusy || compactMenuDisposed) return;
+    compactMenuBusy = true;
+    try {
+      if (!compactMenu || compactMenuLocale !== $locale) {
+        await closeCompactMenu();
+        for (const [action, label] of [
+          ['expand', '展开'],
+          ['exit', '退出'],
+          ['hide', '隐藏'],
+        ]) {
+          compactMenuItems.push(
+            await MenuItem.new({
+              id: `compact-${action}`,
+              text: $t(label),
+              action: () => void windowAction(action).catch((e) => (error = String(e))),
+            }),
+          );
+        }
+        compactMenu = await Menu.new({ items: compactMenuItems });
+        compactMenuLocale = $locale;
+      }
+      if (!compactMenuDisposed && mode === 'compact' && windowVisible)
+        await compactMenu.popup(new LogicalPosition(event.clientX, event.clientY));
+    } catch (e) {
+      error = String(e);
+      await closeCompactMenu();
+    } finally {
+      compactMenuBusy = false;
+      if (compactMenuDisposed) await closeCompactMenu();
+    }
+  }
   onMount(() => {
     let disposed = false;
     let clock: ReturnType<typeof setInterval> | undefined;
@@ -328,7 +396,7 @@
         }, 60000);
       }
     };
-    clockVisible(!document.hidden);
+    clockVisible(windowVisible && documentVisible);
     const subscriptions = subscriptionGroup([
       () =>
         onEvent('snapshot-changed', () => {
@@ -357,7 +425,11 @@
           }
           void refresh();
         }),
-      () => onEvent<boolean>('window-visible', clockVisible),
+      () =>
+        onEvent<boolean>('window-visible', (visible) => {
+          windowVisible = visible;
+          clockVisible(visible && documentVisible);
+        }),
       () =>
         onEvent<boolean>('glass-supported', (supported) => {
           if (!disposed) glassSupported = supported;
@@ -369,6 +441,8 @@
       })
       .then(async () => {
         if (!disposed) {
+          windowVisible = native ? await getCurrentWindow().isVisible() : true;
+          clockVisible(windowVisible && documentVisible);
           await refresh();
           if (disposed) return;
           const view = await getViewState();
@@ -400,7 +474,8 @@
         if (!disposed) error = '无法加载界面，请重新打开面板';
       });
     const visible = () => {
-      clockVisible(!document.hidden);
+      documentVisible = !document.hidden;
+      clockVisible(windowVisible && documentVisible);
       if (!document.hidden) void refresh();
     };
     document.addEventListener('visibilitychange', visible);
@@ -411,6 +486,8 @@
     window.addEventListener('keydown', escape);
     window.addEventListener('languagechange', refreshLanguage);
     return () => {
+      compactMenuDisposed = true;
+      if (!compactMenuBusy) void closeCompactMenu();
       clearInterval(clock);
       disposed = true;
       subscriptions.dispose();
@@ -420,6 +497,8 @@
     };
   });
 </script>
+
+<svelte:window oncontextmenu={compactContextMenu} />
 
 <main
   class="cp-shell"
@@ -722,7 +801,6 @@
           bind:limit={newsLimit}
           detail={newsChallenge}
           navigate={(detail) => void goNewsDetail(detail)}
-          acknowledge={acknowledgeNews}
         />
       {:else if page === 'settings'}
         <div class="cp-sectionhead">

@@ -22,6 +22,17 @@
       hour: '2-digit',
       minute: '2-digit',
     });
+  const nextLabel = $derived(
+    upcoming
+      ? time(upcoming)
+      : plan?.scheduled_for
+        ? $t('计划时间已过，待确认执行')
+        : plan
+          ? $t('已公布计划，时间待定')
+          : news.last_success
+            ? $t('尚未公布')
+            : $t('等待同步'),
+  );
 </script>
 
 <div class="cp-reset-status" aria-label={$t('公开额度重置状态')}>
@@ -32,17 +43,7 @@
     >
   </div>
   <div>
-    <span>{$t('下一次已确认重置')}</span><strong
-      >{upcoming
-        ? time(upcoming)
-        : plan?.scheduled_for
-          ? $t('计划时间已过，待确认执行')
-          : plan
-            ? $t('已公布计划，时间待定')
-            : news.last_success
-              ? $t('尚未公布')
-              : $t('等待同步')}</strong
-    >
+    <span>{$t('下一次已确认重置')}</span><strong title={nextLabel}>{nextLabel}</strong>
   </div>
   <ResetWatch {news} {now} compact />
   {#if news.status !== 'connected' && news.last_success}<small>{$t('离线缓存')}</small>{/if}

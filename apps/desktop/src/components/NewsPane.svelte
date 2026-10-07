@@ -14,7 +14,6 @@
   let {
     news,
     now,
-    acknowledge,
     timezone,
     detail = false,
     limit = $bindable(5),
@@ -26,7 +25,6 @@
     navigate: (detail: boolean) => void;
     news: Snapshot['news'];
     now: number;
-    acknowledge: (keys?: string[]) => Promise<void>;
   } = $props();
   let error = $state('');
   const unread = $derived(news.unread_keys ?? []);
@@ -57,20 +55,18 @@
 </script>
 
 <section class="cp-news-pane" aria-label={$t('Tibo 动态')}>
-  {#if detail}<ChallengeDetail {news} {now} {acknowledge} back={() => navigate(false)} />{:else}
+  {#if detail}<ChallengeDetail {news} {now} back={() => navigate(false)} />{:else}
     <div class="cp-sectionhead">
       <span>{unread.length ? $t('Tibo · {_0} 条未读新消息', { _0: unread.length }) : 'Tibo'}</span>
-      {#if unread.length}<button class="cp-textbutton" onclick={() => void acknowledge()}
-          >{$t('全部已读')}</button
-        >{:else}<small
-          >{news.status === 'connected'
-            ? $t('已同步')
-            : news.last_success
-              ? $t('离线缓存')
-              : $t('等待同步')}</small
-        >{/if}
+      <small
+        >{news.status === 'connected'
+          ? $t('已同步')
+          : news.last_success
+            ? $t('离线缓存')
+            : $t('等待同步')}</small
+      >
     </div>
-    <ResetWatch {news} {now} {acknowledge} />
+    <ResetWatch {news} {now} />
     <ResetOverview {news} {now} {timezone} />
     <ChallengeSummary {news} {now} open={() => navigate(true)} />
     <div class="cp-sectionhead cp-news-feed-heading"><span>{$t('最新公告与消息')}</span></div>
@@ -79,7 +75,6 @@
           {entry}
           {now}
           unread={unread.includes(entry.key)}
-          onread={() => void acknowledge([entry.key])}
         />{:else}<p class="cp-note">
           {news.last_success ? $t('暂无消息。') : $t('等待首次同步。')}
         </p>{/each}

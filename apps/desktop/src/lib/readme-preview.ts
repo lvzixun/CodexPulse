@@ -8,6 +8,11 @@ import type {
   UsageBreakdown,
 } from './types';
 
+const readKeys = new Set<string>();
+export function previewReadNews(keys: string[]): void {
+  for (const key of keys) readKeys.add(key);
+}
+
 export function previewSnapshot(base: Snapshot): Snapshot {
   const now = Date.now();
   const at = new Date(now).toISOString();
@@ -179,8 +184,8 @@ export function previewSnapshot(base: Snapshot): Snapshot {
       status: 'connected',
       last_success: at,
       latest_reset: latest,
-      important_unread: 1,
-      unread_keys: [latest.id],
+      important_unread: readKeys.has('Announcement:sample-reset') ? 0 : 1,
+      unread_keys: readKeys.has('Announcement:sample-reset') ? [] : ['Announcement:sample-reset'],
       items: [latest],
       reset_stats: {
         total: 18,

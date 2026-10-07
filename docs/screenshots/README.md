@@ -32,3 +32,7 @@ node scripts/capture-readme.cjs
 Playwright 可以安装在独立的工具目录，用 `CODEXPULSE_PLAYWRIGHT_MODULE` 指向其模块路径，无需修改产品依赖。若使用系统 Edge，将 `CODEXPULSE_BROWSER_CHANNEL` 设为 `msedge`；未设置时使用 Playwright 的 Chromium。
 
 修改示例数据后执行 `pnpm check` 与 `pnpm build:ui`，确认生产产物不包含示例数据；人工检查中英文截图的文字、状态与布局后再提交。
+
+## 交互验证
+
+同一开发服务器及 Playwright 环境下，可运行 `node scripts/verify-panel.cjs`。它使用 Tauri 官方 IPC 模拟，验证中英文 Tibo 自动已读的页面 / 可见性限制、新消息、并发及失败处理，以及浮窗菜单的三项顺序、动作与复用，不连接真实账户、不退出真实应用。该检查不代替 Windows 原生菜单绘制验收。

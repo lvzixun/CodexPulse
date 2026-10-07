@@ -19,6 +19,8 @@ The **Windows floating window** fits into one line: work status, current model, 
 
 Disable the floating window in Settings if desired. Left-click the tray icon to open the same detail panel; right-click for Settings, Quit, and other simple actions.
 
+Right-click the compact window for Expand, Quit, and Hide. Use the tray icon to reopen it after hiding. Messages in the current snapshot are automatically marked as read when the Tibo page is visible, including new messages refreshed while it remains open.
+
 On **macOS**, click the menu bar icon to open details. Both platforms share the features below.
 
 ## Settings and refresh

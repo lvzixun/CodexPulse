@@ -159,8 +159,10 @@ export const translateNews = (id: string) =>
   native
     ? invoke<string>('translate_news', { id })
     : Promise.reject(new Error(t('翻译仅在桌面应用中可用')));
-export const readNews = (keys: string[]) =>
-  native ? invoke<void>('read_news', { keys }) : Promise.resolve();
+export const readNews = async (keys: string[]): Promise<void> => {
+  if (native) return invoke<void>('read_news', { keys });
+  if (readmePreview) (await import('./readme-preview')).previewReadNews(keys);
+};
 export const getViewState = async () => {
   if (native) return invoke<ViewState>('get_view_state');
   if (readmePreview) return (await import('./readme-preview')).previewView();

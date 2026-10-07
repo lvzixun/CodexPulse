@@ -1005,18 +1005,30 @@ body {
 }
 .cp-reset-status > div {
   display: flex;
-  flex-direction: column;
-  gap: 3px;
-  margin-bottom: 9px;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 6px;
+  min-width: 0;
+}
+.cp-reset-status > div:last-of-type {
+  margin-bottom: 0;
 }
 .cp-reset-status > div > span {
   font-size: 11px;
   color: var(--cp-muted);
+  flex-shrink: 0;
+  white-space: nowrap;
 }
-.cp-reset-status strong {
-  font-size: 18px;
+.cp-reset-status > div > strong {
+  min-width: 0;
+  font-size: 14px;
   font-weight: 650;
   line-height: 1.4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: right;
 }
 .cp-challenge {
   margin: 20px 0;
@@ -1338,8 +1350,8 @@ main.menubar.opaque {
 }
 .menubar .cp-reset-status {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 6px;
   margin: 14px 0 0;
   padding: 14px;
   background: var(--card);
@@ -1348,9 +1360,6 @@ main.menubar.opaque {
 }
 .menubar .cp-reset-status > div {
   margin-bottom: 0;
-}
-.menubar .cp-reset-status strong {
-  font-size: 18px;
 }
 .menubar .cp-reset-status > div > span {
   font-size: 12px;

@@ -8,8 +8,7 @@
     entry,
     now,
     unread = false,
-    onread = () => {},
-  }: { entry: NewsEntry; now: number; unread?: boolean; onread?: () => void } = $props();
+  }: { entry: NewsEntry; now: number; unread?: boolean } = $props();
   let error = $state('');
   let translated = $state('');
   let showTranslation = $state(false);
@@ -50,7 +49,6 @@
   );
   async function translate() {
     if (!item) return;
-    if (unread) onread();
     if (translated) {
       showTranslation = !showTranslation;
       return;
@@ -75,7 +73,6 @@
     if (!entry.sourceUrl) return;
     try {
       await openSource(entry.sourceUrl);
-      if (unread) onread();
     } catch (e) {
       error = String(e);
     }
@@ -109,7 +106,6 @@
         class="cp-textbutton"
         onclick={() => {
           expanded = !expanded;
-          if (expanded && unread) onread();
         }}>{expanded ? $t('收起全文') : $t('展开全文')}</button
       >{/if}
     {#if entry.sourceUrl}<button class="cp-textbutton" onclick={() => void source()}
@@ -123,8 +119,6 @@
             : translated
               ? $t('显示译文')
               : $t('翻译')}</button
-      >{/if}
-    {#if unread}<button class="cp-textbutton cp-news-read" onclick={onread}>{$t('标为已读')}</button
       >{/if}
   </div>
   {#if error}<p class="cp-note" role="status">{localizeError(error, $locale)}</p>{/if}
