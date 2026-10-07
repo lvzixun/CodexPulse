@@ -14,11 +14,13 @@ Windows 补齐当前用户登录启动、系统启动审批状态读取、Unicod
 
 ## 验证
 
-0.1.5 合并代码加 Windows 修正：Rust 141 项通过（桌面 61、核心 80），6 项显式联网探针默认忽略；Node 15 项通过；Svelte 0 错误 / 0 警告；Rust 1.97.1 Clippy `-D warnings` 通过。版本号更新不修改依赖版本。本机 0.1.6 release 构建通过，PE 子系统为 Windows GUI（2）；在 workspace 隔离目录使用当前用户安装，`/S /NS` 安装及重复安装均成功，产品版本与卸载登记为 0.1.6。实际卸载成功，安装目录可执行文件与卸载登记均移除；账本完整性检查为 `ok`，全部设置与安装前一致，用量事实从 12,793 增至 12,822，未丢失。最终 CI 产物待补充。
+0.1.5 合并代码加 Windows 修正：Rust 141 项通过（桌面 61、核心 80），6 项显式联网探针默认忽略；Node 15 项通过；Svelte 0 错误 / 0 警告；Rust 1.97.1 Clippy `-D warnings` 通过。版本号更新不修改依赖版本。本机 0.1.6 release 构建通过，PE 子系统为 Windows GUI（2）；在 workspace 隔离目录使用当前用户安装，`/S /NS` 安装及重复安装均成功，产品版本与卸载登记为 0.1.6。实际卸载成功，安装目录可执行文件与卸载登记均移除；账本完整性检查为 `ok`，全部设置与安装前一致，用量事实从 12,793 增至 12,822，未丢失。最终 CI 安装包再经隔离目录安装、GUI 启动 / 展开与卸载验证；产品版本 0.1.6、PE 子系统 2，浮窗实际显示当前模型与约 28 tok/s。第二次卸载后设置仍与原值一致、账本完整性为 `ok`；已将本机原运行位置更新为最终 CI 可执行文件并恢复小浮窗。
 
 Windows 真实账户 300 秒紧凑模式无新请求，展开后成功；独立消息刷新、本地增量采集及隐藏 5 分钟释放 / 重建实测见 [基线与资源采样](windows-parity-0.1.4.md)。机器为 Windows 11 Pro 10.0.26300 x64、i9-14900KF、32 逻辑处理器、约 63.8 GiB RAM。短期采样不代替长时间漂移测试，也不把私有提交称为私有 RSS。
 
-macOS 的本次验证由 CI 执行测试、Clippy、Universal 构建、严格 ad-hoc 签名验证及 arm64 / x86_64 架构校验。另一台机器的原生 UI 证据见 [0.1.5 记录](reset-watch-0.1.5.md)。本轮不声称 Windows 多屏拔插、真实注销登录、Intel Mac 实机或长期漂移已验收。
+macOS 的本次 CI 验证已通过 Rust 143 项（6 项联网探针忽略）、Node 15 项测试及 Clippy、Universal 构建、严格 ad-hoc 签名验证及 arm64 / x86_64 架构校验。另一台机器的原生 UI 证据见 [0.1.5 记录](reset-watch-0.1.5.md)。本轮不声称 Windows 多屏拔插、真实注销登录、Intel Mac 实机或长期漂移已验收。
+
+最终 0.1.6 本机包再次验证：10:07:25 启动为小浮窗，至 10:17:37 账户 last_attempt / last_success 仍停留在启动前 10:01:32，本地 facts 从卸载检查时的 12,822 增至 12,855（+33）。模型与速度持续显示，没有用本地模型 / 速度展示触发账户网络刷新。
 
 Windows 安装后原生检查：184 × 36 浮窗显示当前 `gpt-6.1-sol` 与约 31 tok/s；点击进入 Tibo，重置观察显示本地 15:00 截止及约 4 小时 59 分钟倒计时，和最近已执行重置分别展示；手动翻译成功显示「我接受你的投票」，不包含回复上下文；28 天挑战完整记录实际展开两日内容；总览同样展示重置观察与倒计时。
 
@@ -28,4 +30,15 @@ Windows 安装后原生检查：184 × 36 浮窗显示当前 `gpt-6.1-sol` 与�
 
 ## 发布状态
 
-准备中；正式发布完成后记录 CI、产物 SHA-256、安装 / 卸载和 debug 清理结果。macOS 保留 ad-hoc 签名，Developer ID / 公证延期；Windows 暂无 Authenticode 签名。稳定 Release 表示发布渠道，不表示这些签名已经完成。
+已发布 [CodexPulse 0.1.6](https://github.com/lvzixun/CodexPulse/releases/tag/v0.1.6)，北京时间 2026-10-07 10:24:58，`isDraft=false`、`isPrerelease=false`，标记为 latest；仓库 `isPrivate=true`。macOS 保留 ad-hoc 签名，Developer ID / 公证延期；Windows 暂无 Authenticode 签名。稳定 Release 表示发布渠道，不表示这些签名已经完成。
+
+
+[双平台 CI #37559751397](https://github.com/lvzixun/CodexPulse/actions/runs/37559751397) 全部通过：Windows Rust 141 项、macOS Rust 143 项，分别忽略 6 项显式联网探针；两平台 Node 15 项、Svelte、Clippy、编译与打包通过。macOS 严格签名和双架构检查通过。CI 与发布 tag `v0.1.6` 均固定应用提交 `9c255c5ca55c5424819a83f65db16ad393d9bb4a`，之后 main 只补充文档；没有把旧版本安装包改名为 0.1.6。
+
+| 正式产物 | 字节 | SHA-256 |
+| --- | ---: | --- |
+| `CodexPulse_0.1.6_x64-setup.exe` | 4,505,177 | `de04f8b31e1fb85e855efb109ed234c580e4a7f58e15f0df7cb8c48ef9fb75be` |
+| `CodexPulse_0.1.6_universal.dmg` | 12,213,374 | `3d229aac78a7a0aff39c71141c3bbe90e0258ef11a4bf8897fb8c8c7d4ce496e` |
+| `SHA256SUMS.txt` | 196 | `6236a0cfa2f1149282bda44434a380394621b250181357282c2bafb62fd75f2e` |
+
+全部上传资产的服务端摘要及大小与本地一致；正式发布后重新下载校验文件，逐字节匹配。安装包保存在本机 `releases/v0.1.6`（Git 忽略），可执行文件同目录留存；debug 清理后未再次本机构建。版本 0.1.5 的 macOS Release 与标签保留。

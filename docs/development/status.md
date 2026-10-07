@@ -8,7 +8,7 @@
 
 ## 0.1.6 Windows 对齐与双平台发布
 
-Windows 功能与 macOS 共享实现对齐，账户仅详情可见时刷新，小浮窗显示当前模型 / 速度；登录启动与脱敏复制补齐。保留远端 0.1.5 标签，以 0.1.6 同源构建。最新验证和发布状态见 [0.1.6 记录](windows-release-0.1.6.md)；0.1.4 性能数据为实际历史基线。
+Windows 功能与 macOS 共享实现对齐，账户仅详情可见时刷新，小浮窗显示当前模型 / 速度；登录启动与脱敏复制补齐。已发布 [Windows x64 / macOS Universal 0.1.6 正式 Release](https://github.com/lvzixun/CodexPulse/releases/tag/v0.1.6)，保留 0.1.5 标签和 macOS Release。双平台 CI 与 Windows 安装 / 卸载通过；清理 debug 逻辑体积 21.167 GiB，D 盘可用空间增加 18.453 GiB。最新验证与签名 / 实机边界见 [0.1.6 记录](windows-release-0.1.6.md)；0.1.4 性能数据为实际历史基线。
 
 ## 0.1.5 重置观察
 
