@@ -16,4 +16,20 @@
 
 中英文浏览器 IPC 回归覆盖隐藏后重新打开、刷新中与失败时保留旧值、成功替换余额、退出清除；同时复查原有 Tibo、提醒、主题和更新交互。此模拟不等同于原生端到端网络验收；未修改用户真实凭据。
 
-本机 Rust workspace 183 项通过、7 项显式联网探针忽略；Clippy / rustfmt、Svelte（0 错误 / 0 警告）、18 项前端测试和发布清单测试通过。生产前端构建和中英文 IPC 回归通过。发布、安装与清理证据将在产物验证后补充。
+本机 Rust workspace 183 项通过、7 项显式联网探针忽略；Clippy / rustfmt、Svelte（0 错误 / 0 警告）、18 项前端测试和发布清单测试通过。生产前端构建和中英文 IPC 回归通过。
+
+## 正式发布与本机安装
+
+[Windows x64 / macOS Universal 0.1.22 正式版](https://github.com/lvzixun/CodexPulse/releases/tag/v0.1.22) 已发布为 latest，非预发布；源码标签 `8ccc1bdce7650e88db96207ae2fb573fb0e89473`。[CI #37726797379](https://github.com/lvzixun/CodexPulse/actions/runs/37726797379) 两端全部成功：macOS Rust 183 项、Windows 182 项通过，各 7 项显式联网探针忽略，前端、Clippy、版本 / 架构及签名门禁通过。
+
+下载后的双平台更新包再次通过公钥签名、版本绑定与篡改拒绝；7 个正式资产在草稿及发布后分别与 GitHub 服务端大小 / SHA-256 比对一致。macOS DMG 与更新归档均为 0.1.22、最低 macOS 12、arm64 + x86_64，严格 ad-hoc 签名通过，Info.plist / 可执行文件 / CodeResources 一致。
+
+本机用户及系统 Applications 均安装已验证 CI 产物。原生自动化无法读取隐藏窗口（timeoutReached / cgWindowNotFound），因此未完成原生窗口隐藏 / 重开视觉验收；不将 IPC 模拟称为原生通过。替换预先分阶段复制并验证，向唯一已确认的旧进程发送 SIGTERM、确认退出后替换并再次验证文件；随后通过桌面接口启动新版，进程来自用户 Applications。只读检查应用持久化缓存确认 12:36:42 启动账户请求成功、身份已核验、额度桶与 allowance 存在；未修改用户真实凭据或刷新设置。账户姓名属于已有持久化脱敏范围，不据此宣称原生姓名显示通过。
+
+清理约 4.67 GiB：Rust target、测试临时依赖与签名验证工具工程、CI 下载副本、解包 App 和已确认替换后的备份；卸载本轮验证 DMG，保留用户原有挂载、正式资产及校验日志。Codex 数据、应用数据库及用户下载未删除，仓库 target 不存在。
+
+| 资产                                   |       字节 | SHA-256                                                            |
+| -------------------------------------- | ---------: | ------------------------------------------------------------------ |
+| CodexPulse_0.1.22_universal.app.tar.gz | 14,088,574 | `d452e9285dfd2577e29076a21841539077c4e947d34b544b1ac449a2c9b1a626` |
+| CodexPulse_0.1.22_universal.dmg        | 13,760,976 | `50ac3788650534e081fc91466156eeffcc180f66b01fae05fa7069970978e128` |
+| CodexPulse_0.1.22_x64-setup.exe        |  5,077,920 | `ab171f9b70f87ea034cea1bf65867076654922b7b851d466ff2d3111149e56e2` |
