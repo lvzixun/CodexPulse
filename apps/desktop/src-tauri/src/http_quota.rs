@@ -178,6 +178,96 @@ fn proxy_config_for_host(
         if local { "codex_env" } else { "process_env" }.into(),
     ))
 }
+// Routing for public updater traffic. Do not expose Debug/Serialize: proxy URLs
+// can contain proxy credentials. Account auth/config files are never read here.
+#[derive(Clone)]
+pub struct PublicProxyRouting {
+    proxy: Option<ureq::Proxy>,
+    url: Option<url::Url>,
+    no_proxy: String,
+}
+impl PublicProxyRouting {
+    pub fn ureq_proxy(&self) -> Option<ureq::Proxy> {
+        self.proxy.clone()
+    }
+    pub fn for_url(&self, target: &url::Url) -> Option<url::Url> {
+        if target
+            .host_str()
+            .is_some_and(|host| bypass(&self.no_proxy, host))
+        {
+            None
+        } else {
+            self.url.clone()
+        }
+    }
+}
+pub fn public_proxy_routing(scopes: &[Scope]) -> Result<Option<PublicProxyRouting>, Failure> {
+    let content = if let Some(scope) = scopes.first() {
+        bytes(&scope.home.join(".env"), true)
+            .map_err(|_| Failure::from("proxy_config_unreadable"))?
+    } else {
+        Vec::new()
+    };
+    let env = env_values(&content)?;
+    let process = scopes.first().is_none_or(|scope| scope.wsl.is_none());
+    let value = |keys: &[&str]| {
+        keys.iter()
+            .find_map(|key| env.get(*key).cloned())
+            .or_else(|| {
+                process
+                    .then(|| keys.iter().find_map(|key| std::env::var(key).ok()))
+                    .flatten()
+            })
+    };
+    let Some(raw) = value(&[
+        "HTTPS_PROXY",
+        "https_proxy",
+        "ALL_PROXY",
+        "all_proxy",
+        "HTTP_PROXY",
+        "http_proxy",
+    ]) else {
+        // Preserve the updater's existing system/ambient proxy behavior.
+        return Ok(None);
+    };
+    let no_proxy = value(&["NO_PROXY", "no_proxy"]).unwrap_or_default();
+    if raw.trim().is_empty() {
+        return Ok(Some(PublicProxyRouting {
+            proxy: None,
+            url: None,
+            no_proxy,
+        }));
+    }
+    let original =
+        ureq::Proxy::new(raw.trim()).map_err(|_| Failure::from("proxy_config_invalid"))?;
+    let mut url = url::Url::parse(&original.uri().to_string())
+        .map_err(|_| Failure::from("proxy_config_invalid"))?;
+    if url.scheme() == "socks" {
+        url.set_scheme("socks5")
+            .map_err(|_| Failure::from("proxy_config_invalid"))?;
+    }
+    let mut builder = ureq::Proxy::builder(original.protocol())
+        .host(original.host())
+        .port(original.port())
+        .resolve_target(original.resolve_target());
+    if let Some(user) = original.username() {
+        builder = builder.username(user);
+    }
+    if let Some(password) = original.password() {
+        builder = builder.password(password);
+    }
+    for host in no_proxy.split(',') {
+        builder = builder.no_proxy(&host.trim().to_ascii_lowercase());
+    }
+    let proxy = builder
+        .build()
+        .map_err(|_| Failure::from("proxy_config_invalid"))?;
+    Ok(Some(PublicProxyRouting {
+        proxy: Some(proxy),
+        url: Some(url),
+        no_proxy,
+    }))
+}
 // Public feeds reuse only routing configuration, never account credentials.
 pub fn public_proxy(scopes: &[Scope], host: &str) -> Result<Option<ureq::Proxy>, Failure> {
     let Some(scope) = scopes.first() else {
@@ -743,6 +833,76 @@ mod tests {
                 .is_none()
         );
         assert!(!dir.path().join("auth.json").exists());
+    }
+    #[test]
+    fn updater_routing_reloads_dotenv_and_matches_both_clients_without_auth() {
+        let dir = tempfile::tempdir().unwrap();
+        let scope = Scope {
+            source_id: "test".into(),
+            home: dir.path().into(),
+            wsl: None,
+        };
+        // Invalid account files must not prevent anonymous updates.
+        std::fs::write(dir.path().join("auth.json"), "not an auth file").unwrap();
+        let path = dir.path().join(".env");
+        std::fs::write(&path, "HTTPS_PROXY=http://user:pass@127.0.0.1:8080\nALL_PROXY=http://localhost:9999\nNO_PROXY=api.github.com, .INTERNAL.test, *.example.test\nAPI_KEY=ignored\n").unwrap();
+        let scopes = [scope];
+        let routing = public_proxy_routing(&scopes).unwrap().unwrap();
+        let proxy = routing.ureq_proxy().unwrap();
+        assert_eq!(proxy.port(), 8080);
+        assert_eq!(proxy.username(), Some("user"));
+        assert_eq!(proxy.password(), Some("pass"));
+        for (host, direct) in [
+            ("api.github.com", true),
+            ("github.com", false),
+            ("release-assets.githubusercontent.com", false),
+            ("api.internal.test", true),
+            ("internal.test", false),
+            ("a.example.test", true),
+            ("example.test", false),
+        ] {
+            let url = format!("https://{host}/asset");
+            assert_eq!(routing.for_url(&url.parse().unwrap()).is_none(), direct);
+            assert_eq!(proxy.is_no_proxy(&url.parse().unwrap()), direct);
+        }
+        for (value, scheme) in [
+            ("socks://127.0.0.1:1080", "socks5"),
+            ("socks5h://127.0.0.1:1080", "socks5h"),
+            ("127.0.0.1:1080", "http"),
+        ] {
+            std::fs::write(&path, format!("HTTPS_PROXY={value}\nNO_PROXY=*")).unwrap();
+            let routing = public_proxy_routing(&scopes).unwrap().unwrap();
+            assert_eq!(routing.url.as_ref().unwrap().scheme(), scheme);
+            assert!(
+                routing
+                    .for_url(&"https://github.com/a".parse().unwrap())
+                    .is_none()
+            );
+            assert!(
+                routing
+                    .ureq_proxy()
+                    .unwrap()
+                    .is_no_proxy(&"https://github.com/a".parse().unwrap())
+            );
+        }
+        std::fs::write(&path, "HTTPS_PROXY=\nALL_PROXY=http://localhost:9999").unwrap();
+        let routing = public_proxy_routing(&scopes).unwrap().unwrap();
+        assert!(routing.ureq_proxy().is_none());
+        assert!(
+            routing
+                .for_url(&"https://github.com/a".parse().unwrap())
+                .is_none()
+        );
+        std::fs::write(&path, "HTTPS_PROXY=invalid://private-secret").unwrap();
+        assert_eq!(
+            public_proxy_routing(&scopes).err().unwrap().code,
+            "proxy_config_invalid"
+        );
+        std::fs::write(&path, vec![b'x'; 256 * 1024 + 1]).unwrap();
+        assert_eq!(
+            public_proxy_routing(&scopes).err().unwrap().code,
+            "proxy_config_unreadable"
+        );
     }
     #[test]
     fn direct_request_headers_windows_and_additional_buckets() {

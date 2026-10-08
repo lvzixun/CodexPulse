@@ -5,8 +5,10 @@
   import ResetPlan from './ResetPlan.svelte';
   import type { Snapshot } from '../lib/types';
   import { resetAge } from '../lib/format';
+  import { resetPlan } from '../lib/reset-plan';
   let { news, now, timezone }: { news: Snapshot['news']; now: number; timezone: string } = $props();
   const latest = $derived(news.latest_reset);
+  const upcoming = $derived(resetPlan(news, now)?.state === 'upcoming');
   const time = (at: string) =>
     new Date(at).toLocaleString($locale === 'zh' ? 'zh-CN' : 'en-US', {
       timeZone: timezone,
@@ -18,7 +20,11 @@
     });
 </script>
 
-<div class="cp-reset-status" aria-label={$t('公开额度重置状态')}>
+<div
+  class="cp-reset-status"
+  class:cp-reset-status-upcoming={upcoming}
+  aria-label={$t('公开额度重置状态')}
+>
   <div>
     <span>{$t('最近一次重置')}{latest?.kind === 'observation' ? $t(' · 社区记录') : ''}</span
     ><strong title={latest ? time(latest.occurred_at) : undefined}
@@ -27,5 +33,6 @@
   </div>
   <ResetPlan {news} {now} {timezone} showEmpty />
   <ResetWatch {news} {now} compact />
-  {#if news.status !== 'connected' && news.last_success}<small>{$t('离线缓存')}</small>{/if}
+  {#if !upcoming && news.status !== 'connected' && news.last_success}<small>{$t('离线缓存')}</small
+    >{/if}
 </div>

@@ -11,7 +11,7 @@ use std::{
     collections::{BTreeMap, HashSet, VecDeque},
     path::PathBuf,
     sync::{
-        Arc, Mutex, RwLock,
+        Arc, Condvar, Mutex, RwLock,
         atomic::{AtomicBool, Ordering},
         mpsc::{self, SyncSender},
     },
@@ -227,6 +227,8 @@ pub struct Backend {
     stopping: Arc<AtomicBool>,
     pending_anchor: Arc<Mutex<Option<(crate::geometry::Anchor, Instant)>>>,
     database: PathBuf,
+    public_scopes: Arc<RwLock<Vec<crate::http_quota::Scope>>>,
+    routing_ready: Arc<(Mutex<bool>, Condvar)>,
 }
 struct Source {
     health: SourceHealth,
@@ -300,6 +302,9 @@ impl Backend {
         let replies = sender.clone();
         let network_app = app.clone();
         let public_scopes = Arc::new(RwLock::new(Vec::<crate::http_quota::Scope>::new()));
+        let backend_public_scopes = public_scopes.clone();
+        let routing_ready = Arc::new((Mutex::new(false), Condvar::new()));
+        let collector_routing_ready = routing_ready.clone();
         let worker_public_scopes = public_scopes.clone();
         thread::Builder::new()
             .name("pulse-network".into())
@@ -1108,6 +1113,12 @@ impl Backend {
                         {
                             *current = next;
                         }
+                        if let Ok(mut ready) = collector_routing_ready.0.lock()
+                            && !*ready
+                        {
+                            *ready = true;
+                            collector_routing_ready.1.notify_all();
+                        }
                     }
                     let quota_block = sources
                         .iter()
@@ -1401,7 +1412,26 @@ impl Backend {
             stopping,
             pending_anchor,
             database: db,
+            public_scopes: backend_public_scopes,
+            routing_ready,
         })
+    }
+    // Called only on blocking workers. Startup must not race first source discovery
+    // and silently use a direct route before Codex's .env context is available.
+    pub fn public_proxy_scopes(&self) -> Result<Vec<crate::http_quota::Scope>, String> {
+        let ready = self.routing_ready.0.lock().map_err(|_| "代理来源不可用")?;
+        let (ready, _) = self
+            .routing_ready
+            .1
+            .wait_timeout_while(ready, Duration::from_secs(5), |ready| !*ready)
+            .map_err(|_| "代理来源不可用")?;
+        if !*ready {
+            return Err("代理来源尚未就绪".into());
+        }
+        self.public_scopes
+            .read()
+            .map(|scopes| scopes.clone())
+            .map_err(|_| "代理来源不可用".into())
     }
     pub async fn translate(&self, id: &str) -> Result<String, String> {
         let keys = {

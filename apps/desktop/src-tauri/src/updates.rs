@@ -103,16 +103,19 @@ impl Service {
             .map_err(|_| "更新状态不可用".into())
     }
 
-    pub fn startup(&self) -> Result<Info, String> {
-        self.run_check(true)
+    pub fn startup(&self, app: &tauri::AppHandle) -> Result<Info, String> {
+        self.run_check(true, app)
     }
 
-    pub fn check(&self) -> Result<Info, String> {
-        self.run_check(false)
+    pub fn check(&self, app: &tauri::AppHandle) -> Result<Info, String> {
+        self.run_check(false, app)
     }
 
-    fn run_check(&self, startup: bool) -> Result<Info, String> {
-        self.check_using(startup, || fetch(API_URL))
+    fn run_check(&self, startup: bool, app: &tauri::AppHandle) -> Result<Info, String> {
+        self.check_using(startup, || {
+            let routing = routing(app)?;
+            fetch(API_URL, routing.as_ref())
+        })
     }
 
     fn check_using(
@@ -162,9 +165,15 @@ impl Service {
     }
 
     async fn download(&self, app: &tauri::AppHandle) -> Result<(), ()> {
+        let handle = app.clone();
+        let routes = tauri::async_runtime::spawn_blocking(move || routing(&handle))
+            .await
+            .map_err(|_| ())?
+            .map_err(|_| ())?;
         let exit_app = app.clone();
         let updater = app
             .updater_builder()
+            .configure_client(move |client| routed_client(client, routes.clone()))
             .timeout(Duration::from_secs(15))
             .on_before_exit(move || {
                 // Windows updater exits directly after starting NSIS; flush collectors first.
@@ -287,12 +296,45 @@ fn release_version(body: &str) -> Result<Version, Failure> {
     }
     Ok(version)
 }
-fn fetch(url: &str) -> Result<Version, Failure> {
-    let agent: ureq::Agent = ureq::Agent::config_builder()
+fn routing(
+    app: &tauri::AppHandle,
+) -> Result<Option<crate::http_quota::PublicProxyRouting>, Failure> {
+    let scopes = app
+        .state::<crate::backend::Backend>()
+        .public_proxy_scopes()
+        .map_err(|_| failure("proxy_config_unreadable"))?;
+    crate::http_quota::public_proxy_routing(&scopes).map_err(|error| {
+        failure(if error.code == "proxy_config_invalid" {
+            "proxy_config_invalid"
+        } else {
+            "proxy_config_unreadable"
+        })
+    })
+}
+fn routed_client(
+    client: reqwest::ClientBuilder,
+    routing: Option<crate::http_quota::PublicProxyRouting>,
+) -> reqwest::ClientBuilder {
+    match routing {
+        Some(routing) => client
+            .no_proxy()
+            .proxy(reqwest::Proxy::custom(move |url| routing.for_url(url))),
+        None => client,
+    }
+}
+fn fetch(
+    url: &str,
+    routing: Option<&crate::http_quota::PublicProxyRouting>,
+) -> Result<Version, Failure> {
+    let config = ureq::Agent::config_builder()
         .http_status_as_error(false)
-        .timeout_global(Some(Duration::from_secs(10)))
-        .build()
-        .into();
+        .timeout_global(Some(Duration::from_secs(10)));
+    let config = if let Some(routing) = routing {
+        config.proxy(routing.ureq_proxy())
+    } else {
+        config
+    };
+    let agent: ureq::Agent = config.build().into();
     let mut response = agent
         .get(url)
         .header(
@@ -494,10 +536,291 @@ mod tests {
                 let _ = socket.read(&mut request).unwrap();
                 socket.write_all(response.as_bytes()).unwrap();
             });
-            let result = fetch(&url);
+            let result = fetch(&url, None);
             if expected { assert_eq!(result.unwrap(), Version::new(1, 0, 0)); }
             else { let error = result.unwrap_err(); assert_eq!(error.status, "rate_limited"); assert_eq!(error.wait, 1800); }
             server.join().unwrap();
         }
+    }
+    fn request(stream: &mut std::net::TcpStream) -> String {
+        use std::io::BufRead;
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let mut reader = std::io::BufReader::new(stream);
+        let mut headers = String::new();
+        loop {
+            let mut line = String::new();
+            reader.read_line(&mut line).unwrap();
+            if line == "\r\n" || line.is_empty() {
+                break;
+            }
+            headers.push_str(&line);
+        }
+        headers.to_ascii_lowercase()
+    }
+    fn accept(listener: &std::net::TcpListener) -> std::net::TcpStream {
+        listener.set_nonblocking(true).unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        loop {
+            match listener.accept() {
+                Ok((stream, _)) => {
+                    stream.set_nonblocking(false).unwrap();
+                    return stream;
+                }
+                Err(e)
+                    if e.kind() == std::io::ErrorKind::WouldBlock
+                        && std::time::Instant::now() < deadline =>
+                {
+                    std::thread::sleep(Duration::from_millis(5))
+                }
+                Err(e) => panic!("test server: {e}"),
+            }
+        }
+    }
+    fn routes(home: &std::path::Path, proxy: &str) -> crate::http_quota::PublicProxyRouting {
+        std::fs::write(
+            home.join(".env"),
+            format!("HTTPS_PROXY={proxy}\nNO_PROXY=127.0.0.1\nOPENAI_API_KEY=must-not-send"),
+        )
+        .unwrap();
+        std::fs::write(home.join("auth.json"), "not valid JSON").unwrap();
+        crate::http_quota::public_proxy_routing(&[crate::http_quota::Scope {
+            source_id: "test".into(),
+            home: home.into(),
+            wsl: None,
+        }])
+        .unwrap()
+        .unwrap()
+    }
+    #[test]
+    fn updater_client_routes_download_redirects_and_keeps_proxy_auth_off_direct_origin() {
+        use std::{io::Write, net::TcpListener};
+        let direct = TcpListener::bind("127.0.0.1:0").unwrap();
+        let direct_url = format!("http://{}/asset", direct.local_addr().unwrap());
+        let origin = std::thread::spawn(move || {
+            let mut socket = accept(&direct);
+            let headers = request(&mut socket);
+            socket
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Length: 6\r\nConnection: close\r\n\r\nsigned",
+                )
+                .unwrap();
+            headers
+        });
+        let proxy = TcpListener::bind("127.0.0.1:0").unwrap();
+        let proxy_url = format!("http://user:pass@{}", proxy.local_addr().unwrap());
+        let server = std::thread::spawn(move || {
+            let mut requests = Vec::new();
+            for destination in ["http://cdn.update.invalid/package".to_owned(), direct_url] {
+                let mut socket = accept(&proxy);
+                requests.push(request(&mut socket));
+                socket.write_all(format!("HTTP/1.1 302 Found\r\nLocation: {destination}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").as_bytes()).unwrap();
+            }
+            requests
+        });
+        let dir = tempfile::tempdir().unwrap();
+        let routing = routes(dir.path(), &proxy_url);
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let body = tauri::async_runtime::block_on(async {
+            routed_client(reqwest::Client::builder(), Some(routing))
+                .timeout(Duration::from_secs(5))
+                .build()
+                .unwrap()
+                .get("http://updates.invalid/manifest")
+                .send()
+                .await
+                .unwrap()
+                .text()
+                .await
+                .unwrap()
+        });
+        assert_eq!(body, "signed");
+        let requests = server.join().unwrap();
+        assert!(requests[0].starts_with("get http://updates.invalid/manifest "));
+        assert!(requests[1].starts_with("get http://cdn.update.invalid/package "));
+        assert!(requests[0].contains("proxy-authorization: basic dxnlcjpwyxnz"));
+        for headers in requests {
+            assert!(
+                !headers
+                    .lines()
+                    .any(|line| line.starts_with("authorization:")
+                        || line.starts_with("cookie:")
+                        || line.starts_with("chatgpt-account-id:"))
+            );
+            assert!(!headers.contains("must-not-send"));
+        }
+        let headers = origin.join().unwrap();
+        assert!(!headers.contains("authorization:"));
+        assert!(!headers.contains("must-not-send"));
+    }
+    #[test]
+    fn update_check_uses_codex_proxy_and_preserves_retry_after() {
+        use std::{io::Write, net::TcpListener};
+        for limited in [false, true] {
+            let proxy = TcpListener::bind("127.0.0.1:0").unwrap();
+            let proxy_url = format!("http://{}", proxy.local_addr().unwrap());
+            let server = std::thread::spawn(move || {
+                let mut socket = accept(&proxy);
+                let connect = request(&mut socket);
+                assert!(connect.starts_with("connect updates.invalid:80 "));
+                socket
+                    .write_all(b"HTTP/1.1 200 Connection established\r\n\r\n")
+                    .unwrap();
+                let headers = request(&mut socket);
+                let response = if limited {
+                    "HTTP/1.1 429 Too Many Requests\r\nRetry-After: 3600\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".into()
+                } else {
+                    let body = release("v9.0.0");
+                    format!(
+                        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                        body.len()
+                    )
+                };
+                socket.write_all(response.as_bytes()).unwrap();
+                [connect, headers].join("\n")
+            });
+            let dir = tempfile::tempdir().unwrap();
+            let routing = routes(dir.path(), &proxy_url);
+            let result = fetch("http://updates.invalid/manifest", Some(&routing));
+            if limited {
+                let failure = result.unwrap_err();
+                assert_eq!(failure.status, "rate_limited");
+                assert_eq!(failure.wait, 3600);
+            } else {
+                assert_eq!(result.unwrap(), Version::new(9, 0, 0));
+            }
+            let headers = server.join().unwrap();
+            assert!(!headers.contains("authorization:"));
+            assert!(!headers.contains("must-not-send"));
+        }
+    }
+    #[test]
+    fn authenticated_https_proxy_is_selected_for_github_and_asset_hosts() {
+        use std::{io::Write, net::TcpListener};
+        let proxy = TcpListener::bind("127.0.0.1:0").unwrap();
+        let proxy_url = format!("http://user:pass@{}", proxy.local_addr().unwrap());
+        let server = std::thread::spawn(move || {
+            let mut requests = Vec::new();
+            for _ in 0..2 {
+                let mut socket = accept(&proxy);
+                requests.push(request(&mut socket));
+                socket.write_all(b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").unwrap();
+            }
+            requests
+        });
+        let dir = tempfile::tempdir().unwrap();
+        let routing = routes(dir.path(), &proxy_url);
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        tauri::async_runtime::block_on(async {
+            let client = routed_client(reqwest::Client::builder(), Some(routing))
+                .timeout(Duration::from_secs(5))
+                .build()
+                .unwrap();
+            for host in ["github.com", "release-assets.githubusercontent.com"] {
+                assert!(
+                    client
+                        .get(format!("https://{host}/package"))
+                        .send()
+                        .await
+                        .is_err()
+                );
+            }
+        });
+        let requests = server.join().unwrap();
+        assert!(requests[0].starts_with("connect github.com:443 "));
+        assert!(requests[1].starts_with("connect release-assets.githubusercontent.com:443 "));
+        for headers in requests {
+            assert!(headers.contains("proxy-authorization: basic dxnlcjpwyxnz"));
+            assert!(
+                !headers
+                    .lines()
+                    .any(|line| line.starts_with("authorization:")
+                        || line.starts_with("cookie:")
+                        || line.starts_with("chatgpt-account-id:"))
+            );
+            assert!(!headers.contains("must-not-send"));
+        }
+    }
+    #[test]
+    #[ignore = "live public updater download through local Codex .env; run explicitly"]
+    fn live_codex_proxy_download_verifies_public_update_signature() {
+        use base64::{Engine, engine::general_purpose::STANDARD};
+        let home = std::env::var_os("CODEX_HOME")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| {
+                std::path::PathBuf::from(
+                    std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).unwrap(),
+                )
+                .join(".codex")
+            });
+        let routing = crate::http_quota::public_proxy_routing(&[crate::http_quota::Scope {
+            source_id: "live-test".into(),
+            home,
+            wsl: None,
+        }])
+        .unwrap()
+        .expect("requires an explicitly configured proxy");
+        assert!(
+            routing
+                .for_url(&"https://github.com".parse().unwrap())
+                .is_some()
+        );
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let started = std::time::Instant::now();
+        tauri::async_runtime::block_on(async {
+            let client = routed_client(reqwest::Client::builder(), Some(routing))
+                .user_agent(concat!("CodexPulse/", env!("CARGO_PKG_VERSION")))
+                .timeout(Duration::from_secs(90))
+                .build()
+                .unwrap();
+            let manifest: serde_json::Value = client
+                .get("https://github.com/lvzixun/CodexPulse/releases/download/v0.1.20/latest.json")
+                .send()
+                .await
+                .unwrap()
+                .error_for_status()
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+            assert_eq!(manifest["version"], "0.1.20");
+            let platform = &manifest["platforms"]["darwin-aarch64"];
+            let url: url::Url = platform["url"].as_str().unwrap().parse().unwrap();
+            assert!(safe_download(&url));
+            let bytes = client
+                .get(url)
+                .send()
+                .await
+                .unwrap()
+                .error_for_status()
+                .unwrap()
+                .bytes()
+                .await
+                .unwrap();
+            let config: serde_json::Value =
+                serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+            let key = STANDARD
+                .decode(config["plugins"]["updater"]["pubkey"].as_str().unwrap())
+                .unwrap();
+            let key =
+                minisign_verify::PublicKey::decode(std::str::from_utf8(&key).unwrap()).unwrap();
+            let sig = STANDARD
+                .decode(platform["signature"].as_str().unwrap())
+                .unwrap();
+            let sig =
+                minisign_verify::Signature::decode(std::str::from_utf8(&sig).unwrap()).unwrap();
+            key.verify(&bytes, &sig, true).unwrap();
+            assert!(
+                sig.trusted_comment()
+                    .split_whitespace()
+                    .any(|p| p == "version:0.1.20")
+            );
+            println!(
+                "Public manifest + signed package via Codex proxy: {} bytes, {:.1}s",
+                bytes.len(),
+                started.elapsed().as_secs_f64()
+            );
+        });
     }
 }

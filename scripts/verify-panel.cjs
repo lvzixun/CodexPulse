@@ -392,6 +392,22 @@ await import('/src/main.ts');
         const reminder = page.locator('.cp-reset-plan');
         await reminder.waitFor();
         assert.equal(await reminder.count(), 1);
+        if (tab === 'overview') {
+          assert.equal(await page.locator('.cp-reset-status > small').count(), 0);
+          const frame = await page.locator('.cp-reset-status').evaluate((el) => {
+            const css = getComputedStyle(el);
+            return {
+              border: css.borderTopWidth,
+              background: css.backgroundColor,
+              padding: css.paddingTop,
+            };
+          });
+          assert.deepEqual(
+            frame,
+            { border: '0px', background: 'rgba(0, 0, 0, 0)', padding: '0px' },
+            'Only the upcoming reminder should have a visible frame',
+          );
+        }
         assert.match(
           await reminder.innerText(),
           language === 'zh' ? /5 小时 30 分钟后重置/ : /Reset in 5h 30m/,

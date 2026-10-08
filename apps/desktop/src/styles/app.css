@@ -1376,6 +1376,14 @@ main.menubar.opaque {
 .menubar .cp-reset-status > div > span {
   font-size: 12px;
 }
+.cp-reset-status.cp-reset-status-upcoming,
+.menubar .cp-reset-status.cp-reset-status-upcoming {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  gap: 0;
+}
 .cp-reset-status > small {
   grid-column: 1 / -1;
 }

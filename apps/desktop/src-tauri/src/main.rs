@@ -29,7 +29,7 @@ use tauri_plugin_opener::OpenerExt;
 #[tauri::command]
 async fn check_updates(app: tauri::AppHandle) -> Result<updates::Info, String> {
     let handle = app.clone();
-    tauri::async_runtime::spawn_blocking(move || handle.state::<updates::Service>().check())
+    tauri::async_runtime::spawn_blocking(move || handle.state::<updates::Service>().check(&handle))
         .await
         .map_err(|_| "更新检查失败".to_string())??;
     app.state::<updates::Service>().prepare(&app)
@@ -367,7 +367,7 @@ fn main() {
             tauri::async_runtime::spawn_blocking(move || {
                 use tauri::Emitter;
                 let service = handle.state::<updates::Service>();
-                if let Ok(info) = service.startup() {
+                if let Ok(info) = service.startup(&handle) {
                     let next = service.prepare(&handle).unwrap_or(info);
                     let _ = handle.emit("app-update", next);
                 }
