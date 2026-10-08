@@ -33,7 +33,7 @@ fn legacy_schema_upgrades_and_newer_schema_is_rejected() {
             .query_row("SELECT MAX(version) FROM schema_version", [], |r| r
                 .get::<_, u32>(0))
             .unwrap(),
-        7
+        8
     );
     assert_eq!(
         connection
@@ -118,7 +118,7 @@ fn schema_three_adds_independent_titles_without_rebuilding_usage() {
             .query_row("SELECT MAX(version) FROM schema_version", [], |r| r
                 .get::<_, u32>(0))
             .unwrap(),
-        7
+        8
     );
     assert_eq!(
         connection

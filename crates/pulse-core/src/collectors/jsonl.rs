@@ -66,7 +66,7 @@ pub fn read_batch(
     timezone: Tz,
     prices: &PriceBook,
 ) -> Result<ReadReport, ReadError> {
-    read_inner(store, source, path, timezone, prices, false)
+    read_inner(store, source, path, timezone, prices, false, false)
 }
 pub fn read_titles(store: &mut Store, source: &str, path: &Path) -> Result<ReadReport, ReadError> {
     read_inner(
@@ -75,6 +75,19 @@ pub fn read_titles(store: &mut Store, source: &str, path: &Path) -> Result<ReadR
         path,
         chrono_tz::UTC,
         &PriceBook::default(),
+        true,
+        false,
+    )
+}
+/// Independent bounded replay. Never rewinds usage checkpoints or changes usage/session totals.
+pub fn read_rates(store: &mut Store, source: &str, path: &Path) -> Result<ReadReport, ReadError> {
+    read_inner(
+        store,
+        source,
+        path,
+        chrono_tz::UTC,
+        &PriceBook::default(),
+        false,
         true,
     )
 }
@@ -85,10 +98,13 @@ fn read_inner(
     timezone: Tz,
     prices: &PriceBook,
     titles_only: bool,
+    rates_only: bool,
 ) -> Result<ReadReport, ReadError> {
     let meta = path.metadata()?;
     let key = if titles_only {
         format!("session-index:{}", path.to_string_lossy())
+    } else if rates_only {
+        format!("run-speed-v1:{}", path.to_string_lossy())
     } else {
         path.to_string_lossy().into_owned()
     };
@@ -110,11 +126,13 @@ fn read_inner(
             parser_version: PARSER_VERSION,
             state: ParserState::default(),
         });
-    let recover_source =
-        !titles_only && cursor.state.session.is_some() && !cursor.state.session_source_known;
+    let recover_source = !titles_only
+        && !rates_only
+        && cursor.state.session.is_some()
+        && !cursor.state.session_source_known;
     // An old checkpoint already knows its latest model. Project that metadata once,
     // without changing offsets or replaying usage facts.
-    let recovered_model = if !titles_only {
+    let recovered_model = if !titles_only && !rates_only {
         cursor
             .state
             .session
@@ -180,15 +198,23 @@ fn read_inner(
     if let Some(session) = recovered_session {
         sessions.insert(session.id.clone(), session);
     }
+    let mut runs = BTreeMap::new();
     let mut facts = Vec::new();
     let mut titles = Vec::new();
     let mut issues = Vec::new();
     let started = Instant::now();
     let mut eof = false;
+    let max_bytes = if rates_only {
+        1024 * 1024
+    } else {
+        MAX_BATCH_BYTES
+    };
+    let max_records = if rates_only { 64 } else { MAX_BATCH_RECORDS };
+    let budget = Duration::from_millis(if rates_only { 8 } else { 250 });
     loop {
-        if report.bytes_read >= MAX_BATCH_BYTES
-            || report.records >= MAX_BATCH_RECORDS
-            || started.elapsed() >= Duration::from_millis(250)
+        if report.bytes_read >= max_bytes
+            || report.records >= max_records
+            || started.elapsed() >= budget
         {
             break;
         }
@@ -197,7 +223,7 @@ fn read_inner(
             eof = true;
             break;
         }
-        let remaining = MAX_BATCH_BYTES - report.bytes_read;
+        let remaining = max_bytes - report.bytes_read;
         let segment = &available[..available.len().min(remaining)];
         let newline = segment.iter().position(|b| *b == b'\n');
         let count = newline.map_or(segment.len(), |n| n + 1);
@@ -225,15 +251,20 @@ fn read_inner(
                     }
                 } else {
                     let parsed = cursor.state.parse(&line);
-                    if let Some(session) = parsed.session {
-                        sessions.insert(session.id.clone(), session);
+                    if let Some(run) = parsed.run_sample {
+                        runs.insert(run.id.clone(), run);
                     }
-                    if let Some(mut fact) = parsed.fact {
-                        prices.apply(&mut fact);
-                        facts.push(fact);
-                    }
-                    if let Some(issue) = parsed.issue {
-                        issues.push(issue.code);
+                    if !rates_only {
+                        if let Some(session) = parsed.session {
+                            sessions.insert(session.id.clone(), session);
+                        }
+                        if let Some(mut fact) = parsed.fact {
+                            prices.apply(&mut fact);
+                            facts.push(fact);
+                        }
+                        if let Some(issue) = parsed.issue {
+                            issues.push(issue.code);
+                        }
                     }
                 }
             }
@@ -255,16 +286,20 @@ fn read_inner(
         modified_ns
     };
     cursor.state.observed_file_len = Some(meta.len());
+    if rates_only {
+        issues.clear();
+    }
     report.issues = issues.len();
     report.inserted = if titles_only {
         store.commit_titles(&cursor, &titles, &issues)?
     } else {
-        store.commit_batch(
+        store.commit_batch_with_runs(
             &cursor,
             &sessions.into_values().collect::<Vec<_>>(),
             &facts,
             &issues,
             timezone,
+            &runs.into_values().collect::<Vec<_>>(),
         )?
     };
     Ok(report)

@@ -4,7 +4,8 @@
 
 | 内容                       | 逻辑尺寸  | PNG 像素尺寸 |
 | -------------------------- | --------- | ------------ |
-| 总览、模型、Sessions、Tibo | 380 × 800 | 1140 × 2400  |
+| 总览、Sessions、Tibo | 380 × 800 | 1140 × 2400  |
+| 模型（展开运行曲线） | 380 × 980 | 1140 × 2940 |
 | Windows 小浮窗             | 184 × 36  | 552 × 108    |
 
 中英文各一套，均为浏览器以 3 倍设备像素比直接渲染的无损 PNG，不是将旧截图放大。详情使用菜单栏布局；外层仅模拟原生窗口的圆角裁切，不模拟桌面背景或原生毛玻璃。原生平台字体与材质可能不同。
@@ -25,6 +26,8 @@ pnpm --filter @codexpulse/desktop dev --port 1430
 
 ```sh
 node scripts/capture-readme.cjs
+# 仅更新模型截图
+CODEXPULSE_CAPTURE_PAGE=models node scripts/capture-readme.cjs
 ```
 
 默认连接 `http://127.0.0.1:1430/`，可通过 `CODEXPULSE_PREVIEW_URL` 修改本地地址。脚本拒绝非本地服务器，阻止页面请求外部服务；使用 Asia/Shanghai 时区、固定视口与 3 倍设备像素比，检查页面运行错误。截图日期和相对时间取生成时的当前时间。

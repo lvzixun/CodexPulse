@@ -898,7 +898,9 @@
         <ModelsPane
           bind:query={modelQuery}
           bind:selected={selectedModel}
-          revision={`${data.usage.fact_revision}:${data.usage.sessions}:${data.usage.reference.cost_nanousd}:${data.usage.reference.pending}`}
+          revision={`${data.usage.fact_revision}:${data.usage.sessions}:${data.usage.reference.cost_nanousd}:${data.usage.reference.pending}:${data.updated_at}`}
+          {now}
+          timezone={Intl.DateTimeFormat().resolvedOptions().timeZone}
           ready={() => void restorePageScroll(true)}
           sessions={(model) => {
             sessionQuery = {

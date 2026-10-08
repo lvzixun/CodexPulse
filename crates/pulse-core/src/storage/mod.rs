@@ -1,6 +1,6 @@
 use crate::{
     PARSER_VERSION,
-    domain::{SessionMeta, UsageFact},
+    domain::{RunSample, SessionMeta, UsageFact},
     ledger::ParserState,
 };
 use chrono::DateTime;
@@ -12,6 +12,7 @@ mod models;
 mod queries;
 mod reference;
 mod sessions;
+mod speeds;
 mod timezone;
 mod titles;
 pub use models::{ModelCursor, ModelDirection, ModelPage, ModelPageRequest, ModelRow};
@@ -21,6 +22,7 @@ pub use sessions::{
     PageDirection, PriceCoverage, SessionCursor, SessionDetail, SessionDetailRequest,
     SessionFilter, SessionModel, SessionPage, SessionPageRequest, TokenMeasure, UsageBreakdown,
 };
+pub use speeds::{ModelSpeed, ModelSpeedRequest, SpeedPoint, SpeedRange, SpeedSummary};
 pub use timezone::TimezoneProgress;
 pub use titles::SessionTitle;
 
@@ -87,7 +89,7 @@ impl Store {
             [],
             |row| row.get(0),
         )?;
-        if version > 7 {
+        if version > 8 {
             return Err(StoreError::NewerSchema);
         }
         if version < 3 {
@@ -154,6 +156,11 @@ impl Store {
             ))?;
             tx.commit()?;
         }
+        if version < 8 {
+            let tx = connection.transaction()?;
+            tx.execute_batch(include_str!("../../migrations/008-run-speeds.sql"))?;
+            tx.commit()?;
+        }
         let book = crate::pricing::PriceBook::bundled()?;
         Ok(Self {
             connection,
@@ -197,6 +204,18 @@ impl Store {
         issues: &[String],
         timezone: Tz,
     ) -> Result<usize, StoreError> {
+        self.commit_batch_with_runs(cursor, sessions, facts, issues, timezone, &[])
+    }
+    /// Usage and run-speed samples share a checkpoint; speed-only replay uses its own cursor.
+    pub fn commit_batch_with_runs(
+        &mut self,
+        cursor: &FileCursor,
+        sessions: &[SessionMeta],
+        facts: &[UsageFact],
+        issues: &[String],
+        timezone: Tz,
+        runs: &[RunSample],
+    ) -> Result<usize, StoreError> {
         let offset =
             i64::try_from(cursor.offset).map_err(|_| crate::domain::DataError::Overflow)?;
         let tx = self.connection.transaction()?;
@@ -237,6 +256,7 @@ impl Store {
             tx.execute("INSERT INTO daily_model_usage(day,timezone,model,total,input,cached,output,cost_nanousd,unpriced_tokens,incomplete_events) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10) ON CONFLICT(day,timezone,model) DO UPDATE SET total=total+excluded.total,input=input+excluded.input,cached=cached+excluded.cached,output=output+excluded.output,cost_nanousd=cost_nanousd+excluded.cost_nanousd,unpriced_tokens=unpriced_tokens+excluded.unpriced_tokens,incomplete_events=incomplete_events+excluded.incomplete_events",params![day,timezone.name(),fact.model,total,tokens.input.unwrap_or(0) as i64,tokens.cached.unwrap_or(0) as i64,tokens.output.unwrap_or(0) as i64,fact.cost_nanousd.unwrap_or(0),unpriced,incomplete])?;
             tx.execute("INSERT INTO session_model_usage(session_id,model,total,input,cached,output,cost_nanousd,unpriced_tokens) VALUES(?1,?2,?3,?4,?5,?6,?7,?8) ON CONFLICT(session_id,model) DO UPDATE SET total=total+excluded.total,input=input+excluded.input,cached=cached+excluded.cached,output=output+excluded.output,cost_nanousd=cost_nanousd+excluded.cost_nanousd,unpriced_tokens=unpriced_tokens+excluded.unpriced_tokens",params![fact.session_id,fact.model,total,tokens.input.unwrap_or(0) as i64,tokens.cached.unwrap_or(0) as i64,tokens.output.unwrap_or(0) as i64,fact.cost_nanousd.unwrap_or(0),unpriced])?;
         }
+        speeds::commit_runs(&tx, runs)?;
         for code in issues {
             tx.execute("INSERT INTO parse_issues(source_id,file_key,code) VALUES(?1,?2,?3) ON CONFLICT(source_id,file_key,code) DO UPDATE SET count=count+1",params![cursor.source_id,cursor.file_key,code])?;
         }

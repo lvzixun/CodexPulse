@@ -78,7 +78,30 @@ export interface ModelPageRequest {
   cursor: ModelCursor | null;
   direction: 'next' | 'previous';
 }
+export type SpeedRange = 'recent50' | 'recent100' | 'month';
+export interface SpeedSummary {
+  output_tokens: number;
+  elapsed_ms: number;
+  samples: number;
+  service_tier: string | null;
+}
+export interface SpeedPoint extends SpeedSummary {
+  started_at: string;
+  measured_at: string;
+}
+export interface ModelSpeed extends SpeedSummary {
+  points: SpeedPoint[];
+  current: SpeedPoint | null;
+  history_pending: boolean;
+}
+export interface ModelSpeedRequest {
+  model: string;
+  from_day: string;
+  through_day: string;
+  range: SpeedRange;
+}
 export interface ModelPage {
+  speed_pending?: boolean;
   items: ModelRow[];
   next: ModelCursor | null;
   previous: ModelCursor | null;
@@ -88,6 +111,7 @@ export interface ModelPage {
   unknown_total_events: number;
 }
 export interface ModelRow extends ModelUsage {
+  speed?: SpeedSummary;
   reference: ReferenceEstimate;
   events: number;
   unknown_totals: number;
@@ -117,6 +141,7 @@ export interface SessionMeta {
     elapsed_ms: number;
     measured_at: string;
     completed: boolean;
+    service_tier?: string | null;
   } | null;
 }
 export interface ReferenceEstimate {

@@ -275,6 +275,12 @@ export function previewModels(base: Snapshot): ModelPage {
   return {
     items: ['gpt-6.1-sol', 'gpt-6-astra', 'gpt-6-luna'].map((model, i) => ({
       model,
+      speed: {
+        output_tokens: 24600,
+        elapsed_ms: 1000000,
+        samples: 50,
+        service_tier: i === 0 ? 'mixed' : 'standard',
+      },
       total: [28e6, 14.6e6, 6e6][i],
       input: [22e6, 11.6e6, 5e6][i],
       cached: [18e6, 8e6, 4e6][i],
@@ -297,5 +303,42 @@ export function previewModels(base: Snapshot): ModelPage {
     total_models: 3,
     known_total: 48.6e6,
     unknown_total_events: 0,
+  };
+}
+
+export function previewModelSpeed(
+  request: import('./types').ModelSpeedRequest,
+): import('./types').ModelSpeed {
+  const end = Date.now() - 2000;
+  const count = request.range === 'recent100' ? 100 : request.range === 'month' ? 120 : 50;
+  const span =
+    request.range === 'month'
+      ? 29 * 86400000
+      : request.range === 'recent100'
+        ? 86400000
+        : 12 * 3600000;
+  const points = Array.from({ length: count }, (_, i) => {
+    const at = end - span + (i / (count - 1)) * span;
+    const elapsed_ms = 15000 + (i % 5) * 1000;
+    const value = 24 + Math.sin(i * 0.5) * 6 + Math.cos(i * 0.17) * 4;
+    return {
+      started_at: new Date(at - elapsed_ms).toISOString(),
+      measured_at: new Date(at).toISOString(),
+      output_tokens: Math.round((value * elapsed_ms) / 1000),
+      elapsed_ms,
+      samples: request.range === 'month' ? 3 : 1,
+      service_tier: i % 3 ? 'fast' : 'standard',
+    };
+  });
+  const current = { ...points.at(-1)!, service_tier: 'fast' };
+  points[points.length - 1] = current;
+  return {
+    output_tokens: points.reduce((a, p) => a + p.output_tokens, 0),
+    elapsed_ms: points.reduce((a, p) => a + p.elapsed_ms, 0),
+    samples: points.reduce((a, p) => a + p.samples, 0),
+    service_tier: 'mixed',
+    points,
+    current,
+    history_pending: false,
   };
 }

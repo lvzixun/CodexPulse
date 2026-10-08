@@ -71,6 +71,8 @@ fn decimal(value: &str) -> Result<i64, StoreError> {
 }
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct ModelRow {
+    #[serde(default)]
+    pub speed: super::SpeedSummary,
     pub reference: super::ReferenceEstimate,
     #[serde(flatten)]
     pub usage: ModelUsage,
@@ -83,6 +85,8 @@ pub struct ModelRow {
 }
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct ModelPage {
+    #[serde(default)]
+    pub speed_pending: bool,
     pub items: Vec<ModelRow>,
     pub next: Option<ModelCursor>,
     pub previous: Option<ModelCursor>,
@@ -181,6 +185,7 @@ impl Store {
                             unknown_output: unsigned(row, 15)?,
                             unpriced_events: unsigned(row, 16)?,
                             reference: Default::default(),
+                            speed: Default::default(),
                         },
                         unsigned(row, 9)?,
                         unsigned(row, 10)?,
@@ -211,6 +216,7 @@ impl Store {
             timezone: timezone.name().into(),
         };
         Ok(ModelPage {
+            speed_pending: false,
             next: rows.last().filter(|row| row.1 < row.2).map(cursor),
             previous: rows.first().filter(|row| row.1 > 1).map(cursor),
             total_models: rows.first().map_or(0, |row| row.2),

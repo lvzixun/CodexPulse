@@ -169,6 +169,21 @@ async fn get_model_page(
         .map_err(|_| "采集器已停止".to_string())?
 }
 #[tauri::command]
+async fn get_model_speed(
+    request: pulse_core::storage::ModelSpeedRequest,
+    state: State<'_, Backend>,
+) -> Result<pulse_core::storage::ModelSpeed, String> {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    state
+        .sender
+        .try_send(backend::Message::ModelSpeed(request, tx))
+        .map_err(|_| "采集器繁忙，请稍后重试".to_string())?;
+    tokio::time::timeout(std::time::Duration::from_secs(15), rx)
+        .await
+        .map_err(|_| "查询超时，请稍后重试".to_string())?
+        .map_err(|_| "采集器已停止".to_string())?
+}
+#[tauri::command]
 async fn get_session_detail(
     request: pulse_core::storage::SessionDetailRequest,
     state: State<'_, Backend>,
@@ -324,6 +339,7 @@ fn main() {
             read_news,
             get_session_page,
             get_model_page,
+            get_model_speed,
             get_session_detail,
             set_settings,
             window_action,

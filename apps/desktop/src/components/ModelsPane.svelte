@@ -6,18 +6,24 @@
   import { formatUsd } from '../lib/format';
   import type { ModelPage, ModelPageRequest } from '../lib/types';
   import Icon from './Icon.svelte';
+  import ModelSpeedChart from './ModelSpeedChart.svelte';
+  import { rateValue, tierKey } from '../lib/speed';
   let {
     query = $bindable(),
     selected = $bindable(),
     revision,
     sessions,
     ready,
+    now,
+    timezone,
   }: {
     query: ModelPageRequest;
     selected: string | null;
     revision: string;
     sessions: (model: string) => void;
     ready: () => void;
+    now: number;
+    timezone: string;
   } = $props();
   let list = $state<ModelPage | null>(null);
   let loading = $state(false),
@@ -84,6 +90,20 @@
               ? '*'
               : ''}{/if}</small
         >
+        <span class="cp-model-speed" title={$t('有效轮次的总输出除以总运行耗时，不包含会话空闲。')}>
+          {$t('近 50 轮均速')}
+          <b
+            >{rateValue(m.speed)?.toLocaleString($locale === 'zh' ? 'zh-CN' : 'en-US', {
+              maximumFractionDigits: 1,
+              minimumFractionDigits: 1,
+            }) ?? '—'}</b
+          >
+          {#if rateValue(m.speed) !== null}
+            tok/s{/if}
+          {#if m.speed?.service_tier === 'mixed'}<span class="cp-speed-tier mixed"
+              >{$t(tierKey('mixed'))}</span
+            >{/if}
+        </span>
         {#if list && list.known_total > 0 && m.unknown_totals < m.events}<span
             class="cp-model-bar"
             role="img"
@@ -122,6 +142,14 @@
             >
           </div>
         </div>
+        <ModelSpeedChart
+          model={m.model}
+          from={query.from_day}
+          through={query.through_day}
+          {revision}
+          {now}
+          {timezone}
+        />
         {#if m.reference.unpriced_events || m.incomplete_events}
           <p class="cp-note">
             {m.reference.unpriced_events

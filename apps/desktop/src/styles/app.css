@@ -1807,3 +1807,32 @@ main.menubar.opaque {
 .cp-reset-watch-compact .cp-watch-title {
   font-size: 18px;
 }
+
+.cp-model-speed {
+  display: flex;
+  gap: 4px;
+  align-items: baseline;
+  color: var(--cp-muted);
+  font-size: 11px;
+  margin-top: 3px;
+}
+.cp-model-speed b {
+  font-size: 12px !important;
+  color: var(--cp-text);
+  font-weight: 600;
+}
+.cp-speed-tier {
+  display: inline-flex;
+  font-size: 10px;
+  line-height: 1.45;
+  font-weight: 600;
+  padding: 1px 5px;
+  border-radius: 4px;
+  color: var(--cp-accent);
+  background: color-mix(in srgb, var(--cp-accent) 13%, transparent);
+}
+.cp-speed-tier.mixed {
+  color: var(--cp-muted);
+  background: var(--cp-soft);
+  font-weight: 400;
+}

@@ -192,6 +192,7 @@ mod tests {
                         elapsed_ms: 10_000,
                         measured_at: "2026-10-07T09:59:45Z".into(),
                         completed: false,
+                        service_tier: None,
                     }),
                     title: Some("private session title".into()),
                     ..Default::default()

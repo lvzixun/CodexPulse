@@ -102,6 +102,19 @@ pub struct OutputRate {
     pub elapsed_ms: u64,
     pub measured_at: String,
     pub completed: bool,
+    #[serde(default)]
+    pub service_tier: Option<String>,
+}
+
+/// One owned run, updated in place while active and finalized on completion.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RunSample {
+    pub id: String,
+    pub session_id: String,
+    pub model: String,
+    pub started_at: String,
+    #[serde(flatten)]
+    pub rate: OutputRate,
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq)]

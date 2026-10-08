@@ -9,7 +9,7 @@ Track Codex account limits, work status, token usage, and reset updates on your 
 ## Features
 
 - **Limits:** remaining quota, reset times, credits, and reset cards.
-- **Usage:** 30-day totals, model share charts, and API-equivalent cost estimates.
+- **Usage:** 30-day totals, model share charts, and API-equivalent cost estimates; per-model run averages, speed curves, and Fast mode indicators.
 - **Sessions:** running work first; expand for model, usage, and average speed.
 - **Tibo:** reset announcements, history, and the 28-day challenge, with on-demand translation.
 

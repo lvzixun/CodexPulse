@@ -1,4 +1,4 @@
-use crate::domain::{OutputRate, ParseIssue, SessionMeta, TokenCounts, UsageFact};
+use crate::domain::{OutputRate, ParseIssue, RunSample, SessionMeta, TokenCounts, UsageFact};
 use chrono::DateTime;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -27,6 +27,10 @@ pub struct ParserState {
     pub rate_started_at: Option<String>,
     #[serde(default)]
     pub rate_output: Option<u64>,
+    #[serde(default)]
+    pub rate_tier: Option<String>,
+    #[serde(default)]
+    pub session_created_at: Option<String>,
 }
 
 #[derive(Debug, Default)]
@@ -36,6 +40,7 @@ pub struct ParseOutput {
     pub issue: Option<ParseIssue>,
     /// A log quota observation has no retroactive account identity.
     pub quota_observation: Option<Value>,
+    pub run_sample: Option<RunSample>,
 }
 
 fn text(v: &Value, key: &str) -> Option<String> {
@@ -73,6 +78,52 @@ fn counters(value: &Value) -> Option<TokenCounts> {
 }
 
 impl ParserState {
+    fn set_rate_tier(&mut self, tier: Option<&str>) {
+        let tier = tier
+            .map(|tier| match tier {
+                "priority" => "fast",
+                "default" => "standard",
+                value => value,
+            })
+            .map(str::to_owned);
+        if self.rate_started_at.is_some() {
+            if self.rate_output == Some(0) {
+                self.rate_tier = tier;
+            } else if self.rate_tier != tier {
+                // Never relabel earlier output after a mode change or unknown segment.
+                self.rate_tier = Some("mixed".into());
+                if let Some(session) = self.session.as_mut() {
+                    session.output_rate = None;
+                }
+            }
+        }
+    }
+    fn run_sample(&self) -> Option<RunSample> {
+        let session = self.session.as_ref()?;
+        let rate = session.output_rate.clone()?;
+        let start = DateTime::parse_from_rfc3339(self.rate_started_at.as_deref()?)
+            .ok()?
+            .with_timezone(&chrono::Utc)
+            .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+        let model = self.model.as_ref()?;
+        if self.turn_id.is_none() || model == "unknown" {
+            return None;
+        }
+        let id = format!(
+            "{:x}",
+            Sha256::digest(
+                serde_json::to_vec(&("run-speed-v1", &session.id, &self.turn_id, model, &start,))
+                    .ok()?
+            )
+        );
+        Some(RunSample {
+            id,
+            session_id: session.id.clone(),
+            model: model.clone(),
+            started_at: start,
+            rate,
+        })
+    }
     fn set_model(&mut self, model: Option<String>) {
         if self.model != model {
             if let Some(session) = self.session.as_mut() {
@@ -126,6 +177,7 @@ impl ParserState {
                     ..Self::default()
                 };
             }
+            self.session_created_at = timestamp.clone();
             self.provider = text(payload, "model_provider");
             let parent = text(payload, "forked_from_id")
                 .or_else(|| text(&payload["history_base"], "thread_id"));
@@ -166,9 +218,19 @@ impl ParserState {
             if let Some(provider) = text(payload, "model_provider") {
                 self.provider = Some(provider);
             }
-            self.turn_id = text(payload, "turn_id");
+            let turn = text(payload, "turn_id");
+            if self.turn_id != turn {
+                self.rate_started_at = None;
+                self.rate_output = None;
+                if let Some(session) = self.session.as_mut() {
+                    session.output_rate = None;
+                }
+            }
+            self.turn_id = turn;
             if payload.get("service_tier").is_some() {
                 self.service_tier = text(payload, "service_tier");
+                let tier = self.service_tier.clone();
+                self.set_rate_tier(tier.as_deref());
             }
             return ParseOutput {
                 session: self.session.clone(),
@@ -195,6 +257,8 @@ impl ParserState {
                     self.provider = Some(provider);
                 }
                 self.service_tier = text(settings, "service_tier");
+                let tier = self.service_tier.clone();
+                self.set_rate_tier(tier.as_deref());
                 ParseOutput {
                     session: self.session.clone(),
                     ..Default::default()
@@ -204,6 +268,7 @@ impl ParserState {
                 self.turn_id = text(payload, "turn_id");
                 self.rate_started_at = timestamp.clone();
                 self.rate_output = Some(0);
+                self.rate_tier = None;
                 if let Some(session) = self.session.as_mut() {
                     session.output_rate = None;
                 }
@@ -214,13 +279,16 @@ impl ParserState {
                 }
             }
             "task_complete" | "turn_completed" => {
+                let mut run_sample = None;
                 if text(payload, "turn_id") == self.turn_id {
                     self.update_rate(timestamp.as_deref(), payload["duration_ms"].as_u64(), true);
+                    run_sample = self.run_sample();
                 }
                 self.rate_started_at = None;
                 self.set_activity("completed", timestamp.as_deref());
                 ParseOutput {
                     session: self.session.clone(),
+                    run_sample,
                     ..Default::default()
                 }
             }
@@ -251,6 +319,18 @@ impl ParserState {
     fn update_rate(&mut self, timestamp: Option<&str>, duration: Option<u64>, completed: bool) {
         let sample = (|| {
             let start = DateTime::parse_from_rfc3339(self.rate_started_at.as_deref()?).ok()?;
+            // Copied parent history predates this session and is not an owned run.
+            if self
+                .session_created_at
+                .as_deref()
+                .and_then(|v| DateTime::parse_from_rfc3339(v).ok())
+                .is_some_and(|created| start < created)
+            {
+                return None;
+            }
+            if self.inherited_until.is_some_and(|end| self.ordinal < end) {
+                return None;
+            }
             let end_text = timestamp?;
             let end = DateTime::parse_from_rfc3339(end_text).ok()?;
             let observed = u64::try_from((end - start).num_milliseconds()).ok()?;
@@ -268,6 +348,7 @@ impl ParserState {
                 elapsed_ms,
                 measured_at: end_text.into(),
                 completed,
+                service_tier: self.rate_tier.clone(),
             })
         })();
         if let Some(session) = self.session.as_mut() {
@@ -415,6 +496,7 @@ impl ParserState {
             session.last_activity = ts.clone();
         }
         ParseOutput {
+            run_sample: self.run_sample(),
             fact: Some(UsageFact {
                 id,
                 session_id,

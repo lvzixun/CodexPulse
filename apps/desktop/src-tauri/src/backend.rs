@@ -202,6 +202,10 @@ pub enum Message {
         pulse_core::storage::SessionPageRequest,
         tokio::sync::oneshot::Sender<Result<pulse_core::storage::SessionPage, String>>,
     ),
+    ModelSpeed(
+        pulse_core::storage::ModelSpeedRequest,
+        tokio::sync::oneshot::Sender<Result<pulse_core::storage::ModelSpeed, String>>,
+    ),
     ModelPage(
         pulse_core::storage::ModelPageRequest,
         tokio::sync::oneshot::Sender<Result<pulse_core::storage::ModelPage, String>>,
@@ -436,6 +440,8 @@ impl Backend {
                         }
                     })
                     .ok();
+                let mut speed_queue = VecDeque::<(String, PathBuf)>::new();
+                let mut speed_queued = HashSet::<(String, PathBuf)>::new();
                 let mut queue = VecDeque::<(String, PathBuf)>::new();
                 let mut queued = HashSet::<(String, PathBuf)>::new();
                 let mut last_repair = Instant::now() - Duration::from_secs(60);
@@ -543,6 +549,28 @@ impl Backend {
                             }
                             let _ = reply.send(result);
                         }
+                        Ok(Message::ModelSpeed(request, reply)) => {
+                            let connected = sources
+                                .iter()
+                                .filter(|s| s.health.status == "connected")
+                                .map(|s| s.health.id.clone())
+                                .collect::<Vec<_>>();
+                            let result = settings
+                                .timezone
+                                .parse::<Tz>()
+                                .map_err(|_| "统计时区无效".to_string())
+                                .and_then(|tz| {
+                                    store
+                                        .model_speed(&request, tz, Utc::now(), &connected)
+                                        .map(|mut result| {
+                                            result.history_pending =
+                                                !queue.is_empty() || !speed_queue.is_empty();
+                                            result
+                                        })
+                                        .map_err(|_| "无法读取运行速度，请重试".into())
+                                });
+                            let _ = reply.send(result);
+                        }
                         Ok(Message::ModelPage(request, reply)) => {
                             let result = settings
                                 .timezone
@@ -551,6 +579,34 @@ impl Backend {
                                 .and_then(|tz| {
                                     store
                                         .model_page(&request, tz)
+                                        .and_then(|mut page| {
+                                            let connected = sources
+                                                .iter()
+                                                .filter(|s| s.health.status == "connected")
+                                                .map(|s| s.health.id.clone())
+                                                .collect::<Vec<_>>();
+                                            let now = Utc::now();
+                                            for row in &mut page.items {
+                                                row.speed = store
+                                                    .model_speed(
+                                                        &pulse_core::storage::ModelSpeedRequest {
+                                                            model: row.usage.model.clone(),
+                                                            from_day: request.from_day.clone(),
+                                                            through_day: request
+                                                                .through_day
+                                                                .clone(),
+                                                            range: Default::default(),
+                                                        },
+                                                        tz,
+                                                        now,
+                                                        &connected,
+                                                    )?
+                                                    .summary;
+                                            }
+                                            page.speed_pending =
+                                                !queue.is_empty() || !speed_queue.is_empty();
+                                            Ok(page)
+                                        })
                                         .map_err(|_| "无法读取模型分类，请刷新列表".into())
                                 });
                             let _ = reply.send(result);
@@ -832,6 +888,8 @@ impl Backend {
                                     wsl_home_cache.clear();
                                     quota = QuotaState::default();
                                     // Cancel queued reads for old roots before a changed source ID is reused.
+                                    speed_queue.clear();
+                                    speed_queued.clear();
                                     queue.clear();
                                     queued.clear();
                                     last_repair = Instant::now() - Duration::from_secs(60);
@@ -1177,6 +1235,13 @@ impl Backend {
                                     dirty = true;
                                     live_dirty |= !titles_only && report.records > 0;
                                 }
+                                if !titles_only {
+                                    enqueue(
+                                        &mut speed_queue,
+                                        &mut speed_queued,
+                                        (id.clone(), path.clone()),
+                                    );
+                                }
                                 if report.more {
                                     enqueue(&mut queue, &mut queued, (id, path));
                                 }
@@ -1184,6 +1249,24 @@ impl Backend {
                             Err(_) => {
                                 source.health.status = "read_error".into();
                                 dirty = true;
+                            }
+                        }
+                    }
+                    // An independent 8 ms / 64-record replay cursor leaves the usage ledger intact.
+                    let speed_start = Instant::now();
+                    while speed_start.elapsed() < Duration::from_millis(8) {
+                        let Some((id, path)) = speed_queue.pop_front() else {
+                            break;
+                        };
+                        speed_queued.remove(&(id.clone(), path.clone()));
+                        if sources.iter().any(|source| {
+                            source.health.id == id && source.available() && source.owns_path(&path)
+                        }) && let Ok(report) =
+                            pulse_core::collectors::jsonl::read_rates(&mut store, &id, &path)
+                        {
+                            dirty |= report.records > 0;
+                            if report.more {
+                                enqueue(&mut speed_queue, &mut speed_queued, (id, path));
                             }
                         }
                     }
@@ -1892,6 +1975,7 @@ mod tests {
                 elapsed_ms: 2500,
                 measured_at: "2026-10-07T10:00:01Z".into(),
                 completed: false,
+                service_tier: None,
             }),
             ..Default::default()
         };

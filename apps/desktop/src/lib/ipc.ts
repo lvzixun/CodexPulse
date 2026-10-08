@@ -12,6 +12,8 @@ import type {
   SessionDetail,
   ModelPageRequest,
   ModelPage,
+  ModelSpeed,
+  ModelSpeedRequest,
   StartupStatus,
   AppUpdateInfo,
 } from './types';
@@ -189,6 +191,19 @@ export const sessionPage = async (request: SessionPageRequest): Promise<SessionP
       : [],
     older: null,
     newer: null,
+  };
+};
+export const modelSpeed = async (request: ModelSpeedRequest): Promise<ModelSpeed> => {
+  if (native) return invoke<ModelSpeed>('get_model_speed', { request });
+  if (readmePreview) return (await import('./readme-preview')).previewModelSpeed(request);
+  return {
+    output_tokens: 0,
+    elapsed_ms: 0,
+    samples: 0,
+    service_tier: null,
+    points: [],
+    current: null,
+    history_pending: false,
   };
 };
 export const modelPage = async (request: ModelPageRequest): Promise<ModelPage> => {

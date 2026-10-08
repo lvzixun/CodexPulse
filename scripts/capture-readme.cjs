@@ -20,9 +20,14 @@ async function main() {
   try {
     for (const language of ['zh', 'en']) {
       for (const pageName of ['overview', 'models', 'sessions', 'news', 'compact']) {
+        if (process.env.CODEXPULSE_CAPTURE_PAGE && pageName !== process.env.CODEXPULSE_CAPTURE_PAGE)
+          continue;
         const compact = pageName === 'compact';
         const page = await browser.newPage({
-          viewport: { width: compact ? 184 : 380, height: compact ? 36 : 800 },
+          viewport: {
+            width: compact ? 184 : 380,
+            height: compact ? 36 : pageName === 'models' ? 980 : 800,
+          },
           deviceScaleFactor: 3,
           timezoneId: 'Asia/Shanghai',
           locale: language === 'zh' ? 'zh-CN' : 'en-US',
@@ -44,9 +49,11 @@ async function main() {
         await page.goto(url.href);
         await page.locator(compact ? '.cp-compact-model' : '.cp-tabs').waitFor();
         if (compact) await page.getByText('6.1-sol', { exact: true }).waitFor();
-        else if (pageName === 'models')
+        else if (pageName === 'models') {
           await page.getByText('gpt-6-astra', { exact: true }).waitFor();
-        else if (pageName === 'sessions')
+          await page.locator('.cp-modelrow').first().click();
+          await page.locator('.cp-speed-chart').waitFor();
+        } else if (pageName === 'sessions')
           await page.locator('.cp-session-detail[aria-busy="false"] .cp-metrics').first().waitFor();
         else if (pageName === 'news')
           await page.getByText('A smoother review experience', { exact: true }).waitFor();
@@ -73,7 +80,9 @@ async function main() {
           omitBackground: true,
           animations: 'disabled',
         });
-        console.log(`${name}: ${compact ? '552 × 108' : '1140 × 2400'} PNG`);
+        console.log(
+          `${name}: ${compact ? '552 × 108' : pageName === 'models' ? '1140 × 2940' : '1140 × 2400'} PNG`,
+        );
         await page.close();
       }
     }
