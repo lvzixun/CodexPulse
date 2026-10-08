@@ -370,10 +370,105 @@ await import('/src/main.ts');
         'Elapsed time and reopening must never make an update request',
       );
       assert.ok(await page.evaluate(() => __panelTest.cacheReads > 1));
+      // Same upcoming plan in Overview and Tibo, including expiry with no fetch.
+      await page.evaluate(async () => {
+        const now = Date.now();
+        __panelTest.data.settings.timezone = 'Asia/Shanghai';
+        __panelTest.data.news.latest_reset.occurred_at = new Date(now - 21 * 3600000).toISOString();
+        __panelTest.data.news.scheduled_reset = {
+          ...__panelTest.data.news.latest_reset,
+          id: 'example-next-reset',
+          kind: 'scheduled',
+          occurred_at: new Date(now - 3600000).toISOString(),
+          scheduled_for: new Date(now + 5.5 * 3600000).toISOString(),
+        };
+        await __panelTest.push([]);
+      });
+      for (const tab of ['overview', 'news']) {
+        await page
+          .locator('.cp-tabs button')
+          .nth(tab === 'overview' ? 0 : 3)
+          .click();
+        const reminder = page.locator('.cp-reset-plan');
+        await reminder.waitFor();
+        assert.equal(await reminder.count(), 1);
+        assert.match(
+          await reminder.innerText(),
+          language === 'zh' ? /5 小时 30 分钟后重置/ : /Reset in 5h 30m/,
+        );
+        const expectedDate = await page.evaluate(
+          (language) =>
+            new Date(__panelTest.data.news.scheduled_reset.scheduled_for).toLocaleString(
+              language === 'zh' ? 'zh-CN' : 'en-US',
+              {
+                timeZone: 'Asia/Shanghai',
+                year: 'numeric',
+                month: 'numeric',
+                day: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit',
+              },
+            ),
+          language,
+        );
+        assert.ok((await reminder.locator('.cp-plan-time').innerText()).includes(expectedDate));
+        for (const theme of ['dark', 'light']) {
+          await page.locator('main').evaluate((el, theme) => (el.dataset.theme = theme), theme);
+          await reminder.scrollIntoViewIfNeeded();
+          await page.screenshot({ path: `work/reset-reminder-${language}-${tab}-${theme}.png` });
+          for (const width of [320, 380]) {
+            await page.setViewportSize({ width, height: 800 });
+            assert.ok(
+              await reminder.evaluate(
+                (el) =>
+                  el.scrollWidth <= el.clientWidth &&
+                  [...el.querySelectorAll('p,strong,span')].every(
+                    (child) => child.scrollWidth <= child.clientWidth,
+                  ),
+              ),
+              `${language}/${tab}/${theme}/${width}: reminder must not clip text`,
+            );
+          }
+        }
+      }
+      await page.evaluate(async () => {
+        __panelTest.data.news.status = 'network_error';
+        await __panelTest.push([]);
+      });
+      await page
+        .locator('.cp-plan-caveat')
+        .getByText(/离线缓存|Offline cache/)
+        .waitFor();
+      const deadline = await page.evaluate(
+        () => __panelTest.data.news.scheduled_reset.scheduled_for,
+      );
+      await page.clock.setSystemTime(new Date(deadline));
+      await page.clock.runFor(1100);
+      assert.equal(await page.locator('.cp-reset-plan').count(), 0);
+      await page
+        .getByText(/计划时间已过，待确认执行|Scheduled time passed; awaiting confirmation/)
+        .waitFor();
+      await page.locator('.cp-tabs button').first().click();
+      assert.equal(await page.locator('.cp-reset-plan').count(), 0);
+      await page
+        .getByText(/计划时间已过，待确认执行|Scheduled time passed; awaiting confirmation/)
+        .waitFor();
+      await page.evaluate(async () => {
+        __panelTest.data.news.latest_reset.occurred_at =
+          __panelTest.data.news.scheduled_reset.scheduled_for;
+        await __panelTest.push([]);
+      });
+      await page
+        .locator('.cp-reset-plan-status')
+        .getByText(/尚未公布|Not announced/)
+        .waitFor();
+      await page.locator('.cp-tabs button').last().click();
+      assert.equal(await page.locator('.cp-reset-plan-status').count(), 0);
+      assert.deepEqual(await page.evaluate(() => __panelTest.checks), ['manual']);
       assert.deepEqual(errors, []);
       console.log(
         language +
-          ': full compact/header drag regions, click threshold/suppression/recovery, upgrade prompt/manual check/cache, Tibo auto-read, compact menu passed',
+          ': compact/header drag, update cache, Tibo read, menus, upcoming reset in both tabs/themes, offline cache and deadline expiry passed',
       );
       await page.close();
     }

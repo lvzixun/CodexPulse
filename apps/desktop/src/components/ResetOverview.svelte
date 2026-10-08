@@ -4,6 +4,7 @@
   import type { Snapshot } from '../lib/types';
   import { resetCalendar } from '../lib/reset-calendar';
   import { resetAge } from '../lib/format';
+  import ResetPlan from './ResetPlan.svelte';
   let { news, now, timezone }: { news: Snapshot['news']; now: number; timezone: string } = $props();
   let selected = $state('');
   const stats = $derived(news.reset_stats);
@@ -38,6 +39,7 @@
       >{news.latest_reset ? dateTime(news.latest_reset.occurred_at) : $t('等待同步')}</span
     >
   </div>
+  <ResetPlan {news} {now} {timezone} />
   <dl class="cp-reset-metrics">
     <div>
       <dt>{$t('重置次数')}</dt>

@@ -1519,6 +1519,75 @@ main.menubar.opaque {
 .cp-reset-recent > span {
   padding-bottom: 4px;
 }
+.cp-reset-plan {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--cp-accent);
+  border-color: color-mix(in srgb, var(--cp-accent) 38%, transparent);
+  border-left: 3px solid var(--cp-accent);
+  border-radius: 10px;
+  background: var(--accent-bg);
+}
+.cp-plan-heading,
+.cp-plan-heading > span:first-child {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.cp-plan-heading {
+  justify-content: space-between;
+  flex-wrap: wrap;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--cp-accent);
+}
+.cp-plan-heading svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+.cp-plan-badge {
+  border: 1px solid currentColor;
+  border-radius: 5px;
+  padding: 1px 5px;
+  font-size: 10px;
+  white-space: nowrap;
+}
+.cp-plan-countdown {
+  display: block;
+  margin-top: 6px;
+  font-size: 21px;
+  font-weight: 650;
+  line-height: 1.35;
+  font-variant-numeric: tabular-nums;
+}
+.cp-plan-time {
+  margin-top: 4px;
+  font-size: 12px;
+}
+.cp-plan-caveat {
+  margin-top: 6px;
+  font-size: 11px;
+}
+.cp-reset-plan-status {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 12px;
+  font-size: 12px;
+}
+.cp-reset-status > .cp-reset-plan-status {
+  margin-top: 0;
+}
+.cp-reset-plan-status > span {
+  color: var(--cp-muted);
+}
+.cp-reset-plan-status > strong,
+.cp-reset-status > .cp-reset-plan-status > strong {
+  white-space: normal;
+  text-align: right;
+}
 .cp-reset-metrics {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

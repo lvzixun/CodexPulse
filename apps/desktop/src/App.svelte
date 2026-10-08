@@ -769,7 +769,7 @@
               ? $t('暂无已验证额度缓存。手动模式可在设置中点击立即刷新。')
               : $t('尚未获得有效额度快照，可在设置中查看来源状态。')}
           </p>{/each}
-        <ResetStatus news={data.news} {now} />
+        <ResetStatus news={data.news} {now} timezone={data.settings.timezone} />
         <div class="cp-divider"></div>
         <section class="cp-session-overview" aria-label={working ? $t('当前会话') : $t('最近会话')}>
           <div class="cp-sectionhead">
