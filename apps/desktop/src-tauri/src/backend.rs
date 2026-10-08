@@ -432,7 +432,7 @@ impl Backend {
                 let mut watcher =
                     notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
                         if let Ok(event) = event {
-                            queue_file_events(&watcher_paths, &watcher_sender, event.paths);
+                            queue_watcher_event(&watcher_paths, &watcher_sender, event);
                         }
                     })
                     .ok();
@@ -704,25 +704,14 @@ impl Backend {
                                     }) {
                                         continue;
                                     }
-                                    let changed = stamps
-                                        .get(&scope.source_id)
-                                        .is_some_and(|old| old != &stamp);
-                                    if stamps.get(&scope.source_id) == Some(&stamp) {
-                                        continue;
-                                    }
-                                    probes_changed = true;
-                                    let recovered = reconcile_probe(
+                                    probes_changed |= accept_probe(
                                         &mut quota,
+                                        &mut stamps,
+                                        &mut quota_schedule,
                                         &scope,
-                                        &stamp,
-                                        stamps.get(&scope.source_id),
+                                        stamp,
                                     );
-                                    stamps.insert(scope.source_id.clone(), stamp);
-                                    if changed || recovered {
-                                        quota_schedule.invalidate(0);
-                                        quota_epoch
-                                            .store(quota_schedule.generation, Ordering::Relaxed);
-                                    }
+                                    quota_epoch.store(quota_schedule.generation, Ordering::Relaxed);
                                 }
                                 if probes_changed {
                                     let _ = persist_quota(&store, &mut quota);
@@ -782,79 +771,13 @@ impl Backend {
                                         .get_mut(&scope.source_id)
                                         .expect("reconciled source");
                                     state.last_attempt = Utc::now().to_rfc3339();
-                                    match response.profile {
-                                        Ok(profile) => {
-                                            state.profile_status = "connected".into();
-                                            state.profile_last_success =
-                                                Some(state.last_attempt.clone());
-                                            state.profile = Some(profile);
-                                        }
-                                        Err(error) => {
-                                            state.profile_status = error.code.clone();
-                                            if [
-                                                "not_signed_in",
-                                                "reauth_required",
-                                                "account_mismatch",
-                                                "credentials_unreadable",
-                                                "credentials_invalid",
-                                                "credentials_changed",
-                                            ]
-                                            .contains(&error.code.as_str())
-                                            {
-                                                state.profile = None;
-                                                state.profile_last_success = None;
-                                            }
-                                        }
-                                    }
-                                    match response.result {
-                                        Ok(readout) => {
-                                            state.status = "connected".into();
-                                            state.failures = 0;
-                                            state.retry_at = if readout.allowance_retry_after > 0 {
-                                                now.saturating_add(readout.allowance_retry_after)
-                                            } else {
-                                                0
-                                            };
-                                            state.allowance = Some(readout.allowance);
-                                            state.last_success = Some(state.last_attempt.clone());
-                                            state.buckets = readout.buckets;
-                                            state.proxy_source = readout.proxy_source;
-                                        }
-                                        Err(error) => {
-                                            state.status = error.code.clone();
-                                            if [
-                                                "reauth_required",
-                                                "credentials_expired",
-                                                "credentials_changed",
-                                            ]
-                                            .contains(&error.code.as_str())
-                                            {
-                                                state.allowance = None;
-                                            }
-                                            if error.code == "credentials_changed" {
-                                                state.retry_at = 0;
-                                                quota_schedule.next = 0;
-                                            } else {
-                                                state.failures = state.failures.saturating_add(1);
-                                                let backoff = (30_i64
-                                                    * (1_i64 << state.failures.min(6)))
-                                                .min(1800);
-                                                state.retry_at = now
-                                                    .saturating_add(backoff.max(error.retry_after));
-                                            }
-                                            if [
-                                                "not_signed_in",
-                                                "account_mismatch",
-                                                "credentials_unreadable",
-                                                "credentials_invalid",
-                                            ]
-                                            .contains(&error.code.as_str())
-                                            {
-                                                state.buckets.clear();
-                                                state.allowance = None;
-                                            }
-                                        }
-                                    }
+                                    apply_profile_result(state, response.profile);
+                                    apply_quota_result(
+                                        state,
+                                        response.result,
+                                        now,
+                                        &mut quota_schedule,
+                                    );
                                 }
                                 quota.last_success = quota
                                     .sources
@@ -1064,6 +987,7 @@ impl Backend {
                         last_wsl = Instant::now();
                         dirty = true;
                     }
+                    let mut credential_scopes = BTreeMap::new();
                     if let Ok(mut paths) = changed.lock() {
                         for path in paths.drain(..) {
                             for source in sources.iter().filter(|s| {
@@ -1072,20 +996,7 @@ impl Backend {
                                         .iter()
                                         .any(|f| path == s.home.join(f))
                             }) {
-                                if let Some(q) = quota.sources.get_mut(&source.health.id) {
-                                    q.buckets.clear();
-                                    q.allowance = None;
-                                    q.profile = None;
-                                    q.profile_last_success = None;
-                                    q.profile_status = "verifying_account".into();
-                                    q.identity = None;
-                                    q.status = "verifying_account".into();
-                                }
-                                stamps.remove(&source.health.id);
-                                quota_schedule.invalidate(0);
-                                quota_epoch.store(quota_schedule.generation, Ordering::Relaxed);
-                                last_probe = Instant::now() - Duration::from_secs(60);
-                                dirty = true;
+                                credential_scopes.insert(source.health.id.clone(), scope(source));
                             }
                             for source in sources
                                 .iter()
@@ -1098,6 +1009,25 @@ impl Backend {
                                 );
                             }
                         }
+                    }
+                    // Local file notifications are hints, not proof of an account
+                    // switch. Probe once per affected local source, outside the watcher
+                    // lock, before publishing: same-account renewal keeps the cache;
+                    // a different/unknown identity is still isolated immediately.
+                    let mut credentials_changed = false;
+                    for scope in credential_scopes.values() {
+                        credentials_changed |= accept_probe(
+                            &mut quota,
+                            &mut stamps,
+                            &mut quota_schedule,
+                            scope,
+                            crate::http_quota::probe(scope),
+                        );
+                    }
+                    if credentials_changed {
+                        quota_epoch.store(quota_schedule.generation, Ordering::Relaxed);
+                        let _ = persist_quota(&store, &mut quota);
+                        dirty = true;
                     }
                     let now = Utc::now().timestamp();
                     // Only enabled, available sources enter the public routing
@@ -1589,6 +1519,98 @@ fn last_attempt(quota: &QuotaState) -> i64 {
         .max()
         .unwrap_or(0)
 }
+fn apply_profile_result(
+    state: &mut QuotaSource,
+    result: Result<crate::account_profile::AccountProfile, crate::http_quota::Failure>,
+) {
+    match result {
+        Ok(profile) => {
+            state.profile_status = "connected".into();
+            state.profile_last_success = Some(state.last_attempt.clone());
+            state.profile = Some(profile);
+        }
+        Err(error) => {
+            state.profile_status = error.code.clone();
+            if [
+                "not_signed_in",
+                "account_mismatch",
+                "credentials_unreadable",
+                "credentials_invalid",
+            ]
+            .contains(&error.code.as_str())
+            {
+                state.profile = None;
+                state.profile_last_success = None;
+            }
+        }
+    }
+}
+fn apply_quota_result(
+    state: &mut QuotaSource,
+    result: Result<crate::http_quota::Readout, crate::http_quota::Failure>,
+    now: i64,
+    schedule: &mut crate::refresh::Schedule,
+) {
+    match result {
+        Ok(readout) => {
+            state.status = "connected".into();
+            state.failures = 0;
+            state.retry_at = if readout.allowance_retry_after > 0 {
+                now.saturating_add(readout.allowance_retry_after)
+            } else {
+                0
+            };
+            state.allowance = Some(readout.allowance);
+            state.last_success = Some(state.last_attempt.clone());
+            state.buckets = readout.buckets;
+            state.proxy_source = readout.proxy_source;
+        }
+        Err(error) => {
+            state.status = error.code.clone();
+            if error.code == "credentials_changed" {
+                // Retry with the new credentials, without waiving an existing wait.
+                schedule.next = 0;
+            } else {
+                state.failures = state.failures.saturating_add(1);
+                let backoff = (30_i64 * (1_i64 << state.failures.min(6))).min(1800);
+                state.retry_at = state
+                    .retry_at
+                    .max(now.saturating_add(backoff.max(error.retry_after)));
+            }
+            if [
+                "not_signed_in",
+                "account_mismatch",
+                "credentials_unreadable",
+                "credentials_invalid",
+            ]
+            .contains(&error.code.as_str())
+            {
+                state.buckets.clear();
+                state.allowance = None;
+            }
+        }
+    }
+}
+// Used by periodic probes and coalesced local file notifications. No HTTP here.
+fn accept_probe(
+    quota: &mut QuotaState,
+    stamps: &mut BTreeMap<String, crate::http_quota::Stamp>,
+    schedule: &mut crate::refresh::Schedule,
+    scope: &crate::http_quota::Scope,
+    stamp: crate::http_quota::Stamp,
+) -> bool {
+    let previous = stamps.get(&scope.source_id);
+    if previous == Some(&stamp) {
+        return false;
+    }
+    let changed = previous.is_some();
+    let recovered = reconcile_probe(quota, scope, &stamp, previous);
+    stamps.insert(scope.source_id.clone(), stamp);
+    if changed || recovered {
+        schedule.invalidate(0);
+    }
+    true
+}
 fn reconcile_identity(
     quota: &mut QuotaState,
     scope: &crate::http_quota::Scope,
@@ -1610,11 +1632,17 @@ fn reconcile_identity(
         state.status = "awaiting_refresh".into();
     }
     if stamp.status != "ready" {
-        state.allowance = None;
-        state.status = stamp.status.clone();
+        // Identity reconciliation above already clears switched/unknown accounts.
+        // An expired token for this same account does not invalidate old values.
+        // Keep the reason for a server/transport wait across local expiry;
+        // otherwise renewal would misclassify it as authentication backoff.
+        let keep_wait = stamp.status == "credentials_expired"
+            && state.retry_at > 0
+            && !["credentials_expired", "reauth_required"].contains(&state.status.as_str());
+        if !keep_wait {
+            state.status = stamp.status.clone();
+        }
         state.profile_status = stamp.status.clone();
-        state.profile = None;
-        state.profile_last_success = None;
     }
     state.proxy_source = stamp.proxy_source.clone();
     quota.last_success = quota
@@ -1737,6 +1765,22 @@ fn enqueue_source(
     }
 }
 
+fn queue_watcher_event(
+    paths: &Mutex<Vec<PathBuf>>,
+    sender: &SyncSender<Message>,
+    event: notify::Event,
+) {
+    // Reading credentials/logs must not cause our own watcher to invalidate them.
+    let write_close = matches!(
+        event.kind,
+        notify::EventKind::Access(notify::event::AccessKind::Close(
+            notify::event::AccessMode::Write
+        ))
+    );
+    if write_close || !matches!(event.kind, notify::EventKind::Access(_)) {
+        queue_file_events(paths, sender, event.paths);
+    }
+}
 fn queue_file_events(
     paths: &Mutex<Vec<PathBuf>>,
     sender: &SyncSender<Message>,
@@ -1958,6 +2002,256 @@ mod tests {
         let store = Store::open(&database).unwrap();
         assert_eq!(initial_settings(&store).unwrap().timezone, "UTC");
     }
+    fn cache_fixture(
+        scope: &crate::http_quota::Scope,
+        stamp: &crate::http_quota::Stamp,
+    ) -> QuotaState {
+        let mut quota = QuotaState::default();
+        reconcile_identity(&mut quota, scope, stamp);
+        let state = quota.sources.get_mut(&scope.source_id).unwrap();
+        state.status = "connected".into();
+        state.last_success = Some("2026-10-08T03:00:00Z".into());
+        state.buckets.push(pulse_core::quota::QuotaBucket {
+            source_id: scope.source_id.clone(),
+            identity_key: stamp.identity.clone().unwrap(),
+            identity_confirmed: true,
+            limit_id: "codex".into(),
+            name: "Codex".into(),
+            plan: Some("pro".into()),
+            primary: None,
+            secondary: None,
+            captured_at: "2026-10-08T03:00:00Z".into(),
+        });
+        state.allowance = Some(crate::account_allowance::AccountAllowance {
+            balance: Some(12345.0),
+            reset_cards: Some(2),
+            ..Default::default()
+        });
+        state.profile = Some(crate::account_profile::AccountProfile {
+            display_name: Some("Cached account".into()),
+            ..Default::default()
+        });
+        state.profile_status = "connected".into();
+        state.profile_last_success = state.last_success.clone();
+        quota
+    }
+    fn write_test_auth(home: &std::path::Path, account: &str, revision: &str) {
+        use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+        let claims = serde_json::json!({"sub":"user", "exp":4102444800_i64, "jti":revision});
+        let token = format!("header.{}.sig", URL_SAFE_NO_PAD.encode(claims.to_string()));
+        std::fs::write(
+            home.join("auth.json"),
+            serde_json::json!({"tokens":{
+                "access_token":token, "account_id":account
+            }})
+            .to_string(),
+        )
+        .unwrap();
+    }
+    #[test]
+    fn watched_auth_renewal_preserves_cache_and_server_wait_until_verified_replacement() {
+        let directory = tempfile::tempdir().unwrap();
+        let scope = crate::http_quota::Scope {
+            source_id: "local".into(),
+            home: directory.path().into(),
+            wsl: None,
+        };
+        write_test_auth(directory.path(), "account-a", "old-token");
+        let stamp = crate::http_quota::probe(&scope);
+        assert_eq!(stamp.status, "ready");
+        let mut quota = cache_fixture(&scope, &stamp);
+        let state = quota.sources.get_mut(&scope.source_id).unwrap();
+        state.status = "http_429".into();
+        state.failures = 2;
+        state.retry_at = 3600;
+        let before = serde_json::to_value(&quota).unwrap();
+        let mut stamps = BTreeMap::from([(scope.source_id.clone(), stamp)]);
+        let mut schedule = crate::refresh::Schedule::new();
+        let flight = schedule.begin();
+        // A touch/duplicate notification must not invalidate a flight or any cache.
+        assert!(!accept_probe(
+            &mut quota,
+            &mut stamps,
+            &mut schedule,
+            &scope,
+            crate::http_quota::probe(&scope)
+        ));
+        assert_eq!(schedule.generation, flight);
+        write_test_auth(directory.path(), "account-a", "renewed-token");
+        assert!(accept_probe(
+            &mut quota,
+            &mut stamps,
+            &mut schedule,
+            &scope,
+            crate::http_quota::probe(&scope)
+        ));
+        assert_eq!(
+            serde_json::to_value(&quota).unwrap()["sources"],
+            before["sources"]
+        );
+        assert_eq!(schedule.flight, Some(flight));
+        assert!(!schedule.due_for_account(
+            &crate::refresh::Config::default(),
+            4000,
+            3600,
+            true,
+            false
+        ));
+        assert!(!schedule.finish(flight, 4300));
+        assert!(!schedule.due_for_account(
+            &crate::refresh::Config::default(),
+            3599,
+            3600,
+            true,
+            false
+        ));
+        assert!(!schedule.due_for_account(
+            &crate::refresh::Config::default(),
+            4000,
+            3600,
+            false,
+            false
+        ));
+        assert!(schedule.due_for_account(
+            &crate::refresh::Config::default(),
+            4000,
+            3600,
+            true,
+            false
+        ));
+        // A real account change and logout must still discard every old value.
+        write_test_auth(directory.path(), "account-b", "new-account");
+        assert!(accept_probe(
+            &mut quota,
+            &mut stamps,
+            &mut schedule,
+            &scope,
+            crate::http_quota::probe(&scope)
+        ));
+        let state = &quota.sources[&scope.source_id];
+        assert!(
+            state.buckets.is_empty()
+                && state.allowance.is_none()
+                && state.profile.is_none()
+                && state.last_success.is_none()
+        );
+        quota = cache_fixture(&scope, &stamps[&scope.source_id]);
+        std::fs::write(directory.path().join("auth.json"), "{}").unwrap();
+        assert!(accept_probe(
+            &mut quota,
+            &mut stamps,
+            &mut schedule,
+            &scope,
+            crate::http_quota::probe(&scope)
+        ));
+        let state = &quota.sources[&scope.source_id];
+        assert!(
+            state.identity.is_none()
+                && state.buckets.is_empty()
+                && state.allowance.is_none()
+                && state.profile.is_none()
+        );
+    }
+    #[test]
+    fn same_account_expiry_and_failed_refresh_keep_last_success_until_new_success() {
+        let scope = crate::http_quota::Scope {
+            source_id: "local".into(),
+            home: "test-home".into(),
+            wsl: None,
+        };
+        let ready = crate::http_quota::Stamp {
+            identity: Some("same-account".into()),
+            status: "ready".into(),
+            ..Default::default()
+        };
+        let mut quota = cache_fixture(&scope, &ready);
+        let expired = crate::http_quota::Stamp {
+            status: "credentials_expired".into(),
+            ..ready.clone()
+        };
+        reconcile_identity(&mut quota, &scope, &expired);
+        let state = quota.sources.get_mut(&scope.source_id).unwrap();
+        assert!(state.profile.is_some() && state.allowance.is_some() && state.buckets.len() == 1);
+        let saved = serde_json::to_value(&*state).unwrap();
+        let mut schedule = crate::refresh::Schedule::new();
+        for code in [
+            "network_error",
+            "http_429",
+            "reauth_required",
+            "credentials_changed",
+        ] {
+            apply_profile_result(state, Err(code.into()));
+            apply_quota_result(
+                state,
+                Err(crate::http_quota::Failure {
+                    code: code.into(),
+                    retry_after: 3600,
+                }),
+                1000,
+                &mut schedule,
+            );
+            let actual = serde_json::to_value(&*state).unwrap();
+            for field in [
+                "buckets",
+                "allowance",
+                "profile",
+                "last_success",
+                "profile_last_success",
+            ] {
+                assert_eq!(actual[field], saved[field], "{code}: {field}");
+            }
+        }
+        assert!(state.retry_at >= 4600);
+        state.last_attempt = "2026-10-08T04:00:00Z".into();
+        apply_quota_result(
+            state,
+            Ok(crate::http_quota::Readout {
+                buckets: Vec::new(),
+                allowance: crate::account_allowance::AccountAllowance {
+                    balance: Some(99.0),
+                    ..Default::default()
+                },
+                allowance_retry_after: 0,
+                proxy_source: "direct".into(),
+            }),
+            4600,
+            &mut schedule,
+        );
+        assert_eq!(state.last_success.as_deref(), Some("2026-10-08T04:00:00Z"));
+        assert_eq!(state.allowance.as_ref().unwrap().balance, Some(99.0));
+        assert!(state.buckets.is_empty());
+        assert_eq!((state.failures, state.retry_at), (0, 0));
+    }
+    #[test]
+    fn watcher_ignores_reads_but_keeps_write_create_remove_and_rescan_hints() {
+        use notify::{
+            Event, EventKind,
+            event::{AccessKind, AccessMode, ModifyKind},
+        };
+        let paths = Mutex::new(Vec::new());
+        let (sender, receiver) = mpsc::sync_channel(1);
+        queue_watcher_event(
+            &paths,
+            &sender,
+            Event::new(EventKind::Access(AccessKind::Read)).add_path("auth.json".into()),
+        );
+        assert!(paths.lock().unwrap().is_empty() && receiver.try_recv().is_err());
+        for kind in [
+            EventKind::Access(AccessKind::Close(AccessMode::Write)),
+            EventKind::Modify(ModifyKind::Any),
+            EventKind::Create(notify::event::CreateKind::File),
+            EventKind::Remove(notify::event::RemoveKind::File),
+            EventKind::Any,
+        ] {
+            queue_watcher_event(
+                &paths,
+                &sender,
+                Event::new(kind).add_path("auth.json".into()),
+            );
+        }
+        assert_eq!(paths.lock().unwrap().len(), 5);
+        assert!(matches!(receiver.try_recv(), Ok(Message::FilesChanged)));
+    }
     #[test]
     fn same_account_renewal_releases_auth_backoff_without_changing_refresh_policy() {
         let scope = crate::http_quota::Scope {
@@ -2048,6 +2342,23 @@ mod tests {
                 assert_eq!(state.profile_status, status);
                 assert_eq!((state.failures, state.retry_at), (5, 1060));
             }
+        }
+        let expired = crate::http_quota::Stamp {
+            status: "credentials_expired".into(),
+            ..old.clone()
+        };
+        for status in ["http_429", "http_403", "network_error", "connected"] {
+            let mut quota = cache_fixture(&scope, &old);
+            let state = quota.sources.get_mut(&scope.source_id).unwrap();
+            state.status = status.into();
+            state.failures = 5;
+            state.retry_at = 1060;
+            reconcile_probe(&mut quota, &scope, &expired, Some(&old));
+            reconcile_probe(&mut quota, &scope, &renewed, Some(&expired));
+            let state = &quota.sources[&scope.source_id];
+            assert_eq!(state.status, status);
+            assert_eq!((state.failures, state.retry_at), (5, 1060));
+            assert!(state.allowance.is_some() && state.profile.is_some());
         }
     }
     #[test]

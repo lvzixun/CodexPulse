@@ -763,6 +763,7 @@
               ? data.quota.sources[bucket.source_id]?.allowance
               : undefined}
             status={data.quota.sources[bucket.source_id]?.status ?? 'unknown'}
+            requestStatus={data.quota.request_status}
             maxAgeSeconds={data.settings.quota_refresh.interval_seconds + 60}
           />{:else}<p class="cp-note">
             {data.settings.quota_refresh.mode === 'manual'

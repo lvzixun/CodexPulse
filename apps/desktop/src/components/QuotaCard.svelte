@@ -9,12 +9,14 @@
     status,
     maxAgeSeconds,
     allowance,
+    requestStatus = '',
   }: {
     bucket: QuotaBucket;
     now: number;
     status: string;
     maxAgeSeconds: number;
     allowance?: AccountAllowance | null;
+    requestStatus?: string;
   } = $props();
   const windows = $derived([bucket.primary, bucket.secondary].filter((w) => w !== null));
   const stale = $derived(
@@ -105,7 +107,9 @@
       )}{:else}{$t('重置卡到期时间未提供')}{/if}
   </p>
 {/if}
-{#if stale}<p class="cp-note">{$t('额度快照已过期 · 保留最近有效值')}</p>{/if}
+{#if requestStatus === 'refreshing'}<p class="cp-note" role="status">
+    {$t('正在刷新 · 显示上次成功数据')}
+  </p>{:else if stale}<p class="cp-note">{$t('额度快照已过期 · 保留最近有效值')}</p>{/if}
 
 <style>
   .allowance {

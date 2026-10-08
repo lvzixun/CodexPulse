@@ -481,10 +481,50 @@ await import('/src/main.ts');
       await page.locator('.cp-tabs button').last().click();
       assert.equal(await page.locator('.cp-reset-plan-status').count(), 0);
       assert.deepEqual(await page.evaluate(() => __panelTest.checks), ['manual']);
+      await page.locator('.cp-tabs button').first().click();
+      await page.evaluate(async () => {
+        __panelTest.savedQuota = structuredClone(__panelTest.data.quota);
+        await __panelTest.visibility(false);
+        __panelTest.data.quota.request_status = 'refreshing';
+        __panelTest.data.quota.sources.macos.status = 'credentials_expired';
+        await __panelTest.push([]);
+        await __panelTest.visibility(true);
+      });
+      await page
+        .getByText(/正在刷新 · 显示上次成功数据|Refreshing · Showing the last successful data/)
+        .waitFor();
+      const cachedQuota = await page.locator('.cp-quota').innerText();
+      const cachedAllowance = await page.locator('.allowance').innerText();
+      assert.ok(cachedAllowance.includes('12,500'));
+      assert.ok((await page.locator('.cp-source .cp-truncate').innerText()).includes('Alex Chen'));
+      await page.evaluate(async () => {
+        __panelTest.data.quota.request_status = 'backoff';
+        __panelTest.data.quota.sources.macos.status = 'network_error';
+        await __panelTest.push([]);
+      });
+      await page.getByText(/额度快照已过期 · 保留最近有效值|Quota snapshot is stale/).waitFor();
+      assert.equal(await page.locator('.cp-quota').innerText(), cachedQuota);
+      assert.equal(await page.locator('.allowance').innerText(), cachedAllowance);
+      await page.evaluate(async () => {
+        __panelTest.data.quota = __panelTest.savedQuota;
+        __panelTest.data.quota.request_status = 'waiting';
+        __panelTest.data.quota.sources.macos.allowance.balance = 9000;
+        await __panelTest.push([]);
+      });
+      await page.locator('.allowance').getByText('9,000', { exact: false }).waitFor();
+      await page.evaluate(async () => {
+        __panelTest.data.quota.buckets = [];
+        __panelTest.data.quota.sources.macos.identity = null;
+        __panelTest.data.quota.sources.macos.profile = null;
+        __panelTest.data.quota.sources.macos.allowance = null;
+        await __panelTest.push([]);
+      });
+      await page.waitForFunction(() => !document.querySelector('.cp-quota'));
+      assert.equal(await page.locator('.allowance').count(), 0);
       assert.deepEqual(errors, []);
       console.log(
         language +
-          ': compact/header drag, update cache, Tibo read, menus, upcoming reset in both tabs/themes, offline cache and deadline expiry passed',
+          ': compact/header drag, update cache, Tibo read, menus, upcoming reset in both tabs/themes, offline cache, deadline expiry and quota cache across hidden refresh/failure/logout passed',
       );
       await page.close();
     }

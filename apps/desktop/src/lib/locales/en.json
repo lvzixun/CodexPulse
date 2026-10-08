@@ -240,6 +240,7 @@
   "暂无可用重置卡": "No reset cards available",
   "重置卡到期时间暂不可用": "Reset card expiration is unavailable",
   "重置卡到期时间未提供": "Reset card expiration not provided",
+  "正在刷新 · 显示上次成功数据": "Refreshing · Showing the last successful data",
   "额度快照已过期 · 保留最近有效值": "Quota snapshot is stale · Keeping the last valid value",
   "上次更新 {_0}": "Last updated {_0}",
   "尚未更新": "Not updated yet",
