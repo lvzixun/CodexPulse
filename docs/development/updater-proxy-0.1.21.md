@@ -16,4 +16,21 @@ Backend 保留现有公共来源上下文，通过 Condvar 等待首次发现，
 
 本机 Rust workspace 180 项通过、7 项显式联网探针默认忽略；Clippy / rustfmt、Svelte（0 错误 / 0 警告）、18 项前端测试和发布清单测试通过。生产前端构建、中英文 IPC 回归（深浅主题、窄宽度、两页倒计时、离线标记、到期状态和单层容器）通过。
 
-正式构建、资产验证、安装及清理结果完成后补充。
+## 正式发布与本机安装
+
+[Windows x64 / macOS Universal 0.1.21 正式版](https://github.com/lvzixun/CodexPulse/releases/tag/v0.1.21) 已发布为 latest，非预发布；源码标签为 `bd909fc226cd3761de7f90ed1ccae9f7631b5898`。[CI #37717830008](https://github.com/lvzixun/CodexPulse/actions/runs/37717830008) 两端全部成功：macOS Rust 180 项、Windows 179 项通过，各 7 项显式联网探针忽略；前端、Clippy、版本 / 架构与签名门禁通过。
+
+实际下载的双平台更新资产再次通过公钥签名、版本绑定和篡改拒绝校验。7 个资产在草稿和正式发布后分别与 GitHub 服务端大小及 SHA-256 比对一致，才切换为 latest。
+
+本机用户和系统 Applications 中的 App 均从已验证 CI 产物安装为 0.1.21；DMG 与归档版本 0.1.21、最低 macOS 12、arm64 + x86_64、严格 ad-hoc 签名和关键文件一致。旧版通过面板退出，确认进程结束后分阶段替换；新版进程来自已替换的用户 Applications。原生设置确认 v0.1.21，总览截图确认只有一层提醒框，Tibo AX 确认同一倒计时与计划时间。
+
+原生启动检查本次显示“暂时无法检查更新”；该机默认 Codex 目录没有 .env，本轮未验证真实代理下载或完整应用内自动升级，不把 CI / 模拟代理测试称为原生升级验收。没有绕过既有等待强制重查。公开 latest / 标签清单在本机匿名 curl 检查中连接超时；一次有界 IPv4 复查定位到 `release-assets.githubusercontent.com:443` 连接超时，系统 HTTP / HTTPS / SOCKS 代理均未启用。该网络检查未计作通过；GitHub API 的正式版本、latest 指向与 7 个资产校验单独复核。外部网页抓取清单也未成功，未作为通过证据。
+
+清理约 2.34 GiB：本轮 Rust target、临时验证工具工程、浏览器测试临时依赖、CI 下载副本、解包 App 及已验证替换后的旧 App 备份；卸载两次验证挂载。保留正式发布资产、校验记录与预览，用户 Downloads 中原有 0.1.20 DMG、Codex 数据和应用数据库未删除。仓库 target 不存在。
+
+
+| 资产 | 字节 | SHA-256 |
+| --- | ---: | --- |
+| CodexPulse_0.1.21_universal.app.tar.gz | 14,084,016 | `c779b22385d5189729de198784b2ff06c24b64f268633c091446ca65b3fd65cb` |
+| CodexPulse_0.1.21_universal.dmg | 13,757,294 | `dc00e0790f32871e73c7829f5f70dfbc9e08390fa9fab21a3777dddc723affb0` |
+| CodexPulse_0.1.21_x64-setup.exe | 5,076,464 | `c183208e2ade68754b6659da8b61975dfea917ead8948e8996223ee43723aeb9` |
