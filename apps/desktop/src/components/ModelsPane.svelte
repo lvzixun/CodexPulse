@@ -1,7 +1,7 @@
 <script lang="ts">
   import { translator as t, locale, localizeError } from '../lib/i18n';
 
-  import { tick } from 'svelte';
+  import { tick, untrack } from 'svelte';
   import { modelPage } from '../lib/ipc';
   import { formatUsd } from '../lib/format';
   import type { ModelPage, ModelPageRequest } from '../lib/types';
@@ -29,6 +29,7 @@
   let loading = $state(false),
     error = $state('');
   let ticket = 0;
+  let loadedRequest = '';
   const number = (n: number) =>
     new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 }).format(n);
   const measure = (value: number, unknown: number, events: number) =>
@@ -39,23 +40,30 @@
     const request = { ...query, cursor: query.cursor ? { ...query.cursor } : null };
     if (!request.cursor) void revision;
     const current = ++ticket;
-    loading = true;
-    error = '';
+    const key = JSON.stringify(request);
+    // Snapshot updates must not disable/dim the already displayed model rows.
+    const foreground = untrack(() => !list || loadedRequest !== key);
+    loading = foreground;
+    if (foreground) error = '';
     void modelPage(request)
       .then((result) => {
-        if (ticket === current) list = result;
+        if (ticket === current) {
+          list = result;
+          loadedRequest = key;
+          error = '';
+        }
       })
       .catch((e) => {
         if (ticket === current) {
           error = String(e);
-          list = null;
+          if (foreground) list = null;
         }
       })
       .finally(async () => {
         if (ticket === current) {
           loading = false;
           await tick();
-          if (ticket === current) ready();
+          if (ticket === current && foreground) ready();
         }
       });
     return () => {

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { translator as t, locale, localizeError } from '../lib/i18n';
   import { modelSpeed } from '../lib/ipc';
+  import { untrack } from 'svelte';
   import { rateValue, speedGeometry, speedTime, tierKey } from '../lib/speed';
   import type { ModelSpeed, SpeedRange, SpeedPoint } from '../lib/types';
   let {
@@ -26,6 +27,7 @@
   let hover = $state<SpeedPoint | null>(null),
     liveHover = $state(false);
   let ticket = 0;
+  let loadedRequest = '';
   const gradientId = $props.id();
   const displayLocale = $derived($locale === 'zh' ? 'zh-CN' : 'en-US');
   const geometry = $derived(speedGeometry(data?.points ?? []));
@@ -54,13 +56,17 @@
     void retry;
     const request = { model, from_day: from, through_day: through, range };
     const id = ++ticket;
-    loading = true;
-    error = '';
+    const key = JSON.stringify(request);
+    const foreground = untrack(() => !data || loadedRequest !== key);
+    loading = foreground;
+    if (foreground) error = '';
     void modelSpeed(request)
       .then((result) => {
         if (id === ticket) {
           const previous = hover;
           data = result;
+          loadedRequest = key;
+          error = '';
           hover = previous
             ? (result.points.find(
                 (p) =>

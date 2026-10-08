@@ -13,7 +13,7 @@ import {mockIPC,mockWindows} from '__API__/mocks.js';
 window.isTauri=true;mockWindows('pulse');
 const {empty}=await import('/src/lib/ipc.ts');
 const {previewSnapshot,previewView,previewModels,previewModelSpeed}=await import('/src/lib/readme-preview.ts');
-const state=window.__speedTest={data:previewSnapshot(empty),fail:false,none:false,requests:[]};
+const state=window.__speedTest={data:previewSnapshot(empty),fail:false,none:false,requests:[],listRequests:0,hold:null,failList:false};
 const view={...previewView(),mode:'details',page:'models'};
 let emit;
 mockIPC(async(cmd,args)=>{
@@ -24,16 +24,17 @@ mockIPC(async(cmd,args)=>{
  if(cmd==='get_app_update_info')return {current_version:'0.1.23',status:'up_to_date',revision:1};
  if(cmd==='remember_view')return;
  if(cmd==='plugin:window|is_visible')return true;
- if(cmd==='get_model_page')return previewModels(state.data);
+ if(cmd==='get_model_page'){state.listRequests++;if(state.hold)await state.hold;if(state.failList)throw Error('Cannot read model list.');return previewModels(state.data);}
  if(cmd==='get_model_speed'){
   state.requests.push({...args.request});
+  if(state.hold)await state.hold;
   if(state.fail)throw Error('Cannot read run speeds. Please try again.');
   return state.none?{output_tokens:0,elapsed_ms:0,samples:0,service_tier:null,points:[],current:null,history_pending:false}:previewModelSpeed(args.request);
  }
  throw Error('Unexpected mock IPC: '+cmd);
 },{shouldMockEvents:true});
 ({emit}=await import('__API__/event.js'));
-state.push=async()=>{state.data.updated_at=new Date().toISOString();await emit('snapshot-changed')};
+state.push=async()=>{state.data.updated_at=new Date(Date.parse(state.data.updated_at)+1).toISOString();await emit('snapshot-changed')};
 await import('/src/main.ts');
 `.replaceAll('__API__', api);
 (async () => {
@@ -120,6 +121,76 @@ await import('/src/main.ts');
         await page.waitForFunction(
           () => document.querySelectorAll('.cp-speed-chart circle').length === 50,
         );
+        // Slow local reads must not blink/dim existing rows, unmount the chart,
+        // steal focus, or clear successful content on a background failure.
+        await page.locator('.cp-speed-current').focus();
+        await page.evaluate(() => {
+          const s = window.__speedTest;
+          s.row = document.querySelector('.cp-modelrow');
+          s.chart = document.querySelector('.cp-speed-chart');
+          s.current = document.querySelector('.cp-speed-current');
+          s.opacity = getComputedStyle(s.row).opacity;
+          s.curve = s.chart.querySelector('.curve').getAttribute('d');
+          s.hold = new Promise((resolve) => (s.release = resolve));
+        });
+        const counts = await page.evaluate(() => [
+          window.__speedTest.listRequests,
+          window.__speedTest.requests.length,
+        ]);
+        for (let update = 0; update < 3; update++) {
+          await page.evaluate(() => window.__speedTest.push());
+          await page.waitForFunction(
+            ([lists, speeds]) =>
+              window.__speedTest.listRequests > lists &&
+              window.__speedTest.requests.length > speeds,
+            [counts[0] + update, counts[1] + update],
+          );
+          assert.deepEqual(
+            await page.evaluate(() => {
+              const s = window.__speedTest;
+              return {
+                disabled: s.row.disabled,
+                opacity: getComputedStyle(s.row).opacity === s.opacity,
+                row: s.row === document.querySelector('.cp-modelrow'),
+                chart: s.chart === document.querySelector('.cp-speed-chart'),
+                curve: s.curve === s.chart.querySelector('.curve').getAttribute('d'),
+                focus: document.activeElement === s.current,
+                busy: !!document.querySelector('.cp-speed[aria-busy="true"]'),
+              };
+            }),
+            {
+              disabled: false,
+              opacity: true,
+              row: true,
+              chart: true,
+              curve: true,
+              focus: true,
+              busy: false,
+            },
+          );
+        }
+        await page.evaluate(() => {
+          const s = window.__speedTest;
+          s.hold = null;
+          s.release();
+        });
+        await page.evaluate(() => {
+          window.__speedTest.failList = true;
+          return window.__speedTest.push();
+        });
+        await page.getByRole('alert').filter({ hasText: 'Cannot read model list.' }).waitFor();
+        assert.equal(await page.locator('.cp-modelrow').count(), 3);
+        assert.equal(await page.locator('.cp-speed-chart circle').count(), 50);
+        await page.evaluate(() => {
+          window.__speedTest.failList = false;
+          return window.__speedTest.push();
+        });
+        await page.waitForFunction(
+          () =>
+            ![...document.querySelectorAll('[role="alert"]')].some((el) =>
+              el.textContent.includes('Cannot read model list.'),
+            ),
+        );
         const before = await page.evaluate(() => window.__speedTest.requests.length);
         await page.clock.fastForward(61000);
         await page.waitForFunction(() => !document.querySelector('.cp-speed-current'));
@@ -129,7 +200,7 @@ await import('/src/main.ts');
         await page.waitForFunction(() => !document.querySelector('.cp-speed-chart'));
         assert.deepEqual(errors, []);
         console.log(
-          `${language} ${width}px: modes, local time, ranges, themes, cached error/retry, sample expiry and empty state passed`,
+          `${language} ${width}px: modes, local time, ranges, themes, cached error/retry, stable delayed background updates, sample expiry and empty state passed`,
         );
         await page.close();
       }
