@@ -73,6 +73,8 @@ await import('/src/main.ts');
         await page.locator('.cp-modelrow').first().click();
         await page.locator('.cp-speed-chart').waitFor();
         assert.equal(await page.locator('.cp-speed-chart circle').count(), 50);
+        if (language === 'en')
+          assert.doesNotMatch(await page.locator('.cp-speed').innerText(), /\p{Script=Han}/u);
         const ticks = await page.locator('.cp-speed-chart text').allTextContents();
         assert.ok(ticks.includes('09:24'));
         assert.ok(ticks.includes('21:24'));

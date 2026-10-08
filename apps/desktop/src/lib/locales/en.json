@@ -557,5 +557,6 @@
   "历史补采中": "Collecting history",
   "按时间段加权汇总": "Weighted time buckets",
   "有效轮次的总输出除以总运行耗时，不包含会话空闲。": "Total output divided by total valid run duration; excludes session idle time.",
-  "无法读取运行速度，请重试": "Cannot read run speeds. Please try again."
+  "无法读取运行速度，请重试": "Cannot read run speeds. Please try again.",
+  "当前": "Current"
 }
