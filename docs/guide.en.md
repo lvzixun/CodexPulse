@@ -29,6 +29,7 @@ The **macOS menu bar** shows busy / idle / unknown, the current model, and avera
 ## Settings and refresh
 
 - **Appearance:** dark, light, or system theme. Blue is the default accent; violet, teal, amber, and rose are also available.
+- **Windows 10 glass:** uses an opaque background to avoid slow window dragging. The glass switch is disabled, and previously enabled glass settings are turned off automatically.
 - **Independent refresh:** configure automatic or manual refresh and intervals separately for account limits and Codex Resets messages, or refresh immediately. Manual mode shows cached data at startup and makes no background requests for that group. Translation runs only when clicked.
 - **On-demand collection:** on Windows, automatic account requests require expanded, visible details; the compact window makes no account requests. macOS runs once at startup, then on schedule while the panel is visible. Reopening refreshes only when the cache is due. Local log collection and public message refresh run independently.
 

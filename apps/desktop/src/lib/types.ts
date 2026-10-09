@@ -51,6 +51,7 @@ export interface ViewState {
   model_query: ModelPageRequest;
   scroll: Record<string, number>;
   glass_supported: boolean;
+  glass_available: boolean;
   floating_supported: boolean;
 }
 export interface ModelUsage {

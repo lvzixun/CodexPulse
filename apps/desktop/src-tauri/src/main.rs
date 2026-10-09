@@ -215,10 +215,11 @@ fn remember_view(
 }
 #[tauri::command]
 async fn set_settings(
-    settings: Settings,
+    mut settings: Settings,
     app: tauri::AppHandle,
     state: State<'_, Backend>,
 ) -> Result<(), String> {
+    settings.glass &= material::glass_available();
     settings.validate()?;
     let (tx, rx) = tokio::sync::oneshot::channel();
     state

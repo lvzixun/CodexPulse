@@ -1,5 +1,31 @@
+/// OS capability, independent of the user's glass preference and accessibility settings.
+pub fn glass_available() -> bool {
+    #[cfg(windows)]
+    {
+        static AVAILABLE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        *AVAILABLE.get_or_init(|| {
+            // RtlGetVersion reports the real build; Windows 11 also has major version 10.
+            let version = windows_version::OsVersion::current();
+            windows_glass_available(version.major, version.minor, version.build)
+        })
+    }
+    #[cfg(not(windows))]
+    {
+        cfg!(target_os = "macos")
+    }
+}
+
+#[cfg(any(windows, test))]
+fn windows_glass_available(major: u32, minor: u32, build: u32) -> bool {
+    // Acrylic causes slow native window dragging on Windows 10. Keep it disabled there.
+    (major, minor, build) >= (10, 0, 22_000)
+}
+
 /// Native preferences are consulted at show/theme changes, not on every rendered frame.
 pub fn transparency_allowed() -> bool {
+    if !glass_available() {
+        return false;
+    }
     #[cfg(windows)]
     {
         use windows_sys::Win32::{
@@ -57,5 +83,27 @@ pub fn transparency_allowed() -> bool {
     #[cfg(not(any(windows, target_os = "macos")))]
     {
         false
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn windows_10_and_unknown_versions_cannot_enable_glass() {
+        for version in [
+            (0, 0, 0),
+            (6, 3, 9600),
+            (10, 0, 15063),
+            (10, 0, 17763),
+            (10, 0, 19045),
+            (10, 0, 21999),
+        ] {
+            assert!(!windows_glass_available(version.0, version.1, version.2));
+        }
+        for version in [(10, 0, 22000), (10, 0, 22621), (10, 0, 26100), (11, 0, 0)] {
+            assert!(windows_glass_available(version.0, version.1, version.2));
+        }
     }
 }

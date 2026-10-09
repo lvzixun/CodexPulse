@@ -106,6 +106,7 @@
   let compactMenuBusy = false;
   let compactMenuDisposed = false;
   let glassSupported = $state(!native);
+  let glassAvailable = $state(!native);
   let floatingSupported = $state(true);
   let scroll = $state<Record<string, number>>({});
   let content: HTMLDivElement | undefined = $state();
@@ -316,6 +317,7 @@
       model_query: modelQuery,
       scroll: { ...scroll },
       glass_supported: glassSupported,
+      glass_available: glassAvailable,
       floating_supported: floatingSupported,
     };
     if (!viewReady) return;
@@ -384,6 +386,7 @@
     try {
       await saveSettings({
         ...settings,
+        glass: glassAvailable && settings.glass,
         windows_home: path.trim() || null,
         quota_refresh: data.settings.quota_refresh,
         news_refresh: data.settings.news_refresh,
@@ -578,6 +581,7 @@
               modelQuery = view.model_query;
             scroll = view.scroll;
             glassSupported = view.glass_supported;
+            glassAvailable = view.glass_available;
             floatingSupported = view.floating_supported;
           }
           viewReady = true;
@@ -627,7 +631,7 @@
   class:native-shell={native}
   class:compact={mode === 'compact'}
   class:menubar={!floatingSupported}
-  class:opaque={!settings.glass || !glassSupported}
+  class:opaque={!glassAvailable || !settings.glass || !glassSupported}
   data-theme={data.settings.theme}
   data-accent={settings.accent ?? 'blue'}
 >
@@ -980,13 +984,18 @@
             ></label
           ><label class="cp-setting"
             ><span
-              >{$t('毛玻璃效果')}<small class="cp-setting-hint">{$t('关闭后使用不透明背景')}</small
+              >{$t('毛玻璃效果')}<small class="cp-setting-hint"
+                >{$t(
+                  glassAvailable ? '关闭后使用不透明背景' : '当前系统已禁用毛玻璃，使用不透明背景',
+                )}</small
               ></span
             ><input
               type="checkbox"
               role="switch"
               switch={floatingSupported ? undefined : true}
-              bind:checked={settings.glass}
+              disabled={!glassAvailable}
+              checked={glassAvailable && settings.glass}
+              onchange={(e) => (settings.glass = glassAvailable && e.currentTarget.checked)}
             /></label
           >
           <label class="cp-setting"

@@ -239,6 +239,7 @@ export function previewView(): ViewState {
     model_query: { from_day: '', through_day: '', cursor: null, direction: 'next' },
     scroll: {},
     glass_supported: false,
+    glass_available: true,
     floating_supported: windows,
   };
 }

@@ -53,7 +53,7 @@ impl Default for Settings {
             theme: "system".into(),
             language: "system".into(),
             accent: "blue".into(),
-            glass: true,
+            glass: crate::material::glass_available(),
             floating: cfg!(windows),
             always_on_top: true,
             windows_enabled: true,
@@ -858,6 +858,7 @@ impl Backend {
                             let _ = reply.send(result);
                         }
                         Ok(Message::Settings(mut next, reply)) => {
+                            next.glass &= crate::material::glass_available();
                             // Location is host-owned and can change while a UI settings draft is open.
                             next.compact_anchor = settings.compact_anchor.clone();
                             next.compact_position = settings.compact_position;
@@ -1535,18 +1536,27 @@ fn sync_system_timezone(
 }
 
 fn initial_settings(store: &Store) -> Result<Settings, Box<dyn std::error::Error>> {
+    load_settings(store, crate::material::glass_available())
+}
+
+fn load_settings(
+    store: &Store,
+    glass_available: bool,
+) -> Result<Settings, Box<dyn std::error::Error>> {
     let stored = store.setting::<serde_json::Value>("app")?;
     let has_timezone = stored
         .as_ref()
         .is_some_and(|value| value.get("timezone").is_some());
-    let settings: Settings = stored
+    let mut settings: Settings = stored
         .map(serde_json::from_value)
         .transpose()?
         .unwrap_or_default();
+    let glass_disabled = settings.glass && !glass_available;
+    settings.glass &= glass_available;
     settings.validate().map_err(std::io::Error::other)?;
     // Persist the published calendar before collecting facts. Later OS changes
     // rebuild the calendar instead of mixing old and new date buckets.
-    if !has_timezone {
+    if !has_timezone || glass_disabled {
         store.set_setting("app", &settings)?;
     }
     Ok(settings)
@@ -2597,6 +2607,34 @@ mod tests {
         assert!(decoded.validate().is_ok());
         settings.language = "fr".into();
         assert!(settings.validate().is_err());
+    }
+
+    #[test]
+    fn unsupported_glass_is_disabled_and_persisted_without_changing_other_settings() {
+        for available in [false, true] {
+            let store = Store::in_memory().unwrap();
+            let previous = Settings {
+                glass: true,
+                theme: "light".into(),
+                language: "en".into(),
+                accent: "rose".into(),
+                timezone: "Asia/Shanghai".into(),
+                ..Default::default()
+            };
+            store.set_setting("app", &previous).unwrap();
+            let mut expected = serde_json::to_value(&previous).unwrap();
+            expected["glass"] = available.into();
+            let loaded = load_settings(&store, available).unwrap();
+            assert_eq!(serde_json::to_value(&loaded).unwrap(), expected);
+            assert_eq!(
+                store.setting::<serde_json::Value>("app").unwrap().unwrap(),
+                expected
+            );
+            assert_eq!(
+                serde_json::to_value(load_settings(&store, available).unwrap()).unwrap(),
+                expected
+            );
+        }
     }
     #[test]
     fn hiding_names_removes_ipc_values_without_changing_statistics_or_internal_titles() {

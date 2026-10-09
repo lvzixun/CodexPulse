@@ -29,6 +29,8 @@ pub struct ViewState {
     pub model_query: pulse_core::storage::ModelPageRequest,
     pub scroll: std::collections::BTreeMap<String, f64>,
     pub glass_supported: bool,
+    #[serde(default = "crate::material::glass_available")]
+    pub glass_available: bool,
     pub floating_supported: bool,
 }
 fn default_news_limit() -> u32 {
@@ -47,6 +49,7 @@ impl Default for ViewState {
             model_query: Default::default(),
             scroll: Default::default(),
             glass_supported: false,
+            glass_available: crate::material::glass_available(),
             floating_supported: cfg!(windows),
         }
     }

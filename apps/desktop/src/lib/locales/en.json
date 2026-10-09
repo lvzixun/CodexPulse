@@ -91,6 +91,7 @@
   "深色": "Dark",
   "毛玻璃效果": "Glass effect",
   "关闭后使用不透明背景": "Use an opaque background when disabled",
+  "当前系统已禁用毛玻璃，使用不透明背景": "Glass is disabled on this system. An opaque background is used.",
   "隐藏会话标题": "Hide session titles",
   "详情使用短 ID，悬停提示也隐藏名称": "Use short IDs in details and hide titles in tooltips",
   "隐藏项目名称": "Hide project names",
