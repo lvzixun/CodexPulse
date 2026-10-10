@@ -13,7 +13,7 @@ import {mockIPC,mockWindows} from '__API__/mocks.js';
 window.isTauri=true;mockWindows('pulse');
 const {empty}=await import('/src/lib/ipc.ts');
 const {previewSnapshot,previewView,previewModels,previewModelSpeed}=await import('/src/lib/readme-preview.ts');
-const state=window.__speedTest={data:previewSnapshot(empty),fail:false,none:false,requests:[],listRequests:0,hold:null,failList:false};
+const state=window.__speedTest={data:previewSnapshot(empty),fail:false,none:false,requests:[],listRequests:0,hold:null,failList:false,duplicate:false,speedFixtures:{}};
 const view={...previewView(),mode:'details',page:'models'};
 let emit;
 mockIPC(async(cmd,args)=>{
@@ -29,7 +29,10 @@ mockIPC(async(cmd,args)=>{
   state.requests.push({...args.request});
   if(state.hold)await state.hold;
   if(state.fail)throw Error('Cannot read run speeds. Please try again.');
-  return state.none?{output_tokens:0,elapsed_ms:0,samples:0,service_tier:null,points:[],current:null,history_pending:false}:previewModelSpeed(args.request);
+  if(state.none)return {output_tokens:0,elapsed_ms:0,samples:0,service_tier:null,points:[],current:null,history_pending:false};
+  const result=structuredClone(state.speedFixtures[args.request.range]??=previewModelSpeed(args.request));
+  if(state.duplicate)result.points.push({...result.points[0],output_tokens:result.points[0].output_tokens*3});
+  return result;
  }
  throw Error('Unexpected mock IPC: '+cmd);
 },{shouldMockEvents:true});
@@ -55,6 +58,9 @@ await import('/src/main.ts');
         page.setDefaultTimeout(15000);
         const errors = [];
         page.on('pageerror', (e) => errors.push(e.message));
+        page.on('console', (message) => {
+          if (message.text().includes('state_proxy_equality_mismatch')) errors.push(message.text());
+        });
         await page.clock.install({ time: new Date('2026-10-08T13:25:00Z') });
         await page.route('**/__speed_test__.js', (route) =>
           route.fulfill({ contentType: 'text/javascript', body: boot }),
@@ -107,6 +113,32 @@ await import('/src/main.ts');
         assert.match(
           await page.locator('.cp-speed-tooltip').innerText(),
           language === 'zh' ? /标准/ : /Standard/,
+        );
+        assert.equal(await page.locator('.cp-speed-chart circle').first().getAttribute('r'), '4');
+        const selectedRate = Number(await page.locator('.cp-speed-tooltip strong').innerText());
+        await page.evaluate(() => {
+          window.__speedTest.duplicate = true;
+          return window.__speedTest.push();
+        });
+        await page.waitForFunction(
+          (rate) =>
+            Number(document.querySelector('.cp-speed-tooltip strong')?.textContent) > rate * 1.9,
+          selectedRate,
+        );
+        assert.equal(await page.locator('.cp-speed-chart circle').first().getAttribute('r'), '4');
+        assert.match(
+          await page.locator('.cp-speed-chart circle').first().getAttribute('class'),
+          /visible/,
+        );
+        assert.equal(await page.locator('.cp-speed-chart circle').count(), 120);
+        await page.evaluate(() => {
+          window.__speedTest.duplicate = false;
+          return window.__speedTest.push();
+        });
+        await page.waitForFunction(
+          (rate) =>
+            Number(document.querySelector('.cp-speed-tooltip strong')?.textContent) < rate * 1.1,
+          selectedRate,
         );
         await page.locator('.cp-speed-chart circle').first().blur();
         for (const theme of ['dark', 'light']) {

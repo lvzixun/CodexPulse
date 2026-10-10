@@ -24,7 +24,7 @@
     error = $state(''),
     retry = $state(0),
     loading = $state(false);
-  let hover = $state<SpeedPoint | null>(null),
+  let hover = $state<number | null>(null),
     liveHover = $state(false);
   let ticket = 0;
   let loadedRequest = '';
@@ -38,7 +38,9 @@
       ? data.current
       : null,
   );
-  const tip = $derived(liveHover ? current : hover);
+  const tip = $derived(
+    liveHover ? current : (geometry.points.find((p) => p.time === hover)?.sample ?? null),
+  );
   const rate = (sample: SpeedPoint) =>
     rateValue(sample)?.toLocaleString(displayLocale, {
       minimumFractionDigits: 1,
@@ -63,16 +65,11 @@
     void modelSpeed(request)
       .then((result) => {
         if (id === ticket) {
-          const previous = hover;
           data = result;
           loadedRequest = key;
           error = '';
-          hover = previous
-            ? (result.points.find(
-                (p) =>
-                  p.measured_at === previous.measured_at && p.started_at === previous.started_at,
-              ) ?? null)
-            : null;
+          if (hover !== null && !result.points.some((p) => Date.parse(p.measured_at) === hover))
+            hover = null;
         }
       })
       .catch((e) => {
@@ -145,21 +142,21 @@
       {#each geometry.points as p}<circle
           cx={p.x}
           cy={p.y}
-          r={hover === p.sample ? 4 : 3}
-          class:visible={hover === p.sample || p === geometry.points.at(-1)}
+          r={hover === p.time ? 4 : 3}
+          class:visible={hover === p.time || p === geometry.points.at(-1)}
           tabindex="0"
           role="button"
-          onclick={() => (hover = p.sample)}
+          onclick={() => (hover = p.time)}
           onkeydown={(event) => {
             if (event.key === 'Enter' || event.key === ' ') {
               event.preventDefault();
-              hover = p.sample;
+              hover = p.time;
             }
           }}
           aria-label={`${time(p.time, true)} · ${rate(p.sample)} tok/s · ${$t(tierKey(p.sample.service_tier))}`}
-          onmouseenter={() => (hover = p.sample)}
+          onmouseenter={() => (hover = p.time)}
           onmouseleave={() => (hover = null)}
-          onfocus={() => (hover = p.sample)}
+          onfocus={() => (hover = p.time)}
           onblur={() => (hover = null)}
         />{/each}
       {#each geometry.first === geometry.last ? [0] : [0, 0.5, 1] as fraction}<text
