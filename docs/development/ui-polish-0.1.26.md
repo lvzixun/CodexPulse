@@ -17,4 +17,8 @@ macOS 使用系统 Popover 材质、系统字体与 WebKit 原生开关的固有
 
 ## 发布
 
-版本统一为 0.1.26，准备 Windows x64 与 macOS Universal 正式安装包及签名更新文件。双平台 CI 和最终资产验收完成后补录发布结果。
+已发布 [0.1.26 双平台正式版](https://github.com/lvzixun/CodexPulse/releases/tag/v0.1.26)，构建源 `1cfb227`，[CI 38067196873](https://github.com/lvzixun/CodexPulse/actions/runs/38067196873) 全部成功：Windows 190 项、macOS 191 项 Rust 测试，各忽略 7 项显式联网探针；Svelte、22 项 Node 测试及 Clippy 通过。Windows x64 PE 与应用 / NSIS 产品版本验证通过；macOS 双架构及严格 ad-hoc 签名验证通过。
+
+下载后的两个更新包均通过签名、版本绑定与篡改拒绝复核；macOS DMG 和更新归档的版本、最低系统 12.0、arm64 / x86_64、图标、严格签名及可执行文件一致性通过。发布前后全部 7 个服务端资产的大小 / SHA-256 与本地一致；最新正式 Release 和匿名公开更新清单均确认为 0.1.26。
+
+本机 `~/Applications/CodexPulse.app` 已替换为同一 CI Universal 包，安装文件签名及可执行文件哈希核对通过，原候选包保留备份。最终安装时 CUA 返回 `cgWindowNotFound`，无法进行退出 / 重启和最终版本的原生界面复核；当前候选进程需退出后重开。此前原生视觉及隐藏保留验证属于本轮候选版，未把它写成 CI 正式包重启验收。正式产物与验收记录保存在 Git 忽略的 `releases/v0.1.26`，开发服务器已停止。
