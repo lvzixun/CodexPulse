@@ -1,73 +1,52 @@
 <script lang="ts">
   import { translator as t, locale, localizeError } from '../lib/i18n';
+  import { untrack } from 'svelte';
 
-  import { sourceNames, formatUsd } from '../lib/format';
-  import { sessionDetail, openSource } from '../lib/ipc';
-  import type { SessionDetail, TokenMeasure, UsageBreakdown, SourceHealth } from '../lib/types';
-  import Icon from './Icon.svelte';
+  import { formatUsd } from '../lib/format';
+  import { sessionDetail } from '../lib/ipc';
+  import type { SessionDetail, TokenMeasure } from '../lib/types';
   let {
     id,
     revision,
     hideProjects,
-    sources,
     ready,
   }: {
     id: string;
     revision: string | null;
     hideProjects: boolean;
-    sources: SourceHealth[];
     ready: () => void;
   } = $props();
   let detail = $state<SessionDetail | null>(null),
     detailLoading = $state(false),
     detailError = $state('');
-  let modelsAfter = $state<string | null>(null),
-    pricesAfter = $state<string | null>(null);
   let detailTicket = 0,
     lastDetailId: string | null = null;
+  let loadedRequest = '';
   const number = (n: number) =>
     new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 }).format(n);
-  const time = (ts: string | null) =>
-    ts && Number.isFinite(Date.parse(ts))
-      ? new Date(ts).toLocaleString($locale === 'zh' ? 'zh-CN' : 'en-US', {
-          month: 'short',
-          day: 'numeric',
-          hour: '2-digit',
-          minute: '2-digit',
-        })
-      : $t('时间未知');
   const measure = (value: TokenMeasure, events: number) =>
     events === 0 || value.unknown_events === events
       ? '—'
       : `${number(value.known)}${value.unknown_events ? '*' : ''}`;
-  const money = (usage: UsageBreakdown) =>
-    usage.events === 0
-      ? '—'
-      : usage.unpriced_events === usage.events
-        ? $t('待计价')
-        : `${formatUsd(usage.cost_nanousd)}${usage.unpriced_events ? '*' : ''}`;
-  const rate = (micros: number | null) =>
-    micros === null
-      ? $t('未知')
-      : `$${(micros / 1e6).toLocaleString('en-US', { maximumFractionDigits: 6 })}`;
   $effect(() => {
     const selectedId = id;
     if (selectedId !== lastDetailId) {
-      modelsAfter = null;
-      pricesAfter = null;
       lastDetailId = selectedId;
       detail = null;
     }
-    const request = { id: selectedId, models_after: modelsAfter, prices_after: pricesAfter };
+    const request = { id: selectedId, models_after: null, prices_after: null };
+    const key = JSON.stringify(request);
+    const foreground = untrack(() => !detail || loadedRequest !== key);
     void revision;
     const ticket = ++detailTicket;
     detailError = '';
     if (selectedId) {
-      detailLoading = true;
+      detailLoading = foreground;
       void sessionDetail(request)
         .then((result) => {
           if (ticket === detailTicket) {
             detail = result;
+            loadedRequest = key;
             if (!result) detailError = '该 session 暂无可读取元数据';
           }
         })
@@ -77,7 +56,7 @@
         .finally(() => {
           if (ticket === detailTicket) {
             detailLoading = false;
-            ready();
+            if (foreground) ready();
           }
         });
     } else detailLoading = false;
@@ -85,13 +64,6 @@
       detailTicket++;
     };
   });
-  async function source(url: string) {
-    try {
-      await openSource(url);
-    } catch (e) {
-      detailError = String(e);
-    }
-  }
 </script>
 
 <section class="cp-detail cp-session-detail" aria-busy={detailLoading}>
@@ -99,18 +71,21 @@
   {#if detailError}<p class="cp-note" role="alert">{localizeError(detailError, $locale)}</p>{/if}
   {#if detail}
     {@const usage = detail.usage}
-    {#if detail.session.meta.project && !hideProjects}<p class="cp-note">
-        {$t('项目：')}{detail.session.meta.project}
-      </p>{/if}
-    <p class="cp-note">
-      {detail.session.models.length === 1
-        ? detail.session.models[0]
-        : detail.session.models.length
-          ? $t('{_0}{_1} 个模型', {
-              _0: detail.session.models.length,
-              _1: detail.session.models.length === 50 ? '+' : '',
-            })
-          : $t('模型未知')} · {sourceNames(detail.session.sources, sources)}
+    <p class="cp-note cp-session-context">
+      {#if detail.session.meta.project && !hideProjects}<span
+          class="cp-truncate"
+          title={detail.session.meta.project}>{detail.session.meta.project}</span
+        ><span aria-hidden="true">·</span>{/if}
+      <span class="cp-truncate">
+        {detail.session.models.length === 1
+          ? detail.session.models[0]
+          : detail.session.models.length
+            ? $t('{_0}{_1} 个模型', {
+                _0: detail.session.models.length,
+                _1: detail.session.models.length === 50 ? '+' : '',
+              })
+            : $t('模型未知')}</span
+      >
     </p>
     <div class="cp-metrics">
       <div><span>Session tokens</span><strong>{measure(usage.total, usage.events)}</strong></div>
@@ -138,129 +113,15 @@
         >
       </div>
     </div>
-    <p class="cp-note">
-      {usage.events}
-      {$t('条归属记录 ·')}
-      {time(usage.started_at)} — {time(usage.ended_at)}
-    </p>
-    <p class="cp-note cp-id">
-      Session ID：{detail.session.meta.id}{detail.session.meta.parent_id
-        ? $t(' · 继承自 {_0}', { _0: detail.session.meta.parent_id })
-        : ''}
-    </p>
-    {#if usage.events === 0}<p class="cp-note">{$t('尚无可归属的用量记录。')}</p>{:else}
-      <div class="cp-metrics cp-breakdown">
-        <div><span>{$t('输入')}</span><strong>{measure(usage.input, usage.events)}</strong></div>
-        <div>
-          <span>{$t('其中缓存读取')}</span><strong>{measure(usage.cached, usage.events)}</strong>
-        </div>
-        <div><span>{$t('输出')}</span><strong>{measure(usage.output, usage.events)}</strong></div>
-      </div>
-      <p class="cp-note">
-        {$t('缓存写入')}
-        {measure(usage.cache_write, usage.events)}
-        {$t('· 输出中的推理')}
-        {measure(usage.reasoning, usage.events)}{$t(
-          '。缓存属于输入，推理属于输出，不重复相加。* 表示已知部分，缺失字段保留未知。',
-        )}
+    {#if usage.events > 0}
+      <p class="cp-session-breakdown">
+        <span>{$t('输入')} {measure(usage.input, usage.events)}</span>
+        <span>{$t('其中缓存')} {measure(usage.cached, usage.events)}</span>
+        <span>{$t('输出')} {measure(usage.output, usage.events)}</span>
       </p>
-      <details class="cp-session-advanced">
-        <summary>{$t('模型与计价依据')}</summary>
-        <div class="cp-sectionhead cp-modelheading">
-          <span>{$t('Session 的模型分类')}</span><small>{$t('每页最多 50 个')}</small>
-        </div>
-        {#each detail.models as m}<div class="cp-session-model">
-            <div class="cp-sectionhead">
-              <span>{m.model}</span><small
-                >{measure(m.usage.total, m.usage.events)} tok · {money(m.usage)}</small
-              >
-            </div>
-            <p class="cp-note">
-              {$t('输入')}
-              {measure(m.usage.input, m.usage.events)}
-              {$t('· 缓存读取')}
-              {measure(m.usage.cached, m.usage.events)}
-              {$t('· 输出')}
-              {measure(m.usage.output, m.usage.events)}
-            </p>
-          </div>{/each}
-        <div class="cp-pager">
-          <button
-            disabled={modelsAfter === null || detailLoading}
-            onclick={() => (modelsAfter = null)}>{$t('模型首页')}</button
-          ><button
-            disabled={!detail.models_next || detailLoading}
-            onclick={() => (modelsAfter = detail!.models_next)}
-            >{$t('下一页模型')} <Icon name="right" /></button
-          >
-        </div>
-        <div class="cp-sectionhead cp-modelheading">
-          <span>{$t('计价依据与覆盖')}</span><small
-            >{usage.events - usage.unpriced_events} / {usage.events} {$t('条已计价')}</small
-          >
-        </div>
-        <p class="cp-note">
-          {number(usage.unpriced_tokens)}
-          {$t('个已知 tokens、')}{usage.unpriced_events}
-          {$t('条记录未计价。美元数是 API 等价参考值；订阅实际账单以服务商为准。')}
-        </p>
-        {#each detail.prices as price}<details class="cp-price">
-            <summary
-              ><span>{price.version ?? $t('未计价 / 依据缺失')}</span><small
-                >{price.events === price.unknown_totals
-                  ? '—'
-                  : number(price.tokens) + (price.unknown_totals ? '*' : '')} tok · {price.events}
-                {$t('条')}</small
-              ></summary
-            >
-            {#if price.reference}<p class="cp-note">
-                {price.reference.model} · {price.reference.service_tier}
-                {$t('· 单次输入')}
-                {price.reference.min_input ?? 0} — {price.reference.max_input ?? $t('不限')} tokens
-              </p>
-              <p class="cp-note">
-                {$t('每百万 tokens：输入')}
-                {rate(price.reference.input_microusd)}
-                {$t('· 缓存读取')}
-                {rate(price.reference.cached_microusd)}
-                {$t('· 缓存写入')}
-                {rate(price.reference.cache_write_microusd)}
-                {$t('· 输出')}
-                {rate(price.reference.output_microusd)}
-              </p>
-              <p class="cp-note">
-                {$t('核查日期')}
-                {price.reference.checked_at}
-                {$t('· 适用时间')}
-                {time(price.reference.effective_from)} — {price.reference.effective_to
-                  ? time(price.reference.effective_to)
-                  : $t('尚未设置结束时间')}
-              </p>
-              <button class="cp-textbutton" onclick={() => void source(price.reference!.source_url)}
-                >{$t('查看价格来源')} <Icon name="external" /></button
-              >
-            {:else}<p class="cp-note">
-                {price.version
-                  ? $t('该历史价格版本的来源条目当前未内置；保留已记录费用。')
-                  : $t('缺少适用价格或计价所需元数据，不按零费用处理。')}
-              </p>{/if}
-          </details>{/each}
-        <div class="cp-pager">
-          <button
-            disabled={pricesAfter === null || detailLoading}
-            onclick={() => (pricesAfter = null)}>{$t('价格首页')}</button
-          ><button
-            disabled={!detail.prices_next || detailLoading}
-            onclick={() => (pricesAfter = detail!.prices_next)}
-            >{$t('下一页价格')} <Icon name="right" /></button
-          >
-        </div>
-      </details>
+    {:else}<p class="cp-note">{$t('尚无可归属的用量记录。')}</p>{/if}
+    {#if !detail.session.reference.pending && detail.session.reference.unpriced_events > 0 && detail.session.reference.unpriced_events < usage.events}
+      <p class="cp-note cp-session-estimate-note">{$t('* 估算未覆盖全部用量')}</p>
     {/if}
-    <p class="cp-note">
-      {$t('按')}
-      {detail.session.reference.price_date}
-      {$t('API 价格估算。tok/s 为轮次平均输出，包含推理、工具执行与等待，按日志样本更新。')}
-    </p>
   {/if}
 </section>

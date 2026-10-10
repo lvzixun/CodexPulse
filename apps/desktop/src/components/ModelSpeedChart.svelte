@@ -161,12 +161,7 @@
           onmouseleave={() => (hover = null)}
           onfocus={() => (hover = p.sample)}
           onblur={() => (hover = null)}
-          ><title
-            >{time(p.time, true)} · {rate(p.sample)} tok/s · {$t(
-              tierKey(p.sample.service_tier),
-            )}</title
-          ></circle
-        >{/each}
+        />{/each}
       {#each geometry.first === geometry.last ? [0] : [0, 0.5, 1] as fraction}<text
           x={geometry.first === geometry.last ? 173 : 30 + fraction * 281}
           y="118"
@@ -181,23 +176,20 @@
   {:else}<p class="cp-note">
       {data?.history_pending ? $t('正在补采运行样本…') : $t('尚无有效运行样本')}
     </p>{/if}
-  {#if tip}<div class="cp-speed-tooltip" role="tooltip">
-      <b>{$t('本轮模式')} <span class="cp-speed-tier">{$t(tierKey(tip.service_tier))}</span></b
-      ><span><span>{$t('模型')}</span><span>{model}</span></span><span
-        ><span>{$t('运行均速')}</span><span>{rate(tip)} tok/s</span></span
-      ><span><span>{$t('本地时间')}</span><span>{time(tip.measured_at, true)}</span></span
-      >{#if tip.samples > 1}<span>{$t('{_0} 轮加权均速', { _0: tip.samples })}</span>{/if}<small
-        >{$t(
-          '模式来自本轮日志；计时含轮内工具等待。',
-        )}{#if tierKey(tip.service_tier) === '未知' && tip.service_tier}
-          · {tip.service_tier}{/if}</small
-      >
-    </div>{/if}
-  <p class="cp-speed-note">
-    {$t('排除会话空闲 · 轮内工具等待可能包含在内')}{#if data?.history_pending}
-      · {$t('历史补采中')}{/if}{#if range === 'month'}
-      · {$t('按时间段加权汇总')}{/if}
-  </p>
+  <div class="cp-speed-readout">
+    {#if tip}<div class="cp-speed-tooltip" role="tooltip">
+        <span>{time(tip.measured_at, true)}</span>
+        <span class="cp-speed-sample-value"
+          ><strong>{rate(tip)}</strong> tok/s
+          <span class="cp-speed-tier">{$t(tierKey(tip.service_tier))}</span></span
+        >
+      </div>
+    {:else}<p class="cp-speed-note">
+        {$t('排除会话空闲 · 轮内工具等待可能包含在内')}{#if data?.history_pending}
+          · {$t('历史补采中')}{/if}{#if range === 'month'}
+          · {$t('按时间段加权汇总')}{/if}
+      </p>{/if}
+  </div>
   {#if error}<p class="cp-note" role="alert">
       {localizeError(error, $locale)}
       <button class="cp-textbutton" onclick={() => retry++}>{$t('重试查询')}</button>
@@ -307,50 +299,35 @@
     stroke: var(--cp-text);
     stroke-width: 1;
   }
+  .cp-speed-readout {
+    min-height: 30px;
+    margin: 3px 0 8px;
+  }
   .cp-speed-note {
     font-size: 10px;
     color: var(--cp-muted);
     line-height: 1.5;
-    margin: 3px 0 8px;
   }
   .cp-speed-tooltip {
-    position: absolute;
-    z-index: 4;
-    right: 0;
-    top: 59px;
-    width: min(245px, 100%);
-    box-sizing: border-box;
-    pointer-events: none;
-    text-align: left;
-    padding: 11px 12px;
-    border-radius: 9px;
-    border: 1px solid var(--cp-line);
-    background: var(--cp-solid);
-    color: var(--cp-text);
-    box-shadow: 0 6px 18px #0004;
-    font-size: 11px;
-    line-height: 1.7;
-    overflow-wrap: anywhere;
-  }
-  .cp-speed-tooltip b {
-    display: block;
-    font-size: 12px;
-    margin-bottom: 6px;
-  }
-  .cp-speed-tooltip > span {
     display: flex;
+    align-items: center;
     justify-content: space-between;
-    gap: 8px;
-  }
-  .cp-speed-tooltip > span > span:first-child {
+    flex-wrap: wrap;
+    gap: 3px 8px;
+    pointer-events: none;
     color: var(--cp-muted);
+    font-size: 11px;
+    line-height: 1.5;
   }
-  .cp-speed-tooltip small {
-    display: block;
-    color: var(--cp-muted);
-    font-size: 10px;
-    border-top: 1px solid var(--cp-line);
-    margin-top: 7px;
-    padding-top: 6px;
+  .cp-speed-tooltip strong {
+    font-size: 12px;
+    color: var(--cp-accent);
+  }
+  .cp-speed-sample-value {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 4px;
+    white-space: nowrap;
+    color: var(--cp-text);
   }
 </style>

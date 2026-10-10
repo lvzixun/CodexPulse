@@ -59,6 +59,14 @@ main {
   --accent-bg-light: rgba(34, 97, 214, 0.09);
   --accent: var(--accent-dark);
   --accent-bg: var(--accent-bg-dark);
+  --cp-model-0: #b39af2;
+  --cp-model-1: #5bcec0;
+  --cp-model-2: #79acfa;
+  --cp-model-3: #6ac58d;
+  --cp-model-4: #ed8ca7;
+  --cp-model-5: #e5bd6a;
+  --cp-model-6: #e9a06c;
+  --cp-model-7: #9eabf7;
   height: 100%;
   display: flex;
   flex-direction: column;
@@ -77,6 +85,14 @@ main[data-theme='light'] {
   --muted: #61667e;
   --accent: var(--accent-light);
   --accent-bg: var(--accent-bg-light);
+  --cp-model-0: #8564cb;
+  --cp-model-1: #248b80;
+  --cp-model-2: #4d8de0;
+  --cp-model-3: #3b9860;
+  --cp-model-4: #cc6682;
+  --cp-model-5: #b58b35;
+  --cp-model-6: #c47d47;
+  --cp-model-7: #737dca;
 }
 /* DWM owns the native window outline. A second CSS curve exposes the acrylic behind it. */
 main.native-shell {
@@ -93,6 +109,14 @@ main.native-shell {
     --muted: #61667e;
     --accent: var(--accent-light);
     --accent-bg: var(--accent-bg-light);
+    --cp-model-0: #8564cb;
+    --cp-model-1: #248b80;
+    --cp-model-2: #4d8de0;
+    --cp-model-3: #3b9860;
+    --cp-model-4: #cc6682;
+    --cp-model-5: #b58b35;
+    --cp-model-6: #c47d47;
+    --cp-model-7: #737dca;
   }
 }
 main[data-accent='violet'] {
@@ -341,9 +365,15 @@ main[data-theme='light'] .accent-swatch {
   min-width: 0;
 }
 .cp-shell button.cp-logo {
-  background: var(--card);
-  border: 1px solid var(--border);
+  background: transparent;
+  border: 0;
   padding: 0;
+}
+.cp-logo img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  pointer-events: none;
 }
 .cp-price-note {
   color: var(--muted);
@@ -610,9 +640,21 @@ main[data-theme='light'] .accent-swatch {
 }
 .cp-footer .cp-textbutton {
   padding: 0 !important;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.cp-footer > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .cp-modelheading {
   margin: 22px 0 5px;
+}
+.cp-model-entry {
+  --cp-accent: var(--model-color);
+  --accent: var(--model-color);
 }
 .cp-modelrow {
   display: flex;
@@ -647,13 +689,40 @@ main[data-theme='light'] .accent-swatch {
   height: 4px;
   background: var(--cp-soft);
   margin-top: 6px;
+  border-radius: 4px;
+  overflow: hidden;
 }
 .cp-model-bar > span {
   display: block;
   height: 100%;
-  background: var(--cp-accent);
+  background: var(--model-color, var(--cp-accent));
+  border-radius: inherit;
+  transition: width 180ms ease-out;
+}
+.cp-model-name {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.cp-model-name i {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--model-color);
+}
+.cp-model-chevron {
+  display: inline-flex;
+  color: var(--cp-muted);
+  transition: transform 180ms ease-out;
+}
+.cp-model-chevron.cp-model-expanded {
+  transform: rotate(90deg);
 }
 .cp-modelrow[aria-expanded='true'] > span:first-child strong {
+  color: var(--model-color, var(--cp-accent));
+}
+.cp-modelrow[aria-expanded='true'] > span:last-child b {
   color: var(--cp-accent);
 }
 .cp-model-detail {
@@ -748,21 +817,45 @@ main[data-theme='light'] .accent-swatch {
   grid-row: 1 / span 2;
   align-self: center;
   color: var(--cp-muted);
+  transition: transform 180ms ease-out;
 }
 .cp-session-expanded {
   transform: rotate(90deg);
 }
 .cp-detail.cp-session-detail {
   margin: 0 0 16px 0;
-  padding: 0 0 0 12px;
-  border-top: 0;
-  border-left: 2px solid var(--cp-line);
+  padding: 12px;
+  border: 1px solid var(--cp-line);
+  border-radius: 10px;
+  background: var(--cp-soft);
 }
-.cp-session-advanced summary {
-  cursor: pointer;
+.cp-session-context {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 0;
+  line-height: 1.4;
+}
+.cp-session-context > .cp-truncate {
+  max-width: 65%;
+}
+.cp-session-breakdown {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--cp-line);
   color: var(--cp-muted);
-  font-size: 12px;
-  padding: 12px 0;
+  font-size: 11px;
+  line-height: 1.5;
+}
+.cp-session-breakdown > span {
+  white-space: nowrap;
+}
+.cp-session-estimate-note {
+  margin-top: 6px;
+  font-size: 10px;
 }
 .cp-detail {
   margin-top: 17px;
@@ -830,6 +923,47 @@ input {
   accent-color: var(--cp-accent);
   width: 17px;
   height: 17px;
+}
+.cp-setting > span {
+  min-width: 0;
+}
+.cp-shell:not(.menubar) input[role='switch'] {
+  appearance: none;
+  position: relative;
+  flex: none;
+  width: 40px;
+  height: 20px;
+  margin: 0;
+  border: 1px solid var(--cp-muted);
+  border-radius: 12px;
+  background: transparent;
+  cursor: pointer;
+  transition:
+    background-color 140ms ease-out,
+    border-color 140ms ease-out;
+}
+.cp-shell:not(.menubar) input[role='switch']::before {
+  content: '';
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  top: 3px;
+  left: 3px;
+  border-radius: 50%;
+  background: var(--cp-muted);
+  transition: transform 140ms ease-out;
+}
+.cp-shell:not(.menubar) input[role='switch']:checked {
+  border-color: var(--cp-accent);
+  background: var(--cp-accent);
+}
+.cp-shell:not(.menubar) input[role='switch']:checked::before {
+  transform: translateX(20px);
+  background: var(--cp-solid);
+}
+.cp-shell input[role='switch']:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 main {
   --cp-text: var(--text);
@@ -1131,32 +1265,6 @@ body {
   color: var(--cp-muted);
   opacity: 0.5;
 }
-.cp-session-model {
-  padding: 10px 0;
-  border-bottom: 1px solid var(--cp-line);
-}
-.cp-session-model .cp-sectionhead {
-  margin-bottom: 4px;
-}
-.cp-price {
-  padding: 10px 0;
-  border-bottom: 1px solid var(--cp-line);
-}
-.cp-price summary {
-  cursor: pointer;
-  font-size: 11px;
-  overflow-wrap: anywhere;
-}
-.cp-price summary small {
-  display: block;
-  margin-top: 4px;
-}
-.cp-price .cp-note {
-  margin-top: 7px;
-}
-.cp-id {
-  overflow-wrap: anywhere;
-}
 .cp-bucket-label {
   margin: 14px 0 9px;
 }
@@ -1231,6 +1339,21 @@ meter.cp-low::-webkit-meter-optimum-value {
   background: var(--cp-amber);
 }
 @media (forced-colors: active) {
+  .cp-shell:not(.menubar) input[role='switch'] {
+    forced-color-adjust: none;
+    border-color: ButtonText;
+    background: Canvas;
+  }
+  .cp-shell:not(.menubar) input[role='switch']::before {
+    background: ButtonText;
+  }
+  .cp-shell:not(.menubar) input[role='switch']:checked {
+    background: Highlight;
+    border-color: Highlight;
+  }
+  .cp-shell:not(.menubar) input[role='switch']:checked::before {
+    background: HighlightText;
+  }
   .cp-tabs button[aria-pressed='true'] {
     background: Highlight;
     color: HighlightText;
@@ -1265,11 +1388,11 @@ meter.cp-low::-webkit-meter-optimum-value {
 main.menubar {
   color-scheme: dark;
   --bg: transparent;
-  --solid: #3a3c40;
-  --card: rgba(255, 255, 255, 0.055);
-  --border: rgba(255, 255, 255, 0.12);
+  --solid: #28282a;
+  --card: rgba(255, 255, 255, 0.065);
+  --border: rgba(255, 255, 255, 0.15);
   --text: #f5f5f7;
-  --muted: #d0d1d5;
+  --muted: #bfc0c5;
   --cp-glass: transparent;
   font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
   line-height: 1.4;
@@ -1279,9 +1402,9 @@ main.menubar {
 main.menubar[data-theme='light'] {
   color-scheme: light;
   --bg: transparent;
-  --solid: #f2f2f4;
-  --card: rgba(0, 0, 0, 0.035);
-  --border: rgba(0, 0, 0, 0.1);
+  --solid: #f3f3f5;
+  --card: rgba(255, 255, 255, 0.58);
+  --border: rgba(0, 0, 0, 0.12);
   --text: #1d1d1f;
   --muted: #55555a;
 }
@@ -1289,9 +1412,9 @@ main.menubar[data-theme='light'] {
   main.menubar[data-theme='system'] {
     color-scheme: light;
     --bg: transparent;
-    --solid: #f2f2f4;
-    --card: rgba(0, 0, 0, 0.035);
-    --border: rgba(0, 0, 0, 0.1);
+    --solid: #f3f3f5;
+    --card: rgba(255, 255, 255, 0.58);
+    --border: rgba(0, 0, 0, 0.12);
     --text: #1d1d1f;
     --muted: #55555a;
   }
@@ -1332,6 +1455,7 @@ main.menubar.opaque {
   padding: 2px;
   gap: 2px;
   border-radius: 9px;
+  background: rgba(118, 118, 128, 0.12);
 }
 .menubar .cp-tabs button {
   padding: 5px 0;
@@ -1480,8 +1604,11 @@ main.menubar.opaque {
 }
 .menubar input[role='switch'] {
   appearance: auto;
-  width: 32px;
-  height: 18px;
+  width: auto;
+  height: auto;
+  margin: 0;
+  flex-shrink: 0;
+  accent-color: auto;
 }
 .menubar .cp-footer {
   padding: 8px 16px;

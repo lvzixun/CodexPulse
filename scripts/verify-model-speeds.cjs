@@ -82,6 +82,18 @@ await import('/src/main.ts');
         await page.locator('.cp-speed-current').hover();
         await page.locator('.cp-speed-tooltip').waitFor();
         assert.match(await page.locator('.cp-speed-tooltip').innerText(), /Fast/);
+        assert.equal(
+          await page.locator('.cp-speed-chart title').count(),
+          0,
+          'Native hover titles should not duplicate the inline readout',
+        );
+        const chartBounds = await page.locator('.cp-speed-chart').boundingBox();
+        const readoutBounds = await page.locator('.cp-speed-tooltip').boundingBox();
+        assert.ok(
+          readoutBounds.y >= chartBounds.y + chartBounds.height,
+          'Readout must sit below the chart',
+        );
+        assert.ok(readoutBounds.height < 40, 'Readout should remain compact');
         await page.locator('.cp-speed-head').hover();
         await page.locator('.cp-speed select').selectOption('recent100');
         await page.waitForFunction(
@@ -99,6 +111,32 @@ await import('/src/main.ts');
         await page.locator('.cp-speed-chart circle').first().blur();
         for (const theme of ['dark', 'light']) {
           await page.locator('main').evaluate((el, theme) => (el.dataset.theme = theme), theme);
+          for (const accent of ['blue', 'violet']) {
+            await page
+              .locator('main')
+              .evaluate((el, accent) => (el.dataset.accent = accent), accent);
+            const colors = await page
+              .locator('.cp-model-entry:has(.cp-model-detail)')
+              .evaluate((el) => {
+                const style = (selector) => getComputedStyle(el.querySelector(selector));
+                return {
+                  model: style('.cp-model-bar > span').backgroundColor,
+                  curve: style('.curve').stroke,
+                  fill: style('stop').stopColor,
+                  point: style('circle.visible').fill,
+                  indicator: style('.cp-speed-dot').backgroundColor,
+                  tier: style('.cp-speed-current .cp-speed-tier').color,
+                  tokens: style('.cp-modelrow > span:last-child b').color,
+                  link: style('.cp-model-detail > .cp-textbutton').color,
+                };
+              });
+            for (const [part, color] of Object.entries(colors))
+              assert.equal(
+                color,
+                colors.model,
+                `${width} ${language} ${theme} ${accent}: ${part} must use the model color`,
+              );
+          }
           const overflow = await page.evaluate(() =>
             [...document.querySelectorAll('.cp-speed,.cp-modelrow,.cp-model-detail')].some(
               (el) => el.scrollWidth > el.clientWidth + 1,
@@ -111,6 +149,14 @@ await import('/src/main.ts');
             fg: getComputedStyle(el).color,
           }));
           assert.notEqual(contrast.bg, contrast.fg);
+          if (width === 380)
+            await page
+              .locator('.cp-model-entry')
+              .first()
+              .screenshot({
+                path: `work/model-readout-${theme}-${language}.png`,
+                animations: 'disabled',
+              });
         }
         await page.evaluate(() => (window.__speedTest.fail = true));
         await page.locator('.cp-speed select').selectOption('recent50');

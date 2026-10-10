@@ -34,6 +34,7 @@
   import QuotaCard from './components/QuotaCard.svelte';
   import NewsPane from './components/NewsPane.svelte';
   import Icon from './components/Icon.svelte';
+  import appIcon from './lib/assets/app-icon.svg';
   import ResetStatus from './components/ResetStatus.svelte';
   import AccountSummary from './components/AccountSummary.svelte';
   import ModelsPane from './components/ModelsPane.svelte';
@@ -515,7 +516,7 @@
         }),
       () =>
         onEvent('snapshot-changed', () => {
-          if (!disposed && !document.hidden) void refresh();
+          if (!disposed && windowVisible && !document.hidden) void refresh();
         }),
       () =>
         onEvent<[string, string | null]>('window-mode', ([next, target]) => {
@@ -544,7 +545,10 @@
         onEvent<boolean>('window-visible', (visible) => {
           windowVisible = visible;
           clockVisible(visible && documentVisible);
-          if (visible && !disposed) void loadCachedAppUpdate();
+          if (visible && !disposed) {
+            void refresh();
+            void loadCachedAppUpdate();
+          }
         }),
       () =>
         onEvent<boolean>('glass-supported', (supported) => {
@@ -594,7 +598,7 @@
     const visible = () => {
       documentVisible = !document.hidden;
       clockVisible(windowVisible && documentVisible);
-      if (!document.hidden) void refresh();
+      if (windowVisible && !document.hidden) void refresh();
     };
     document.addEventListener('visibilitychange', visible);
     const escape = (e: KeyboardEvent) => {
@@ -682,7 +686,7 @@
   {:else}
     <header class="cp-header">
       <button class="cp-logo" aria-label={$t('拖动 CodexPulse 窗口')}
-        ><Icon name="activity" /></button
+        ><img src={appIcon} alt="" draggable="false" /></button
       >
       <button class="cp-brand" aria-label={$t('拖动 CodexPulse 窗口')}
         ><strong>CodexPulse</strong><small

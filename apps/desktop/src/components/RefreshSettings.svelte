@@ -184,7 +184,10 @@
         {#if isFailure(source.status)}<p class="cp-note" role="status">
             {sourceNames([id], data.sources)} · {label(source.status)}
           </p>{/if}
-        {#if isFailure(source.profile_status) && source.profile_status !== source.status}<p class="cp-note" role="status">
+        {#if isFailure(source.profile_status) && source.profile_status !== source.status}<p
+            class="cp-note"
+            role="status"
+          >
             {sourceNames([id], data.sources)}
             {$t('· 账户统计：')}{label(source.profile_status)}
           </p>{/if}
@@ -208,8 +211,10 @@
 
 <style>
   .refresh-group {
-    border-bottom: 1px solid var(--cp-line);
     padding: 8px 0;
+  }
+  .refresh-group + .refresh-group {
+    border-top: 1px solid var(--cp-line);
   }
   .refresh-row {
     display: flex;

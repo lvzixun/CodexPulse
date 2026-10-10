@@ -1,5 +1,9 @@
 <script lang="ts">
   import { translator as t, locale, localizeError } from '../lib/i18n';
+  import { untrack } from 'svelte';
+  import { slide } from 'svelte/transition';
+  import { cubicOut } from 'svelte/easing';
+  import { reducedMotion } from '../lib/motion';
 
   import { sessionLabel, sessionRunState } from '../lib/format';
   import { sessionPage, defaultSessionQuery } from '../lib/ipc';
@@ -29,6 +33,7 @@
     loading = $state(false),
     listError = $state('');
   let pageTicket = 0;
+  let loadedRequest = '';
   const rows = $derived(list?.items ?? []);
   const time = (ts: string) =>
     Number.isFinite(Date.parse(ts))
@@ -43,11 +48,17 @@
     const request = { ...query, filter: { ...query.filter } };
     if (!request.cursor) void revision;
     const ticket = ++pageTicket;
-    loading = true;
-    listError = '';
+    const key = JSON.stringify(request);
+    const foreground = untrack(() => !list || loadedRequest !== key);
+    loading = foreground;
+    if (foreground) listError = '';
     void sessionPage(request)
       .then((result) => {
-        if (ticket === pageTicket) list = result;
+        if (ticket === pageTicket) {
+          list = result;
+          loadedRequest = key;
+          listError = '';
+        }
       })
       .catch((e) => {
         if (ticket === pageTicket) listError = String(e);
@@ -55,7 +66,7 @@
       .finally(() => {
         if (ticket === pageTicket) {
           loading = false;
-          ready();
+          if (foreground) ready();
         }
       });
     return () => {
@@ -116,8 +127,11 @@
           class:cp-session-expanded={selected === s.meta.id}><Icon name="right" /></span
         >
       </button>
-      {#if selected === s.meta.id}<div id={`session-detail-${s.meta.id}`}>
-          <SessionDetails id={s.meta.id} {revision} {hideProjects} {sources} {ready} />
+      {#if selected === s.meta.id}<div
+          id={`session-detail-${s.meta.id}`}
+          transition:slide={{ duration: reducedMotion.current ? 0 : 180, easing: cubicOut }}
+        >
+          <SessionDetails id={s.meta.id} {revision} {hideProjects} {ready} />
         </div>{/if}
     </div>
   {:else}{#if !loading && !listError}<p class="cp-note">

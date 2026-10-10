@@ -13,6 +13,14 @@ use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
 };
 
+// Keep the macOS popover's painted WebView alive for instant menu-bar reopening.
+// Its renderer pauses foreground work while hidden. Windows still releases idle windows.
+const HIDDEN_WINDOW_RELEASE_DELAY: Option<Duration> = if cfg!(target_os = "macos") {
+    None
+} else {
+    Some(Duration::from_secs(300))
+};
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ViewState {
     pub mode: String,
@@ -372,10 +380,11 @@ pub fn release_hidden(app: &tauri::AppHandle) {
     let Some(host) = app.try_state::<WindowHost>() else {
         return;
     };
-    let due = host
-        .hidden_since
-        .lock()
-        .is_ok_and(|s| s.is_some_and(|t| t.elapsed() >= Duration::from_secs(300)));
+    let due = HIDDEN_WINDOW_RELEASE_DELAY.is_some_and(|delay| {
+        host.hidden_since
+            .lock()
+            .is_ok_and(|s| s.is_some_and(|t| t.elapsed() >= delay))
+    });
     if !due {
         if let Ok(mut last) = host.maintenance.lock()
             && last.elapsed() >= Duration::from_secs(30)
@@ -406,7 +415,8 @@ pub fn release_hidden(app: &tauri::AppHandle) {
         .run_on_main_thread(move || {
             let host = handle.state::<WindowHost>();
             if let Ok(mut hidden) = host.hidden_since.lock()
-                && hidden.is_some_and(|t| t.elapsed() >= Duration::from_secs(300))
+                && HIDDEN_WINDOW_RELEASE_DELAY
+                    .is_some_and(|delay| hidden.is_some_and(|t| t.elapsed() >= delay))
                 && let Some(w) = handle.get_webview_window("pulse")
                 && !w.is_visible().unwrap_or(true)
             {
@@ -553,10 +563,7 @@ fn refresh_material_with(app: &tauri::AppHandle, settings: &Settings) {
         let effects = if allowed {
             Some(tauri::utils::config::WindowEffectsConfig {
                 effects: if cfg!(target_os = "macos") {
-                    vec![
-                        tauri::utils::WindowEffect::LiquidGlassRegular,
-                        tauri::utils::WindowEffect::Popover,
-                    ]
+                    vec![tauri::utils::WindowEffect::Popover]
                 } else {
                     vec![tauri::utils::WindowEffect::Acrylic]
                 },
