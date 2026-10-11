@@ -2,10 +2,8 @@
   import { translator as t, locale, localizeError } from '../lib/i18n';
 
   import { tick, untrack } from 'svelte';
-  import { slide } from 'svelte/transition';
-  import { cubicOut } from 'svelte/easing';
   import { modelColor } from '../lib/model-color';
-  import { reducedMotion } from '../lib/motion';
+  import Disclosure from './Disclosure.svelte';
   import { modelPage } from '../lib/ipc';
   import { formatUsd } from '../lib/format';
   import type { ModelPage, ModelPageRequest } from '../lib/types';
@@ -18,6 +16,7 @@
     revision,
     sessions,
     ready,
+    cancelRestore,
     now,
     timezone,
   }: {
@@ -26,6 +25,7 @@
     revision: string;
     sessions: (model: string) => void;
     ready: () => void;
+    cancelRestore: () => void;
     now: number;
     timezone: string;
   } = $props();
@@ -34,6 +34,8 @@
     error = $state('');
   let ticket = 0;
   let loadedRequest = '';
+  let restoreDetail: string | null = null;
+  let loadedSpeed = $state<string | null>(null);
   const number = (n: number) =>
     new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 }).format(n);
   const measure = (value: number, unknown: number, events: number) =>
@@ -47,6 +49,7 @@
     const key = JSON.stringify(request);
     // Snapshot updates must not disable/dim the already displayed model rows.
     const foreground = untrack(() => !list || loadedRequest !== key);
+    if (foreground) restoreDetail = untrack(() => selected);
     loading = foreground;
     if (foreground) error = '';
     void modelPage(request)
@@ -67,7 +70,12 @@
         if (ticket === current) {
           loading = false;
           await tick();
-          if (ticket === current && foreground) ready();
+          if (
+            ticket === current &&
+            foreground &&
+            (!restoreDetail || !list?.items.some((m) => m.model === restoreDetail))
+          )
+            ready();
         }
       });
     return () => {
@@ -93,7 +101,11 @@
         disabled={loading}
         aria-expanded={selected === m.model}
         aria-controls={`model-detail-${m.model}`}
-        onclick={() => (selected = selected === m.model ? null : m.model)}
+        onclick={() => {
+          if (restoreDetail) cancelRestore();
+          restoreDetail = null;
+          selected = selected === m.model ? null : m.model;
+        }}
       >
         <span class="cp-model-label"
           ><strong class="cp-truncate cp-model-name" title={m.model}
@@ -147,60 +159,70 @@
           ></span
         >
       </button>
-      {#if selected === m.model}
-        <div
-          id={`model-detail-${m.model}`}
-          transition:slide={{ duration: reducedMotion.current ? 0 : 180, easing: cubicOut }}
-        >
-          <div class="cp-model-detail">
-            <div class="cp-metrics">
-              <div>
-                <span>{$t('输入')}</span><strong
-                  >{measure(m.input, m.unknown_input, m.events)}</strong
-                >
-              </div>
-              <div>
-                <span>{$t('其中缓存')}</span><strong
-                  >{measure(m.cached, m.unknown_cached, m.events)}</strong
-                >
-              </div>
-              <div>
-                <span>{$t('输出')}</span><strong
-                  >{measure(m.output, m.unknown_output, m.events)}</strong
-                >
-              </div>
+      <Disclosure
+        id={`model-detail-${m.model}`}
+        open={selected === m.model}
+        contentReady={loadedSpeed === m.model}
+        closed={() => {
+          if (loadedSpeed === m.model) loadedSpeed = null;
+        }}
+        settled={() => {
+          if (restoreDetail === m.model && selected === m.model) {
+            restoreDetail = null;
+            ready();
+          }
+        }}
+      >
+        <div class="cp-model-detail">
+          <div class="cp-metrics">
+            <div>
+              <span>{$t('输入')}</span><strong>{measure(m.input, m.unknown_input, m.events)}</strong
+              >
             </div>
-            <ModelSpeedChart
-              model={m.model}
-              from={query.from_day}
-              through={query.through_day}
-              {revision}
-              {now}
-              {timezone}
-            />
-            {#if m.reference.unpriced_events || m.incomplete_events}
-              <p class="cp-note">
-                {m.reference.unpriced_events
-                  ? $t('{_0} 条信息不足{_1}', {
-                      _0: m.reference.unpriced_events,
-                      _1: m.reference.unpriced_tokens
-                        ? ` · ${number(m.reference.unpriced_tokens)} tokens`
-                        : '',
-                    })
-                  : ''}{m.incomplete_events
-                  ? $t('{_0}{_1} 条记录缺少拆分字段', {
-                      _0: m.unpriced_events ? ' · ' : '',
-                      _1: m.incomplete_events,
-                    })
-                  : ''}
-              </p>
-            {/if}
-            <button class="cp-textbutton" disabled={loading} onclick={() => sessions(m.model)}
-              >{$t('查看此模型最近 30 天的 sessions')} <Icon name="right" /></button
-            >
+            <div>
+              <span>{$t('其中缓存')}</span><strong
+                >{measure(m.cached, m.unknown_cached, m.events)}</strong
+              >
+            </div>
+            <div>
+              <span>{$t('输出')}</span><strong
+                >{measure(m.output, m.unknown_output, m.events)}</strong
+              >
+            </div>
           </div>
+          <ModelSpeedChart
+            model={m.model}
+            from={query.from_day}
+            through={query.through_day}
+            {revision}
+            {now}
+            {timezone}
+            ready={() => {
+              if (selected === m.model) loadedSpeed = m.model;
+            }}
+          />
+          {#if m.reference.unpriced_events || m.incomplete_events}
+            <p class="cp-note">
+              {m.reference.unpriced_events
+                ? $t('{_0} 条信息不足{_1}', {
+                    _0: m.reference.unpriced_events,
+                    _1: m.reference.unpriced_tokens
+                      ? ` · ${number(m.reference.unpriced_tokens)} tokens`
+                      : '',
+                  })
+                : ''}{m.incomplete_events
+                ? $t('{_0}{_1} 条记录缺少拆分字段', {
+                    _0: m.unpriced_events ? ' · ' : '',
+                    _1: m.incomplete_events,
+                  })
+                : ''}
+            </p>
+          {/if}
+          <button class="cp-textbutton" disabled={loading} onclick={() => sessions(m.model)}
+            >{$t('查看此模型最近 30 天的 sessions')} <Icon name="right" /></button
+          >
         </div>
-      {/if}
+      </Disclosure>
     </div>
   {:else}
     {#if loading}<p class="cp-note">{$t('正在读取模型分类…')}</p>{:else if !error}<p

@@ -11,6 +11,7 @@
     revision,
     now,
     timezone,
+    ready,
   }: {
     model: string;
     from: string;
@@ -18,6 +19,7 @@
     revision: string;
     now: number;
     timezone: string;
+    ready?: () => void;
   } = $props();
   let range = $state<SpeedRange>('recent50'),
     data = $state<ModelSpeed | null>(null),
@@ -76,7 +78,10 @@
         if (id === ticket) error = String(e);
       })
       .finally(() => {
-        if (id === ticket) loading = false;
+        if (id === ticket) {
+          loading = false;
+          if (foreground) ready?.();
+        }
       });
     return () => {
       ticket++;

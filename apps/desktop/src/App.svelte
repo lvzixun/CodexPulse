@@ -297,11 +297,15 @@
     newsChallenge = detail;
     await restorePageScroll();
   }
-  async function restorePageScroll(modelsReady = false) {
+  function cancelPageRestore() {
+    restoreScroll = false;
+    if (content) scroll[scrollKey()] = content.scrollTop;
+  }
+  async function restorePageScroll(listReady = false) {
     restoreScroll = true;
     await tick();
-    // A paged model list has no height until its asynchronous read completes.
-    if (mode === 'details' && page === 'models' && !modelsReady) return;
+    // Paged lists and restored disclosures have no final height until their reads settle.
+    if (mode === 'details' && (page === 'models' || page === 'sessions') && !listReady) return;
     if (content) content.scrollTop = scroll[scrollKey()] ?? 0;
     await tick();
     restoreScroll = false;
@@ -909,6 +913,7 @@
           {now}
           timezone={Intl.DateTimeFormat().resolvedOptions().timeZone}
           ready={() => void restorePageScroll(true)}
+          cancelRestore={cancelPageRestore}
           sessions={(model) => {
             sessionQuery = {
               filter: { model, from_day: data.usage.from_day, through_day: data.usage.through_day },
@@ -933,7 +938,8 @@
           hideProjects={data.settings.hide_projects}
           sources={data.sources}
           {now}
-          ready={() => void restorePageScroll()}
+          ready={() => void restorePageScroll(true)}
+          cancelRestore={cancelPageRestore}
         />
       {:else if page === 'news'}
         <NewsPane

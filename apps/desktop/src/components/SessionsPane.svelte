@@ -1,9 +1,7 @@
 <script lang="ts">
   import { translator as t, locale, localizeError } from '../lib/i18n';
   import { untrack } from 'svelte';
-  import { slide } from 'svelte/transition';
-  import { cubicOut } from 'svelte/easing';
-  import { reducedMotion } from '../lib/motion';
+  import Disclosure from './Disclosure.svelte';
 
   import { sessionLabel, sessionRunState } from '../lib/format';
   import { sessionPage, defaultSessionQuery } from '../lib/ipc';
@@ -19,6 +17,7 @@
     sources,
     now,
     ready,
+    cancelRestore,
   }: {
     query: SessionPageRequest;
     selected: string | null;
@@ -28,12 +27,15 @@
     sources: SourceHealth[];
     now: number;
     ready: () => void;
+    cancelRestore: () => void;
   } = $props();
   let list = $state<SessionPage | null>(null),
     loading = $state(false),
     listError = $state('');
   let pageTicket = 0;
   let loadedRequest = '';
+  let restoreDetail: string | null = null;
+  let loadedDetail = $state<string | null>(null);
   const rows = $derived(list?.items ?? []);
   const time = (ts: string) =>
     Number.isFinite(Date.parse(ts))
@@ -50,6 +52,7 @@
     const ticket = ++pageTicket;
     const key = JSON.stringify(request);
     const foreground = untrack(() => !list || loadedRequest !== key);
+    if (foreground) restoreDetail = untrack(() => selected);
     loading = foreground;
     if (foreground) listError = '';
     void sessionPage(request)
@@ -66,7 +69,11 @@
       .finally(() => {
         if (ticket === pageTicket) {
           loading = false;
-          if (foreground) ready();
+          if (
+            foreground &&
+            (!restoreDetail || !list?.items.some((s) => s.meta.id === restoreDetail))
+          )
+            ready();
         }
       });
     return () => {
@@ -102,7 +109,11 @@
         class="cp-sessionrow"
         aria-expanded={selected === s.meta.id}
         aria-controls={`session-detail-${s.meta.id}`}
-        onclick={() => (selected = selected === s.meta.id ? null : s.meta.id)}
+        onclick={() => {
+          if (restoreDetail) cancelRestore();
+          restoreDetail = null;
+          selected = selected === s.meta.id ? null : s.meta.id;
+        }}
       >
         <span class="cp-session-heading"
           ><span class="cp-truncate" title={sessionLabel(s.meta, hideTitles, $locale)}
@@ -127,12 +138,29 @@
           class:cp-session-expanded={selected === s.meta.id}><Icon name="right" /></span
         >
       </button>
-      {#if selected === s.meta.id}<div
-          id={`session-detail-${s.meta.id}`}
-          transition:slide={{ duration: reducedMotion.current ? 0 : 180, easing: cubicOut }}
-        >
-          <SessionDetails id={s.meta.id} {revision} {hideProjects} {ready} />
-        </div>{/if}
+      <Disclosure
+        id={`session-detail-${s.meta.id}`}
+        open={selected === s.meta.id}
+        contentReady={loadedDetail === s.meta.id}
+        closed={() => {
+          if (loadedDetail === s.meta.id) loadedDetail = null;
+        }}
+        settled={() => {
+          if (restoreDetail === s.meta.id && selected === s.meta.id) {
+            restoreDetail = null;
+            ready();
+          }
+        }}
+      >
+        <SessionDetails
+          id={s.meta.id}
+          {revision}
+          {hideProjects}
+          ready={() => {
+            if (selected === s.meta.id) loadedDetail = s.meta.id;
+          }}
+        />
+      </Disclosure>
     </div>
   {:else}{#if !loading && !listError}<p class="cp-note">
         {$t('还没有采集到 Sessions。')}
