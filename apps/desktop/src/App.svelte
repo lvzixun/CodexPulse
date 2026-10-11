@@ -753,6 +753,7 @@
     {/if}
     <div
       class="cp-body"
+      class:cp-paged-body={page === 'models' || page === 'sessions'}
       bind:this={content}
       onscroll={() => {
         if (!restoreScroll && content) scroll[scrollKey()] = content.scrollTop;

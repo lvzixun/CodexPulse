@@ -32,7 +32,8 @@ mockIPC(async(cmd,args)=>{
  if(cmd==='get_view_state')return {...previewView(),mode:'details',page:'models',floating_supported:params.get('platform')==='windows'};
  if(cmd==='remember_view')return;
  if(cmd==='get_startup_status')return 'disabled';
- if(cmd==='get_app_update_info')return {current_version:'0.1.28',status:'up_to_date',revision:1};
+ if(cmd==='get_app_update_info')return {current_version:'0.1.29',status:'up_to_date',revision:1};
+ if(cmd==='read_news'){state.data.news.unread_keys=[];return;}
  if(cmd==='plugin:window|is_visible')return true;
  if(cmd==='get_model_page')return previewModels(state.data);
  if(cmd==='get_model_speed'){
@@ -164,6 +165,10 @@ async function checkRestoration(page, kind, language) {
             new URL(`?language=${language}&platform=${platform}&delay=${delay}`, base).href,
           );
           await page.locator('.cp-modelrow').first().waitFor();
+          assert.equal(
+            await page.locator('.cp-body').evaluate((el) => getComputedStyle(el).overflowAnchor),
+            'none',
+          );
           await page.waitForTimeout(200);
           const modelEndDelta = await sample(page, 'model', Math.max(650, delay + 260));
           if (delay === 120) await checkRestoration(page, 'model', language);
@@ -200,6 +205,10 @@ async function checkRestoration(page, kind, language) {
           }
           await page.getByRole('button', { name: 'Sessions', exact: true }).click();
           await page.locator('.cp-sessionrow').first().waitFor();
+          assert.equal(
+            await page.locator('.cp-body').evaluate((el) => getComputedStyle(el).overflowAnchor),
+            'none',
+          );
           await page.waitForTimeout(100);
           const sessionEndDelta = await sample(page, 'session', Math.max(650, delay + 260));
           if (delay === 120) await checkRestoration(page, 'session', language);
@@ -247,6 +256,17 @@ async function checkRestoration(page, kind, language) {
             await page.evaluate(() => __disclosureTest.observers),
             0,
             'Page unmount must release observers',
+          );
+          assert.equal(
+            await page.locator('.cp-body').evaluate((el) => getComputedStyle(el).overflowAnchor),
+            'auto',
+            'Overview retains browser anchoring',
+          );
+          await page.getByRole('button', { name: /^Tibo/ }).click();
+          assert.equal(
+            await page.locator('.cp-body').evaluate((el) => getComputedStyle(el).overflowAnchor),
+            'auto',
+            'Tibo retains browser anchoring for inserted messages',
           );
           if (delay === 120) {
             await page.emulateMedia({ reducedMotion: 'no-preference' });

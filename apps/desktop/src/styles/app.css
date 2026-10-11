@@ -990,10 +990,12 @@ body {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  /* Disclosure height changes must not compete with explicit page restoration. */
-  overflow-anchor: none;
   scrollbar-width: thin;
   scrollbar-color: var(--border) transparent;
+}
+.cp-paged-body {
+  /* Disclosure height changes must not compete with explicit page restoration. */
+  overflow-anchor: none;
 }
 .cp-header,
 .cp-source,
