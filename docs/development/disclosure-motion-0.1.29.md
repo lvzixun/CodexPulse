@@ -23,4 +23,11 @@ Windows 与 macOS 共用 `Disclosure` 和高度控制器。用 ResizeObserver �
 
 ## 发布
 
-0.1.28 为未发布候选，复核后收窄滚动锚定范围，取消候选构建，保留原标签且不覆盖。最终版本为 0.1.29，等待双平台 CI 和产物验证后发布。
+0.1.28 为未发布候选，复核后收窄滚动锚定范围，取消候选构建，保留原标签且不覆盖。最终版本 [0.1.29](https://github.com/lvzixun/CodexPulse/releases/tag/v0.1.29) 已于 2026-10-11 发布为正式最新版。
+
+- 发布源码：`cfc860189442caecf5c91ea3be4161af69971b8b`；[双平台 CI 38132302875](https://github.com/lvzixun/CodexPulse/actions/runs/38132302875) 全部通过。Windows 190 项、macOS 191 项 Rust 测试通过，每端另有 7 项网络探测按设计忽略；前端检查、22 项 Node / 清单测试和 Clippy 通过。
+- Windows x64 应用及安装器版本检查通过，下载后的安装器版本和 CI SHA-256 一致；macOS Universal 架构与严格 ad-hoc 签名检查通过，下载后再次确认版本、最低系统 12.0、双架构和签名资源。
+- 两端更新签名、版本绑定与篡改拒绝检查通过；7 个 GitHub 发布资产的大小和服务端 SHA-256 均与本地文件一致。
+- 匿名 HTTPS 最新更新清单返回 0.1.29；Windows x64、macOS Intel / Apple Silicon 的下载地址和签名均与已验证清单一致。
+
+本轮未进行本机 Rust 构建，未新增 `target/debug`；未替换本机安装的 0.1.26，可通过设置检查更新升级。macOS 实机交互与原生帧率仍不属于本轮验收范围。
