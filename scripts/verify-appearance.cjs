@@ -66,14 +66,38 @@ if (!['127.0.0.1', 'localhost'].includes(new URL(base).hostname))
               }),
             );
             assert.deepEqual(rows, [true, true], 'Reset labels and values must share each row');
-            if (theme === 'light' && accent === 'blue')
-              await page.screenshot({ path: `work/tabs-light-${platform}-${language}.png` });
+            const resetCard = await page.locator('.cp-reset-status').evaluate((el) => {
+              const style = getComputedStyle(el);
+              const session = getComputedStyle(document.querySelector('.cp-session-overview'));
+              return {
+                background: style.backgroundColor,
+                sessionBackground: session.backgroundColor,
+                radius: style.borderRadius,
+                sessionRadius: session.borderRadius,
+                padding: style.padding,
+                sessionPadding: session.padding,
+                border: style.borderTopWidth,
+                nextIsSession: el.nextElementSibling.classList.contains('cp-session-overview'),
+              };
+            });
+            assert.notEqual(resetCard.background, 'rgba(0, 0, 0, 0)', 'Reset card needs a surface');
+            assert.equal(resetCard.background, resetCard.sessionBackground);
+            assert.equal(resetCard.radius, resetCard.sessionRadius);
+            assert.equal(resetCard.nextIsSession, true, 'No extra divider between the cards');
+            if (platform === 'windows') {
+              assert.equal(resetCard.padding, resetCard.sessionPadding);
+              assert.equal(resetCard.border, '0px', 'Replace the old rules with a single surface');
+            }
+            if (theme !== 'system' && accent === 'blue')
+              await page.screenshot({
+                path: `work/reset-card-${theme}-${platform}-${language}.png`,
+              });
             cases++;
           }
         await page.close();
       }
     console.log(
-      `${cases} theme/accent/platform/language combinations: selected-tab fill/text/outline and inline reset rows passed`,
+      `${cases} theme/accent/platform/language combinations: selected tabs, inline reset rows and reset/session card surfaces passed`,
     );
   } finally {
     await browser.close();

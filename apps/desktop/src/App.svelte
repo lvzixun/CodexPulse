@@ -779,7 +779,6 @@
               : $t('尚未获得有效额度快照，可在设置中查看来源状态。')}
           </p>{/each}
         <ResetStatus news={data.news} {now} timezone={data.settings.timezone} />
-        <div class="cp-divider"></div>
         <section class="cp-session-overview" aria-label={working ? $t('当前会话') : $t('最近会话')}>
           <div class="cp-sectionhead">
             <span>{working ? $t('当前会话') : $t('最近会话')}</span>

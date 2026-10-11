@@ -452,11 +452,6 @@ main[data-theme='light'] .accent-swatch {
 .cp-body {
   padding: 20px;
 }
-.cp-divider {
-  height: 1px;
-  background: var(--cp-line);
-  margin: 19px 0;
-}
 .cp-sectionhead {
   display: flex;
   align-items: center;
@@ -1147,10 +1142,10 @@ body {
   text-align: left;
 }
 .cp-reset-status {
-  padding: 13px 0;
-  border-top: 1px solid var(--cp-line);
-  border-bottom: 1px solid var(--cp-line);
-  margin: 14px 0;
+  padding: 14px;
+  background: var(--cp-soft);
+  border-radius: 15px;
+  margin: 14px 0 20px;
 }
 .cp-reset-status > div {
   display: flex;
@@ -1465,9 +1460,6 @@ main.menubar.opaque {
 .menubar .cp-body {
   padding: 12px 16px;
 }
-.menubar .cp-divider {
-  margin: 12px 0;
-}
 .menubar .cp-summary {
   border-radius: 12px;
   padding: 12px;
@@ -1488,7 +1480,7 @@ main.menubar.opaque {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 6px;
-  margin: 14px 0 0;
+  margin: 14px 0 12px;
   padding: 14px;
   background: var(--card);
   border: 1px solid var(--cp-line);
