@@ -13,8 +13,14 @@ Rust 后台采集器在接受新的消息状态响应后处理，面板隐藏时
 - macOS 本机 `cargo test --workspace --release --locked` 全量测试通过，包含新增 6 项通知测试：立即提醒、SQLite 关闭重开去重、同计划编辑及移除恢复、开关变化、缓存 / 失败响应、可信来源、过期 / 已执行和中英文时区文案。
 - Clippy 全目标零警告，Rust 格式检查通过；Svelte 零错误 / 警告，22 项 Node 测试及生产前端构建通过。
 - 8 组 IPC 模拟回归通过：macOS / Windows 样式、中英文、320 / 380px；验证默认开关、保存关闭状态、窄屏布局，以及收到通知导航事件后从挑战详情返回重置消息列表。
-- 本轮未验收两平台真实系统横幅展示和原生通知点击，也未在本机编译 Windows 安装包。现有安装包未替换，尚未构建或发布新的正式 Release。
+- 本机已安装 CI 正式 macOS Universal 包，原生重启确认版本 0.1.32、通知开关默认开启；真实已公布计划的持久化去重记录为 1 条，未注入测试公告或修改用户通知偏好。
+- 两平台真实系统横幅展示和原生通知点击尚未验收；Windows 安装包由 CI 构建和检查，未进行 Windows 原生运行验收。
 
 ## 发布
 
-用户已要求提交、打包及发布 Release，版本统一为 0.1.32。待双平台 CI、签名更新文件及服务端资产核验后正式发布，最终结果在本节补充。
+已按用户要求通过 `gh` 发布 [v0.1.32](https://github.com/lvzixun/CodexPulse/releases/tag/v0.1.32)，并设为最新正式版。源码提交及版本标签为 `dffda40abd5f89050a293c4bde2c863885578687`。
+
+- [双平台 CI](https://github.com/lvzixun/CodexPulse/actions/runs/38337321637) 全部通过：Windows 196 项、macOS 197 项 Rust 测试通过，两平台各 7 项显式联网 / 实机探针默认忽略；Svelte、22 项 Node 测试、Clippy 和发布构建通过。
+- Windows x64 安装包版本和 PE 检查通过；macOS Universal 包包含 arm64 / x86_64，最低系统 12.0，严格 ad-hoc 签名校验通过，DMG 与更新包内可执行文件一致。
+- 双平台自动更新签名、签名版本绑定和篡改拒绝通过；7 个公开服务端资产的名称、大小及 SHA-256 全部与本地一致。匿名下载的最新 `latest.json` 与本地逐字节相同，版本为 0.1.32，包含 Windows x64、macOS Intel / Apple Silicon 更新入口。
+- 本机 `/Applications/CodexPulse.app` 已替换为上述正式通用包并完成原生启动及设置检查，旧版本保留在本次工作备份中。
