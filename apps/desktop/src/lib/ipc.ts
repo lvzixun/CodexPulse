@@ -74,6 +74,7 @@ export const empty: Snapshot = {
     hide_projects: false,
     quota_refresh: { mode: 'auto', interval_seconds: 300 },
     news_refresh: { mode: 'auto', interval_seconds: 300 },
+    reset_notifications: true,
     timezone: 'UTC',
     compact_position: null,
     compact_anchor: null,

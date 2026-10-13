@@ -30,6 +30,7 @@ export interface Settings {
   hide_projects: boolean;
   quota_refresh: RefreshConfig;
   news_refresh: RefreshConfig;
+  reset_notifications: boolean;
   timezone: string;
   compact_position: [number, number] | null;
   compact_anchor: {

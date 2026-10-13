@@ -15,6 +15,7 @@ mod menubar_status;
 mod news;
 mod platform;
 mod refresh;
+mod reset_notifications;
 #[cfg(test)]
 mod rpc;
 mod source_config;
@@ -323,6 +324,7 @@ async fn copy_diagnostics(
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_single_instance::init(|app, args, _| {
             if !args.iter().any(|arg| arg == "--startup") {
@@ -380,6 +382,7 @@ fn main() {
                 .clone();
             app.manage(backend);
             platform::setup(app, &settings)?;
+            reset_notifications::setup(app.handle())?;
             let handle = app.handle().clone();
             tauri::async_runtime::spawn_blocking(move || {
                 use tauri::Emitter;

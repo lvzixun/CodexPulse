@@ -23,13 +23,13 @@ Right-click the compact window for Expand, Quit, and Hide. Use the tray icon to 
 
 The **macOS menu bar** shows busy / idle / unknown, the current model, and average speed. `↻` marks new important reset announcements or plans, `•` marks other posts, and `!` marks source errors. Hover for details and click to open the panel. Parallel tasks show a count; long model names are shortened. Missing activity or speed samples display `—`. Local status keeps updating while the panel is hidden. Both platforms share the features below.
 
-
 **Per-model run speed:** rows show the weighted average of the latest 50 valid runs within the last 30 days. Expand for the last 50 runs, 100 runs, or 30 days, plotted against device local time. Total output divided by total run duration excludes session idle time but may include reasoning, tools, and waits within runs. Current samples show logged modes such as Fast or Standard; missing modes stay Unknown and combined modes show Mixed. Hover or focus for time, speed, and mode. Old logs are backfilled locally in bounded batches, without extra network requests.
 
 ## Settings and refresh
 
 - **Appearance:** dark, light, or system theme. Blue is the default accent; violet, teal, amber, and rose are also available.
 - **Windows 10 glass:** uses an opaque background to avoid slow window dragging. The glass switch is disabled, and previously enabled glass settings are turned off automatically.
+- **Reset plan notifications:** enabled by default. New announced plans trigger one system notification; reopening, refreshing, and restarting do not repeat it. Keep the app running and allow notifications in system settings. Plans discovered while disabled are not sent later; forecasts and expired plans stay quiet.
 - **Independent refresh:** configure automatic or manual refresh and intervals separately for account limits and Codex Resets messages, or refresh immediately. Manual mode shows cached data at startup and makes no background requests for that group. Translation runs only when clicked.
 - **On-demand collection:** on Windows, automatic account requests require expanded, visible details; the compact window makes no account requests. macOS runs once at startup, then on schedule while the panel is visible. Reopening refreshes only when the cache is due. Local log collection and public message refresh run independently.
 

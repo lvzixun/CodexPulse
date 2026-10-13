@@ -43,6 +43,7 @@ pub struct Settings {
     pub hide_projects: bool,
     pub quota_refresh: crate::refresh::Config,
     pub news_refresh: crate::refresh::Config,
+    pub reset_notifications: bool,
     pub timezone: String,
     pub compact_position: Option<(i32, i32)>,
     pub compact_anchor: Option<crate::geometry::Anchor>,
@@ -66,6 +67,7 @@ impl Default for Settings {
             hide_projects: false,
             quota_refresh: crate::refresh::Config::default(),
             news_refresh: crate::refresh::Config::default(),
+            reset_notifications: true,
             timezone: iana_time_zone::get_timezone().unwrap_or_else(|_| "UTC".into()),
             compact_position: None,
             compact_anchor: None,
@@ -277,6 +279,7 @@ impl Backend {
         let inbox = store
             .setting::<crate::inbox::Inbox>("news_inbox")?
             .unwrap_or_default();
+        let reset_notifications = crate::reset_notifications::Notifications::load(&store)?;
         let snapshot = Arc::new(RwLock::new(Snapshot {
             settings: settings.clone(),
             quota: QuotaState::default(),
@@ -456,6 +459,7 @@ impl Backend {
                 let mut quota = quota;
                 let mut news = news;
                 let mut inbox = inbox;
+                let mut reset_notifications = reset_notifications;
                 let mut news_schedule = crate::refresh::Schedule::new();
                 let mut quota_schedule = crate::refresh::Schedule::new();
                 let mut stamps = BTreeMap::<String, crate::http_quota::Stamp>::new();
@@ -796,6 +800,19 @@ impl Backend {
                                 .max(next.retry_until)
                                 .min(next.challenge_next_attempt.max(next.challenge_retry_until));
                             if news_schedule.finish(generation, next_due) {
+                                match reset_notifications.discover(
+                                    &store,
+                                    &news,
+                                    &next,
+                                    settings.reset_notifications,
+                                    Utc::now(),
+                                ) {
+                                    Ok(Some(notice)) => notice.show(&app, &settings),
+                                    Ok(None) => {}
+                                    Err(error) => {
+                                        eprintln!("Unable to save reset notification: {error}")
+                                    }
+                                }
                                 news = *next;
                                 inbox.update(&news);
                                 let _ = store.set_setting("news_inbox", &inbox);
@@ -2589,6 +2606,8 @@ mod tests {
         assert!(settings.wsl_auto_detect);
         assert_eq!(settings.language, "system");
         assert!(!settings.hide_titles);
+        assert!(settings.reset_notifications);
+        settings.reset_notifications = false;
         settings.wsl_sources.push(crate::source_config::WslSource {
             id: "manual".into(),
             distro: "Ubuntu".into(),
@@ -2600,6 +2619,7 @@ mod tests {
         let decoded: Settings =
             serde_json::from_value(serde_json::to_value(&settings).unwrap()).unwrap();
         assert_eq!(decoded.wsl_sources, settings.wsl_sources);
+        assert!(!decoded.reset_notifications);
         settings.language = "en".into();
         let decoded: Settings =
             serde_json::from_value(serde_json::to_value(&settings).unwrap()).unwrap();

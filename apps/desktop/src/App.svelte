@@ -528,8 +528,12 @@
           if (content) scroll[scrollKey()] = content.scrollTop;
           const changed = mode !== next;
           mode = next as typeof mode;
+          if (target === 'news') {
+            newsChallenge = false;
+            scroll.news = 0;
+          }
           if (target && target !== page) void goPage(target);
-          else if (changed) void restorePageScroll();
+          else if (changed || target === 'news') void restorePageScroll();
           void refresh();
         }),
       () =>
@@ -1006,6 +1010,18 @@
               disabled={!glassAvailable}
               checked={glassAvailable && settings.glass}
               onchange={(e) => (settings.glass = glassAvailable && e.currentTarget.checked)}
+            /></label
+          >
+          <label class="cp-setting"
+            ><span
+              >{$t('重置计划系统通知')}<small class="cp-setting-hint"
+                >{$t('发现已公布的新计划时提醒一次，需在系统中允许通知')}</small
+              ></span
+            ><input
+              type="checkbox"
+              role="switch"
+              switch={floatingSupported ? undefined : true}
+              bind:checked={settings.reset_notifications}
             /></label
           >
           <label class="cp-setting"
