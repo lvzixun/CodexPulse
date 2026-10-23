@@ -13,3 +13,13 @@ Windows 浮窗恢复 184 × 36，模型下方显示级别和 Fast，不再为新
 - Rust 与前端均验证同模型 max/xhigh 合并、稳定排序、其他模型隔离及 Fast 混合状态。
 - 中英文实际 Svelte / IPC 回归验证 184px 下两个 Astra 的 max/xhigh、Fast、速度及重置提示完整可见，原有拖动、点击和消息流程继续通过；文档截图恢复原尺寸。
 - 本地 203 项 Rust 测试通过，7 项显式探针按原设置忽略；23 项 Node 测试、Svelte、生产构建、Clippy 全目标零警告、Rust 格式及前端格式检查通过。
+
+## 发布与本机更新
+
+已发布 [v0.1.34 正式版](https://github.com/lvzixun/CodexPulse/releases/tag/v0.1.34)，并设为最新版本；源码标签指向 `089147fb6f1c5d12ce1f9185c74c3ecbaec75469`。
+
+- [双平台 CI](https://github.com/lvzixun/CodexPulse/actions/runs/39957305942) 全部成功，Windows 202 项、macOS 203 项 Rust 测试通过，各 7 项显式探针按原设置忽略；前端、Node、Clippy、安装包与更新签名检查通过。
+- Windows 安装器 SHA-256 与 CI 输出一致；下载后的两平台更新包均通过签名、版本绑定及篡改拒绝验证。macOS Universal 包包含 arm64 / x86_64，两架构最低系统 12.0，严格签名校验通过；DMG 程序与更新归档一致。
+- 7 个公开资产的大小和 SHA-256 与本地全部一致；匿名查询确认最新正式版为 v0.1.34，匿名下载的更新清单与本地逐字节一致，覆盖三个平台入口。
+- 本机 `/Applications/CodexPulse.app` 已更新为同一 CI 产物并通过原生启动；旧 App 保存在本地忽略的 `releases/v0.1.34/backup/`。重启后真实应用账本中的两个 Astra 级别分别恢复为 max 和 xhigh，未修改原始会话日志。
+- 原生详情窗口启动已确认；系统菜单栏额外项目未能通过本轮 CUA 读取，菜单栏文案依赖渲染回归和真实账本验证。Windows 原生交互未在本机验收。
