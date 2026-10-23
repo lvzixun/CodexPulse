@@ -19,7 +19,7 @@ Windows 提供托盘和一行小浮窗；macOS 菜单栏显示工作状态、模
 
 发现新版后自动下载并验证签名，点击“重启并更新”即可安装，无需打开浏览器。
 
-<a href="docs/screenshots/compact-zh.png"><img src="docs/screenshots/compact-zh.png" alt="Windows 小浮窗：工作状态、模型、推理级别、Fast、速度与重置标记" width="300" /></a>
+<a href="docs/screenshots/compact-zh.png"><img src="docs/screenshots/compact-zh.png" alt="Windows 小浮窗：工作状态、模型、推理级别、Fast、速度与重置标记" width="184" /></a>
 
 <a href="docs/screenshots/overview-zh.png"><img src="docs/screenshots/overview-zh.png" alt="CodexPulse 总览" width="380" /></a>
 

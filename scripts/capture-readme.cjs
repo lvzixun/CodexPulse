@@ -25,7 +25,7 @@ async function main() {
         const compact = pageName === 'compact';
         const page = await browser.newPage({
           viewport: {
-            width: compact ? 300 : 380,
+            width: compact ? 184 : 380,
             height: compact ? 36 : pageName === 'models' ? 980 : 800,
           },
           deviceScaleFactor: 3,
@@ -81,7 +81,7 @@ async function main() {
           animations: 'disabled',
         });
         console.log(
-          `${name}: ${compact ? '900 × 108' : pageName === 'models' ? '1140 × 2940' : '1140 × 2400'} PNG`,
+          `${name}: ${compact ? '552 × 108' : pageName === 'models' ? '1140 × 2940' : '1140 × 2400'} PNG`,
         );
         await page.close();
       }

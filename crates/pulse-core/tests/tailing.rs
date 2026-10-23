@@ -135,7 +135,7 @@ fn old_checkpoint_recovers_settings_once_without_recounting_or_reading_uncommitt
     let key = path.to_string_lossy();
     let mut cursor = store.cursor("windows", &key).unwrap().unwrap();
     let before = store.session_by_id("settings").unwrap().unwrap();
-    cursor.state.session_settings_known = false;
+    cursor.state.session_settings_version = 0;
     cursor.state.session.as_mut().unwrap().reasoning_effort = None;
     cursor.state.session.as_mut().unwrap().service_tier = None;
     store
@@ -162,7 +162,8 @@ fn old_checkpoint_recovers_settings_once_without_recounting_or_reading_uncommitt
             .unwrap()
             .unwrap()
             .state
-            .session_settings_known
+            .session_settings_version
+            == 1
     );
     let report = read(&mut store, &path);
     assert!(report.unchanged);
@@ -192,6 +193,96 @@ fn partial_record_is_not_committed_and_survives_restart() {
     let mut store = Store::open(&db).unwrap();
     assert_eq!(read(&mut store, &path).inserted, 1);
     assert_eq!(store.fact_count().unwrap(), 2);
+}
+
+#[test]
+fn settings_upgrade_walks_past_old_tail_limit_resumes_after_restart_and_yields_to_new_context() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("settings.jsonl");
+    let db = temp.path().join("pulse.db");
+    let mut content = fixture("deep-settings").replace(
+        "\"model\":\"test-model\"",
+        "\"model\":\"test-model\",\"effort\":\"max\",\"service_tier\":\"priority\"",
+    );
+    content.push_str(&(json!({"type":"event_msg","payload":{"type":"thread_settings_applied","thread_id":"foreign",
+        "thread_settings":{"model":"test-model","reasoning_effort":"low"}}}).to_string()+"\n"));
+    let padding =
+        json!({"type":"response_item","payload":{"text":"x".repeat(4000)}}).to_string() + "\n";
+    content.push_str(&padding.repeat(500));
+    fs::write(&path, content).unwrap();
+    let mut store = Store::open(&db).unwrap();
+    while read(&mut store, &path).more {}
+    let before = store.session_by_id("deep-settings").unwrap().unwrap();
+    let key = path.to_string_lossy();
+    let mut cursor = store.cursor("windows", &key).unwrap().unwrap();
+    // Reproduce v0.1.33's checkpoint: a failed short-tail search was marked complete.
+    let mut old = serde_json::to_value(&cursor.state).unwrap();
+    old.as_object_mut()
+        .unwrap()
+        .remove("session_settings_version");
+    old["session_settings_known"] = json!(true);
+    old["session"]["reasoning_effort"] = json!(null);
+    cursor.state = serde_json::from_value(old).unwrap();
+    store
+        .commit_batch(
+            &cursor,
+            &[cursor.state.session.clone().unwrap()],
+            &[],
+            &[],
+            chrono_tz::UTC,
+        )
+        .unwrap();
+    let mut batches = 0;
+    loop {
+        let report = read(&mut store, &path);
+        assert_eq!(report.inserted, 0);
+        assert_eq!(report.records, 0);
+        assert!(report.bytes_read <= 2 * MAX_RECORD_BYTES);
+        batches += 1;
+        if !report.more {
+            break;
+        }
+        assert!(batches < 20);
+        drop(store);
+        store = Store::open(&db).unwrap();
+    }
+    assert!(batches > 1);
+    let after = store.session_by_id("deep-settings").unwrap().unwrap();
+    assert_eq!(after.meta, before.meta);
+    assert_eq!(after.total, before.total);
+    assert_eq!(after.events, before.events);
+    assert!(read(&mut store, &path).unchanged);
+
+    let mut cursor = store.cursor("windows", &key).unwrap().unwrap();
+    cursor.state.session_settings_version = 0;
+    cursor.state.session.as_mut().unwrap().reasoning_effort = None;
+    store
+        .commit_batch(
+            &cursor,
+            &[cursor.state.session.clone().unwrap()],
+            &[],
+            &[],
+            chrono_tz::UTC,
+        )
+        .unwrap();
+    assert!(read(&mut store, &path).more);
+    append(
+        &path,
+        (json!({"type":"turn_context","payload":{"model":"test-model"}}).to_string() + "\n")
+            .as_bytes(),
+    );
+    assert!(read(&mut store, &path).more);
+    append(
+        &path,
+        (json!({"type":"turn_context","payload":{"model":"test-model","effort":"xhigh"}})
+            .to_string()
+            + "\n")
+            .as_bytes(),
+    );
+    assert!(!read(&mut store, &path).more);
+    let after = store.session_by_id("deep-settings").unwrap().unwrap();
+    assert_eq!(after.meta.reasoning_effort.as_deref(), Some("xhigh"));
+    assert_eq!(after.total, before.total);
 }
 #[test]
 fn oversized_record_is_bounded_and_following_usage_is_preserved() {

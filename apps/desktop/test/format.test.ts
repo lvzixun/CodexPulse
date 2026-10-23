@@ -1,6 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { sessionActivity, sessionTokens, sessionRunState } from '../src/lib/format.ts';
+import {
+  sessionActivity,
+  sessionTokens,
+  sessionRunState,
+  compactSettings,
+} from '../src/lib/format.ts';
 import type { RecentSession, SourceHealth } from '../src/lib/types.ts';
 const now = Date.parse('2026-10-06T09:00:00Z');
 const source: SourceHealth = {
@@ -31,6 +36,23 @@ const session: RecentSession = {
   cost_nanousd: 0,
   unpriced_tokens: 100,
 };
+test('parallel model settings show all distinct efforts without mixing models or hiding unknowns', () => {
+  const make = (effort: string | null, model = 'gpt-6-astra', tier = 'priority') => ({
+    ...session,
+    meta: { ...session.meta, current_model: model, reasoning_effort: effort, service_tier: tier },
+  });
+  const sessions = [make('xhigh'), make('max'), make('max'), make('low', 'other')];
+  assert.deepEqual(compactSettings(sessions, 'gpt-6-astra'), { effort: 'max/xhigh', fast: 'Fast' });
+  assert.deepEqual(
+    compactSettings([...sessions].reverse(), 'gpt-6-astra'),
+    compactSettings(sessions, 'gpt-6-astra'),
+  );
+  assert.equal(
+    compactSettings([make('max'), make('xhigh', 'gpt-6-astra', 'default')], 'gpt-6-astra').fast,
+    'Fast±',
+  );
+  assert.equal(compactSettings([make('max'), make(null)], 'gpt-6-astra').effort, 'max/—');
+});
 test('working requires recent owned logs and a connected source', () => {
   assert.equal(sessionActivity({ recent: [session], sources: [source] }, now).state, 'busy');
   assert.equal(

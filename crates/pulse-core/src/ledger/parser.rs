@@ -15,7 +15,9 @@ pub struct ParserState {
     #[serde(default)]
     pub session_source_known: bool,
     #[serde(default)]
-    pub session_settings_known: bool,
+    pub session_settings_version: u8,
+    #[serde(default)]
+    pub settings_recovery_offset: Option<u64>,
     pub model: Option<String>,
     pub provider: Option<String>,
     pub turn_id: Option<String>,
@@ -162,12 +164,24 @@ impl ParserState {
             }
             session.service_tier = self.service_tier.clone();
         }
-        self.session_settings_known = true;
+        if complete
+            || settings.get("effort").is_some()
+            || settings.get("reasoning_effort").is_some()
+            || self
+                .session
+                .as_ref()
+                .is_some_and(|s| s.reasoning_effort.is_some())
+            || self.settings_recovery_offset.is_none()
+        {
+            self.session_settings_version = 1;
+            self.settings_recovery_offset = None;
+        }
     }
     /// Upgrade only display settings from a bounded, committed tail. Never replay usage or activity.
-    pub fn recover_session_settings(&mut self, tail: &[u8]) -> Option<SessionMeta> {
-        self.session_settings_known = true;
-        let session = self.session.as_mut()?;
+    pub fn recover_session_settings(&mut self, tail: &[u8]) -> bool {
+        let Some(session) = self.session.as_mut() else {
+            return true;
+        };
         session.service_tier = self.service_tier.clone();
         for line in tail.split(|b| *b == b'\n').rev() {
             let Ok(record) = serde_json::from_slice::<Value>(line) else {
@@ -185,7 +199,7 @@ impl ParserState {
                 _ => continue,
             };
             if text(settings, "model") != self.model {
-                break;
+                return true;
             }
             if settings.get("effort").is_some()
                 || settings.get("reasoning_effort").is_some()
@@ -193,10 +207,10 @@ impl ParserState {
             {
                 session.reasoning_effort =
                     text(settings, "reasoning_effort").or_else(|| text(settings, "effort"));
-                break;
+                return true;
             }
         }
-        Some(session.clone())
+        false
     }
     /// Upgrade old checkpoints from the bounded metadata header, without replaying
     /// counters or resetting the current activity/output-rate state.

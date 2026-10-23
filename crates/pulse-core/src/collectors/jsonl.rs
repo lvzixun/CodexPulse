@@ -149,7 +149,7 @@ fn read_inner(
     let recover_settings = !titles_only
         && !rates_only
         && cursor.state.session.is_some()
-        && !cursor.state.session_settings_known;
+        && cursor.state.session_settings_version == 0;
     let mut header_bytes = 0;
     let mut recovered_session = if recover_source {
         let mut header = Vec::new();
@@ -167,26 +167,47 @@ fn read_inner(
     }
     .or(recovered_model);
     if recover_settings {
-        // A one-time upgrade reads at most one record-sized tail before the committed offset.
-        let mut file = File::open(path)?;
-        let start = cursor.offset.saturating_sub(MAX_RECORD_BYTES as u64);
-        file.seek(SeekFrom::Start(start))?;
-        let mut tail = Vec::new();
-        file.take(cursor.offset - start).read_to_end(&mut tail)?;
-        header_bytes += tail.len();
-        // Discard a potentially partial first line; only complete committed records are trusted.
-        let tail = if start > 0 {
-            tail.iter()
-                .position(|b| *b == b'\n')
-                .map_or(&[][..], |i| &tail[i + 1..])
+        let known = cursor
+            .state
+            .session
+            .as_ref()
+            .is_some_and(|s| s.reasoning_effort.is_some());
+        let end = cursor
+            .state
+            .settings_recovery_offset
+            .unwrap_or(cursor.offset);
+        let start = end.saturating_sub((2 * MAX_RECORD_BYTES) as u64);
+        let done = if known {
+            true
         } else {
-            &tail
+            // Walk backwards in bounded overlapping windows. The overlap ensures records
+            // spanning a window boundary are inspected intact, without retaining log bodies.
+            let mut file = File::open(path)?;
+            file.seek(SeekFrom::Start(start))?;
+            let mut tail = Vec::new();
+            file.take(end - start).read_to_end(&mut tail)?;
+            header_bytes += tail.len();
+            let tail = if start > 0 {
+                tail.iter()
+                    .position(|b| *b == b'\n')
+                    .map_or(&[][..], |i| &tail[i + 1..])
+            } else {
+                &tail
+            };
+            let tail = tail
+                .iter()
+                .rposition(|b| *b == b'\n')
+                .map_or(&[][..], |i| &tail[..=i]);
+            cursor.state.recover_session_settings(tail) || start == 0
         };
-        let tail = tail
-            .iter()
-            .rposition(|b| *b == b'\n')
-            .map_or(&[][..], |i| &tail[..=i]);
-        recovered_session = cursor.state.recover_session_settings(tail);
+        if done {
+            cursor.state.session_settings_version = 1;
+            cursor.state.settings_recovery_offset = None;
+        } else {
+            cursor.state.settings_recovery_offset =
+                Some(end.saturating_sub(MAX_RECORD_BYTES as u64));
+        }
+        recovered_session = cursor.state.session.clone();
     }
     if !modified_ns.is_empty()
         && cursor.modified_ns == modified_ns
@@ -202,6 +223,7 @@ fn read_inner(
             )?;
             return Ok(ReadReport {
                 bytes_read: header_bytes,
+                more: cursor.state.settings_recovery_offset.is_some(),
                 ..Default::default()
             });
         }
@@ -305,8 +327,9 @@ fn read_inner(
     } else {
         line_start
     };
-    report.more = !eof && position < meta.len();
-    cursor.modified_ns = if report.more {
+    let forward_more = !eof && position < meta.len();
+    report.more = forward_more || cursor.state.settings_recovery_offset.is_some();
+    cursor.modified_ns = if forward_more {
         String::new()
     } else {
         modified_ns

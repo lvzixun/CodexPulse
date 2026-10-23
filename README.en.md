@@ -19,7 +19,7 @@ Windows offers a tray icon and a one-line floating window. The macOS menu bar sh
 
 New updates download automatically and are signature-verified. Click “Restart and update” to install without opening a browser.
 
-<a href="docs/screenshots/compact-en.png"><img src="docs/screenshots/compact-en.png" alt="Windows compact window: work status, model, reasoning effort, Fast, speed, and reset marker" width="300" /></a>
+<a href="docs/screenshots/compact-en.png"><img src="docs/screenshots/compact-en.png" alt="Windows compact window: work status, model, reasoning effort, Fast, speed, and reset marker" width="184" /></a>
 
 <a href="docs/screenshots/overview-en.png"><img src="docs/screenshots/overview-en.png" alt="CodexPulse Overview" width="380" /></a>
 

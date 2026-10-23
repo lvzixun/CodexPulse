@@ -277,8 +277,8 @@ await import('/src/main.ts');
         await __panelTest.push(['compact-news']);
       });
       await page.locator('.cp-compact-line').waitFor();
-      await page.setViewportSize({ width: 300, height: 36 });
-      const savedMeta = await page.evaluate(() => structuredClone(__panelTest.data.recent[0].meta));
+      await page.setViewportSize({ width: 184, height: 36 });
+      const savedRecent = await page.evaluate(() => structuredClone(__panelTest.data.recent));
       for (const [effort, tier, fast] of [
         ['high', 'priority', 'Fast'],
         ['xhigh', 'fast', 'Fast'],
@@ -315,7 +315,7 @@ await import('/src/main.ts');
             },
           ),
         }));
-        assert.equal(boxes.overflow, false, `${language}: compact contents fit in 300px`);
+        assert.equal(boxes.overflow, false, `${language}: compact contents fit in 184px`);
         for (let i = 1; i < boxes.parts.length; i++) {
           assert.ok(
             boxes.parts[i].x >= boxes.parts[i - 1].right,
@@ -326,14 +326,45 @@ await import('/src/main.ts');
         assert.match(await page.locator('.cp-compact-rate').innerText(), /—/);
       }
       await page.evaluate(async () => {
+        const first = __panelTest.data.recent[0];
+        Object.assign(first.meta, {
+          current_model: 'gpt-6-astra',
+          reasoning_effort: 'xhigh',
+          service_tier: 'priority',
+          output_rate: {
+            output_tokens: 1240,
+            elapsed_ms: 40000,
+            measured_at: new Date().toISOString(),
+            completed: false,
+          },
+        });
+        const second = structuredClone(first);
+        second.meta.id += '-parallel';
+        second.meta.reasoning_effort = 'max';
+        __panelTest.data.recent.push(second);
+        await __panelTest.push(['compact-news']);
+      });
+      await page.waitForFunction(
+        () => document.querySelector('.cp-compact-effort')?.textContent === 'max/xhigh',
+      );
+      assert.equal(await page.locator('.cp-compact-model b').innerText(), '6-astra');
+      const fits = await page.locator('.cp-compact-model').evaluate((model) => {
+        const settings = model.querySelector('.cp-compact-settings');
+        return (
+          model.querySelector('b').scrollWidth <= model.clientWidth &&
+          settings.scrollWidth <= model.clientWidth
+        );
+      });
+      assert.ok(fits, `${language}: both Astra levels and Fast are fully visible at 184px`);
+      await page.evaluate(async () => {
         __panelTest.data.recent.forEach((s) => (s.meta.status = 'completed'));
         await __panelTest.push(['compact-news']);
       });
       await page.waitForFunction(() => !document.querySelector('.cp-compact-effort'));
-      await page.evaluate(async (meta) => {
-        __panelTest.data.recent[0].meta = meta;
+      await page.evaluate(async (recent) => {
+        __panelTest.data.recent = recent;
         await __panelTest.push(['compact-news']);
-      }, savedMeta);
+      }, savedRecent);
       await page.setViewportSize({ width: 380, height: 800 });
       const info = await page.locator('.cp-compact-info').boundingBox();
       await page.mouse.move(info.x + 15, info.y + 15);

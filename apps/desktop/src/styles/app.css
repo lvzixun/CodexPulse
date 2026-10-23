@@ -1018,8 +1018,8 @@ body {
   display: flex;
   align-items: center;
   height: 100%;
-  padding: 0 6px;
-  gap: 5px;
+  padding: 0 4px;
+  gap: 3px;
   white-space: nowrap;
   cursor: grab;
   user-select: none;
@@ -1030,14 +1030,14 @@ body {
   color: var(--cp-accent) !important;
   cursor: grab;
   flex-shrink: 0;
-  min-width: 23px;
+  min-width: 15px;
   width: auto;
   height: 26px;
   opacity: 0.65;
   display: flex;
   align-items: center;
   gap: 3px;
-  font-size: 10px;
+  font-size: 9px;
 }
 .cp-activity-dot {
   width: 4px;
@@ -1099,7 +1099,7 @@ body {
   flex: 1;
   align-items: center;
   justify-content: space-between;
-  gap: 5px;
+  gap: 3px;
   min-width: 0;
   height: 100%;
   padding: 0;
@@ -1110,7 +1110,7 @@ body {
   align-items: baseline;
   gap: 2px;
   font-variant-numeric: tabular-nums;
-  font-size: 11px;
+  font-size: 10px;
 }
 .cp-compact-info small {
   font-size: 10px;
@@ -1124,7 +1124,11 @@ body {
   opacity: 0.65;
 }
 .cp-compact-info > .cp-compact-model {
-  flex: 0 1 auto;
+  flex: 1;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0;
+  line-height: 1.2;
   min-width: 0;
   overflow: hidden;
 }
@@ -1137,18 +1141,14 @@ body {
   margin-left: auto;
   flex-shrink: 0;
 }
-.cp-compact-effort,
-.cp-compact-fast {
-  flex-shrink: 0;
-}
-.cp-compact-effort {
-  max-width: 54px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.cp-compact-info > svg {
-  width: 8px;
-  color: var(--cp-muted);
+.cp-compact-info .cp-compact-settings {
+  display: flex;
+  flex-wrap: wrap;
+  max-width: 100%;
+  gap: 3px;
+  row-gap: 0;
+  font-size: 9px;
+  white-space: nowrap;
 }
 .cp-compact-wait {
   flex: 1;

@@ -83,6 +83,33 @@ export function sessionActivity(data: Pick<Snapshot, 'recent' | 'sources'>, now:
       : 'idle';
   return { working, sessions, state };
 }
+export function compactSettings(sessions: RecentSession[], model: string | null) {
+  const matching = sessions.filter((s) => (s.meta.current_model ?? null) === model);
+  const efforts = [...new Set(matching.map((s) => s.meta.reasoning_effort || '—'))].sort();
+  const modes = [
+    ...new Set(
+      matching.map((s) => {
+        const tier = s.meta.service_tier;
+        return tier === 'priority' || tier === 'fast'
+          ? 'Fast'
+          : ['default', 'standard', 'flex', 'batch'].includes(tier ?? '')
+            ? 'Off'
+            : '?';
+      }),
+    ),
+  ].sort();
+  return {
+    effort: efforts.join('/') || '—',
+    fast:
+      modes.length === 1
+        ? modes[0] === 'Off'
+          ? 'Fast off'
+          : modes[0] === '?'
+            ? 'Fast ?'
+            : 'Fast'
+        : 'Fast±',
+  };
+}
 export function sessionRunState(session: RecentSession, sources: SourceHealth[], now: number) {
   const age = now - Date.parse(session.meta.last_activity);
   if (session.meta.status === 'completed') return 'completed';

@@ -63,17 +63,30 @@ pub fn render(snapshot: &Snapshot, now: DateTime<Utc>, language: &str) -> Status
     let model = working
         .and_then(|s| s.meta.current_model.as_deref())
         .unwrap_or("—");
-    let effort = working
-        .and_then(|s| s.meta.reasoning_effort.as_deref())
-        .map(|value| model_text(value, 12))
-        .unwrap_or_else(|| "—".into());
-    let fast = match working.and_then(|s| s.meta.service_tier.as_deref()) {
-        Some("priority" | "fast") => "Fast",
-        Some("default" | "standard" | "flex" | "batch") => "Fast off",
-        _ => "Fast ?",
+    let peers: Vec<_> = running
+        .iter()
+        .filter(|s| s.meta.current_model.as_deref().unwrap_or("—") == model)
+        .collect();
+    let efforts: std::collections::BTreeSet<_> = peers
+        .iter()
+        .map(|s| model_text(s.meta.reasoning_effort.as_deref().unwrap_or("—"), 12))
+        .collect();
+    let effort = model_text(&efforts.into_iter().collect::<Vec<_>>().join("/"), 24);
+    let modes: std::collections::BTreeSet<_> = peers
+        .iter()
+        .map(|s| match s.meta.service_tier.as_deref() {
+            Some("priority" | "fast") => "Fast",
+            Some("default" | "standard" | "flex" | "batch") => "Fast off",
+            _ => "Fast ?",
+        })
+        .collect();
+    let fast = if modes.len() > 1 {
+        "Fast±"
+    } else {
+        modes.first().copied().unwrap_or("Fast ?")
     };
     let settings = if working.is_some() {
-        format!(" {effort} · {fast}")
+        format!(" {effort} {fast}")
     } else {
         String::new()
     };
@@ -114,7 +127,7 @@ pub fn render(snapshot: &Snapshot, now: DateTime<Utc>, language: &str) -> Status
         ""
     };
     let title = format!(
-        "{state}{count} · {}{settings} · {rate} t/s{mark}{}",
+        "{state}{count} · {}{settings} · {rate}t/s{mark}{}",
         model_text(model.strip_prefix("gpt-").unwrap_or(model), 12),
         if issue { " !" } else { "" }
     );
@@ -231,11 +244,11 @@ mod tests {
         let (mut s, now) = fixture();
         assert_eq!(
             render(&s, now, "zh").title,
-            "忙 · 6.1-sol xhigh · Fast · 38.4 t/s"
+            "忙 · 6.1-sol xhigh Fast · 38.4t/s"
         );
         s.recent.push(s.recent[0].clone());
         let status = render(&s, now, "en");
-        assert_eq!(status.title, "Busy2 · 6.1-sol xhigh · Fast · 38.4 t/s");
+        assert_eq!(status.title, "Busy2 · 6.1-sol xhigh Fast · 38.4t/s");
         assert!(!status.tooltip.contains("private session title"));
     }
     #[test]
@@ -246,33 +259,58 @@ mod tests {
             s.recent[0].meta.reasoning_effort = Some(effort.into());
             assert_eq!(
                 render(&s, now, "zh").title,
-                format!("忙 · 6.1-sol {effort} · Fast · — t/s")
+                format!("忙 · 6.1-sol {effort} Fast · —t/s")
             );
         }
         for tier in ["default", "standard", "flex", "batch"] {
             s.recent[0].meta.service_tier = Some(tier.into());
             let status = render(&s, now, "en");
-            assert!(status.title.contains("ultra · Fast off · — t/s"));
+            assert!(status.title.contains("ultra Fast off · —t/s"));
             assert!(status.tooltip.contains("Reasoning effort: ultra"));
         }
         s.recent[0].meta.reasoning_effort = None;
         s.recent[0].meta.service_tier = None;
-        assert!(render(&s, now, "zh").title.contains("6.1-sol — · Fast ?"));
+        assert!(render(&s, now, "zh").title.contains("6.1-sol — Fast ?"));
         s.recent[0].meta.status = "completed".into();
-        assert_eq!(render(&s, now, "zh").title, "闲 · — · — t/s");
+        assert_eq!(render(&s, now, "zh").title, "闲 · — · —t/s");
+    }
+    #[test]
+    fn parallel_model_efforts_are_distinct_sorted_and_do_not_mix_other_models() {
+        let (mut s, now) = fixture();
+        s.recent[0].meta.current_model = Some("gpt-6-astra".into());
+        s.recent[0].meta.reasoning_effort = Some("max".into());
+        let mut second = s.recent[0].clone();
+        second.meta.reasoning_effort = Some("xhigh".into());
+        s.recent.push(second);
+        assert_eq!(
+            render(&s, now, "zh").title,
+            "忙2 · 6-astra max/xhigh Fast · 38.4t/s"
+        );
+        s.recent.swap(0, 1);
+        assert_eq!(
+            render(&s, now, "zh").title,
+            "忙2 · 6-astra max/xhigh Fast · 38.4t/s"
+        );
+        let mut other = s.recent[0].clone();
+        other.meta.current_model = Some("other-model".into());
+        other.meta.reasoning_effort = Some("low".into());
+        s.recent.push(other);
+        assert!(!render(&s, now, "zh").title.contains("low"));
+        s.recent[1].meta.service_tier = Some("default".into());
+        assert!(render(&s, now, "zh").title.contains("Fast±"));
     }
     #[test]
     fn disconnected_stale_future_and_completed_activity_are_not_running() {
         let (mut s, now) = fixture();
         s.sources[0].status = "offline".into();
-        assert_eq!(render(&s, now, "en").title, "? · — · — t/s");
+        assert_eq!(render(&s, now, "en").title, "? · — · —t/s");
         s.sources[0].status = "connected".into();
         for time in ["2026-10-07T09:54:59Z", "2026-10-07T10:01:00Z", "bad"] {
             s.recent[0].meta.last_activity = time.into();
-            assert_eq!(render(&s, now, "zh").title, "? · — · — t/s");
+            assert_eq!(render(&s, now, "zh").title, "? · — · —t/s");
         }
         s.recent[0].meta.status = "completed".into();
-        assert_eq!(render(&s, now, "en").title, "Idle · — · — t/s");
+        assert_eq!(render(&s, now, "en").title, "Idle · — · —t/s");
     }
     #[test]
     fn live_speed_expires_without_a_new_snapshot_but_completed_rate_remains() {
@@ -280,15 +318,15 @@ mod tests {
         let later = now + chrono::Duration::seconds(61);
         assert_eq!(
             render(&s, later, "zh").title,
-            "忙 · 6.1-sol xhigh · Fast · — t/s"
+            "忙 · 6.1-sol xhigh Fast · —t/s"
         );
         s.recent[0].meta.output_rate.as_mut().unwrap().completed = true;
         assert_eq!(
             render(&s, later, "zh").title,
-            "忙 · 6.1-sol xhigh · Fast · 38.4 t/s"
+            "忙 · 6.1-sol xhigh Fast · 38.4t/s"
         );
         s.recent[0].meta.output_rate.as_mut().unwrap().elapsed_ms = 0;
-        assert!(render(&s, later, "zh").title.contains("— t/s"));
+        assert!(render(&s, later, "zh").title.contains("—t/s"));
     }
     #[test]
     fn reset_badge_is_distinct_from_ordinary_posts_and_errors_and_clears_on_read() {
@@ -329,7 +367,7 @@ mod tests {
                 let status = render(&s, now, language);
                 assert!(status.title.ends_with(" ↻"), "{state}: {}", status.title);
                 assert!(!status.tooltip.contains("\n!"), "{state}");
-                assert!(status.title.contains("6.1-sol xhigh · Fast · 38.4 t/s"));
+                assert!(status.title.contains("6.1-sol xhigh Fast · 38.4t/s"));
             }
         }
     }

@@ -1251,7 +1251,7 @@ impl Backend {
                                     source.health.last_read = Some(Utc::now().to_rfc3339());
                                     source.health.issues += report.issues;
                                     dirty = true;
-                                    live_dirty |= !titles_only && report.records > 0;
+                                    live_dirty |= !titles_only;
                                 }
                                 if !titles_only {
                                     enqueue(
