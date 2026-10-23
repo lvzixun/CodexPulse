@@ -138,6 +138,8 @@ export interface SessionMeta {
   status: string;
   last_activity: string;
   current_model?: string | null;
+  reasoning_effort?: string | null;
+  service_tier?: string | null;
   output_rate: {
     output_tokens: number;
     elapsed_ms: number;

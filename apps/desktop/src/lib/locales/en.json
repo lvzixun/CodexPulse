@@ -562,5 +562,7 @@
   "有效轮次的总输出除以总运行耗时，不包含会话空闲。": "Total output divided by total valid run duration; excludes session idle time.",
   "无法读取运行速度，请重试": "Cannot read run speeds. Please try again.",
   "当前": "Current",
-  "最近 30 天": "Last 30 days"
+  "最近 30 天": "Last 30 days",
+  "推理级别": "Reasoning effort",
+  "Fast 模式": "Fast mode"
 }

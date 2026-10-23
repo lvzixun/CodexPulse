@@ -14,6 +14,8 @@ pub struct ParserState {
     pub session: Option<SessionMeta>,
     #[serde(default)]
     pub session_source_known: bool,
+    #[serde(default)]
+    pub session_settings_known: bool,
     pub model: Option<String>,
     pub provider: Option<String>,
     pub turn_id: Option<String>,
@@ -126,8 +128,11 @@ impl ParserState {
     }
     fn set_model(&mut self, model: Option<String>) {
         if self.model != model {
+            self.service_tier = None;
             if let Some(session) = self.session.as_mut() {
                 session.output_rate = None;
+                session.reasoning_effort = None;
+                session.service_tier = None;
             }
             // task_started can precede the first model context. Keep its fresh
             // clock until output arrives, but never attribute old output to a new model.
@@ -140,6 +145,58 @@ impl ParserState {
         if let Some(session) = self.session.as_mut() {
             session.current_model = self.model.clone();
         }
+    }
+    fn set_session_settings(&mut self, settings: &Value, complete: bool) {
+        if complete || settings.get("service_tier").is_some() {
+            self.service_tier = text(settings, "service_tier");
+            let tier = self.service_tier.clone();
+            self.set_rate_tier(tier.as_deref());
+        }
+        if let Some(session) = self.session.as_mut() {
+            if complete
+                || settings.get("effort").is_some()
+                || settings.get("reasoning_effort").is_some()
+            {
+                session.reasoning_effort =
+                    text(settings, "reasoning_effort").or_else(|| text(settings, "effort"));
+            }
+            session.service_tier = self.service_tier.clone();
+        }
+        self.session_settings_known = true;
+    }
+    /// Upgrade only display settings from a bounded, committed tail. Never replay usage or activity.
+    pub fn recover_session_settings(&mut self, tail: &[u8]) -> Option<SessionMeta> {
+        self.session_settings_known = true;
+        let session = self.session.as_mut()?;
+        session.service_tier = self.service_tier.clone();
+        for line in tail.split(|b| *b == b'\n').rev() {
+            let Ok(record) = serde_json::from_slice::<Value>(line) else {
+                continue;
+            };
+            let payload = &record["payload"];
+            let settings = match record["type"].as_str() {
+                Some("turn_context") => payload,
+                Some("event_msg") if payload["type"] == "thread_settings_applied" => {
+                    if text(payload, "thread_id").is_some_and(|id| id != session.id) {
+                        continue;
+                    }
+                    &payload["thread_settings"]
+                }
+                _ => continue,
+            };
+            if text(settings, "model") != self.model {
+                break;
+            }
+            if settings.get("effort").is_some()
+                || settings.get("reasoning_effort").is_some()
+                || record["type"] == "event_msg"
+            {
+                session.reasoning_effort =
+                    text(settings, "reasoning_effort").or_else(|| text(settings, "effort"));
+                break;
+            }
+        }
+        Some(session.clone())
     }
     /// Upgrade old checkpoints from the bounded metadata header, without replaying
     /// counters or resetting the current activity/output-rate state.
@@ -201,6 +258,8 @@ impl ParserState {
                 status: "unknown".into(),
                 last_activity: timestamp.clone().unwrap_or_default(),
                 current_model: self.model.clone(),
+                reasoning_effort: None,
+                service_tier: self.service_tier.clone(),
                 output_rate: None,
             });
             self.session_source_known = true;
@@ -210,9 +269,6 @@ impl ParserState {
             };
         }
         if kind == "turn_context" {
-            if self.model != text(payload, "model") {
-                self.service_tier = None;
-            }
             let next_model = text(payload, "model");
             self.set_model(next_model);
             if let Some(provider) = text(payload, "model_provider") {
@@ -227,11 +283,7 @@ impl ParserState {
                 }
             }
             self.turn_id = turn;
-            if payload.get("service_tier").is_some() {
-                self.service_tier = text(payload, "service_tier");
-                let tier = self.service_tier.clone();
-                self.set_rate_tier(tier.as_deref());
-            }
+            self.set_session_settings(payload, false);
             return ParseOutput {
                 session: self.session.clone(),
                 ..Default::default()
@@ -256,9 +308,7 @@ impl ParserState {
                 if let Some(provider) = text(settings, "model_provider_id") {
                     self.provider = Some(provider);
                 }
-                self.service_tier = text(settings, "service_tier");
-                let tier = self.service_tier.clone();
-                self.set_rate_tier(tier.as_deref());
+                self.set_session_settings(settings, true);
                 ParseOutput {
                     session: self.session.clone(),
                     ..Default::default()

@@ -1124,7 +1124,7 @@ body {
   opacity: 0.65;
 }
 .cp-compact-info > .cp-compact-model {
-  flex: 1;
+  flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
 }
@@ -1136,6 +1136,15 @@ body {
 .cp-compact-rate {
   margin-left: auto;
   flex-shrink: 0;
+}
+.cp-compact-effort,
+.cp-compact-fast {
+  flex-shrink: 0;
+}
+.cp-compact-effort {
+  max-width: 54px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .cp-compact-info > svg {
   width: 8px;

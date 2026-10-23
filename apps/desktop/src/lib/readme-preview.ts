@@ -34,6 +34,8 @@ export function previewSnapshot(base: Snapshot): Snapshot {
     parent_id: null,
     status: 'active',
     current_model: 'gpt-6.1-sol',
+    reasoning_effort: 'xhigh',
+    service_tier: 'priority',
     last_activity: new Date(now - 2000).toISOString(),
     output_rate: { output_tokens: 1240, elapsed_ms: 40000, measured_at: at, completed: false },
   };

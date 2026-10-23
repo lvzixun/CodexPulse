@@ -298,7 +298,7 @@ fn position_floating(app: &tauri::AppHandle, w: &tauri::WebviewWindow, compact: 
         let p = area.place(
             anchor.as_ref(),
             if compact {
-                (184.0, 36.0)
+                (300.0, 36.0)
             } else {
                 (380.0, 800.0)
             },

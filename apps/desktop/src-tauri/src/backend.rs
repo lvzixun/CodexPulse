@@ -1920,16 +1920,22 @@ fn update_live_sessions(
                 &previous.status,
                 &previous.last_activity,
                 &previous.current_model,
+                &previous.reasoning_effort,
+                &previous.service_tier,
                 &previous.output_rate,
             ) != (
                 &next.status,
                 &next.last_activity,
                 &next.current_model,
+                &next.reasoning_effort,
+                &next.service_tier,
                 &next.output_rate,
             ) {
                 previous.status = next.status;
                 previous.last_activity = next.last_activity;
                 previous.current_model = next.current_model;
+                previous.reasoning_effort = next.reasoning_effort;
+                previous.service_tier = next.service_tier;
                 previous.output_rate = next.output_rate;
                 changed = true;
             }
@@ -2007,7 +2013,20 @@ mod tests {
             ..Default::default()
         };
         assert!(update_live_sessions(&mut state, vec![next.clone()]));
+        assert!(!update_live_sessions(&mut state, vec![next.clone()]));
+        let mut next = next;
+        next.reasoning_effort = Some("max".into());
+        next.service_tier = Some("priority".into());
+        assert!(update_live_sessions(&mut state, vec![next.clone()]));
         assert!(!update_live_sessions(&mut state, vec![next]));
+        assert_eq!(
+            state.recent[0].meta.reasoning_effort.as_deref(),
+            Some("max")
+        );
+        assert_eq!(
+            state.recent[0].meta.service_tier.as_deref(),
+            Some("priority")
+        );
         assert_eq!(
             state.recent[0]
                 .meta

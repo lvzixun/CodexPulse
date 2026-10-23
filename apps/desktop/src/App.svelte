@@ -183,6 +183,14 @@
       : '—',
   );
   const compactModel = $derived(working?.meta.current_model ?? null);
+  const compactEffort = $derived(working?.meta.reasoning_effort ?? '—');
+  const compactFast = $derived(
+    ['priority', 'fast'].includes(working?.meta.service_tier ?? '')
+      ? 'Fast'
+      : ['default', 'standard', 'flex', 'batch'].includes(working?.meta.service_tier ?? '')
+        ? 'Fast off'
+        : 'Fast ?',
+  );
   const compactRate = $derived(working ? rateText : '—');
   const highest = $derived(Math.max(1, ...data.usage.days.map((d) => d.total)));
   const unreadKeys = $derived(data.news.unread_keys ?? []);
@@ -672,6 +680,10 @@
         <span class="cp-compact-model" title={compactModel ?? $t('模型未知')}>
           <b>{compactModel ? compactModel.replace(/^gpt-/, '') : '—'}</b>
         </span>
+        {#if working}
+          <span class="cp-compact-effort" title={$t('推理级别')}>{compactEffort}</span>
+          <span class="cp-compact-fast" title={$t('Fast 模式')}>{compactFast}</span>
+        {/if}
         <span class="cp-compact-rate" title={$t('本轮平均输出速度 · 含推理、工具和等待')}>
           <b>{compactRate}</b><small>t/s</small>
         </span>

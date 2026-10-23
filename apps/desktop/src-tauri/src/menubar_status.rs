@@ -63,6 +63,20 @@ pub fn render(snapshot: &Snapshot, now: DateTime<Utc>, language: &str) -> Status
     let model = working
         .and_then(|s| s.meta.current_model.as_deref())
         .unwrap_or("—");
+    let effort = working
+        .and_then(|s| s.meta.reasoning_effort.as_deref())
+        .map(|value| model_text(value, 12))
+        .unwrap_or_else(|| "—".into());
+    let fast = match working.and_then(|s| s.meta.service_tier.as_deref()) {
+        Some("priority" | "fast") => "Fast",
+        Some("default" | "standard" | "flex" | "batch") => "Fast off",
+        _ => "Fast ?",
+    };
+    let settings = if working.is_some() {
+        format!(" {effort} · {fast}")
+    } else {
+        String::new()
+    };
     let rate = working
         .and_then(|s| s.meta.output_rate.as_ref())
         .filter(|rate| {
@@ -100,7 +114,7 @@ pub fn render(snapshot: &Snapshot, now: DateTime<Utc>, language: &str) -> Status
         ""
     };
     let title = format!(
-        "{state}{count} · {} · {rate} t/s{mark}{}",
+        "{state}{count} · {}{settings} · {rate} t/s{mark}{}",
         model_text(model.strip_prefix("gpt-").unwrap_or(model), 12),
         if issue { " !" } else { "" }
     );
@@ -140,7 +154,7 @@ pub fn render(snapshot: &Snapshot, now: DateTime<Utc>, language: &str) -> Status
     };
     let tooltip = if zh {
         format!(
-            "CodexPulse\n{activity}\n模型：{}\n输出速度：{rate} tok/s（当前轮次平均，含等待及工具时间）\n{messages}{}",
+            "CodexPulse\n{activity}\n模型：{}\n推理级别：{effort}\nFast 模式：{fast}\n输出速度：{rate} tok/s（当前轮次平均，含等待及工具时间）\n{messages}{}",
             model_text(model, 80),
             if issue {
                 "\n! 数据来源异常，请打开面板查看"
@@ -150,7 +164,7 @@ pub fn render(snapshot: &Snapshot, now: DateTime<Utc>, language: &str) -> Status
         )
     } else {
         format!(
-            "CodexPulse\n{activity}\nModel: {}\nOutput: {rate} tok/s (turn average, including waits and tools)\n{messages}{}",
+            "CodexPulse\n{activity}\nModel: {}\nReasoning effort: {effort}\nFast mode: {fast}\nOutput: {rate} tok/s (turn average, including waits and tools)\n{messages}{}",
             model_text(model, 80),
             if issue {
                 "\n! Data source issue; open the panel for details"
@@ -187,6 +201,8 @@ mod tests {
                     status: "active".into(),
                     last_activity: "2026-10-07T09:59:00Z".into(),
                     current_model: Some("gpt-6.1-sol".into()),
+                    reasoning_effort: Some("xhigh".into()),
+                    service_tier: Some("priority".into()),
                     output_rate: Some(OutputRate {
                         output_tokens: 384,
                         elapsed_ms: 10_000,
@@ -213,11 +229,37 @@ mod tests {
     #[test]
     fn running_model_speed_and_parallel_count_match_compact_window() {
         let (mut s, now) = fixture();
-        assert_eq!(render(&s, now, "zh").title, "忙 · 6.1-sol · 38.4 t/s");
+        assert_eq!(
+            render(&s, now, "zh").title,
+            "忙 · 6.1-sol xhigh · Fast · 38.4 t/s"
+        );
         s.recent.push(s.recent[0].clone());
         let status = render(&s, now, "en");
-        assert_eq!(status.title, "Busy2 · 6.1-sol · 38.4 t/s");
+        assert_eq!(status.title, "Busy2 · 6.1-sol xhigh · Fast · 38.4 t/s");
         assert!(!status.tooltip.contains("private session title"));
+    }
+    #[test]
+    fn settings_are_current_without_output_and_unknown_is_not_fast_off() {
+        let (mut s, now) = fixture();
+        s.recent[0].meta.output_rate = None;
+        for effort in ["high", "xhigh", "max", "ultra"] {
+            s.recent[0].meta.reasoning_effort = Some(effort.into());
+            assert_eq!(
+                render(&s, now, "zh").title,
+                format!("忙 · 6.1-sol {effort} · Fast · — t/s")
+            );
+        }
+        for tier in ["default", "standard", "flex", "batch"] {
+            s.recent[0].meta.service_tier = Some(tier.into());
+            let status = render(&s, now, "en");
+            assert!(status.title.contains("ultra · Fast off · — t/s"));
+            assert!(status.tooltip.contains("Reasoning effort: ultra"));
+        }
+        s.recent[0].meta.reasoning_effort = None;
+        s.recent[0].meta.service_tier = None;
+        assert!(render(&s, now, "zh").title.contains("6.1-sol — · Fast ?"));
+        s.recent[0].meta.status = "completed".into();
+        assert_eq!(render(&s, now, "zh").title, "闲 · — · — t/s");
     }
     #[test]
     fn disconnected_stale_future_and_completed_activity_are_not_running() {
@@ -236,9 +278,15 @@ mod tests {
     fn live_speed_expires_without_a_new_snapshot_but_completed_rate_remains() {
         let (mut s, now) = fixture();
         let later = now + chrono::Duration::seconds(61);
-        assert_eq!(render(&s, later, "zh").title, "忙 · 6.1-sol · — t/s");
+        assert_eq!(
+            render(&s, later, "zh").title,
+            "忙 · 6.1-sol xhigh · Fast · — t/s"
+        );
         s.recent[0].meta.output_rate.as_mut().unwrap().completed = true;
-        assert_eq!(render(&s, later, "zh").title, "忙 · 6.1-sol · 38.4 t/s");
+        assert_eq!(
+            render(&s, later, "zh").title,
+            "忙 · 6.1-sol xhigh · Fast · 38.4 t/s"
+        );
         s.recent[0].meta.output_rate.as_mut().unwrap().elapsed_ms = 0;
         assert!(render(&s, later, "zh").title.contains("— t/s"));
     }
@@ -281,7 +329,7 @@ mod tests {
                 let status = render(&s, now, language);
                 assert!(status.title.ends_with(" ↻"), "{state}: {}", status.title);
                 assert!(!status.tooltip.contains("\n!"), "{state}");
-                assert!(status.title.contains("6.1-sol · 38.4 t/s"));
+                assert!(status.title.contains("6.1-sol xhigh · Fast · 38.4 t/s"));
             }
         }
     }

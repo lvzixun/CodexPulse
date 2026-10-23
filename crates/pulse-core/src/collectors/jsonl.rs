@@ -146,8 +146,12 @@ fn read_inner(
         None
     };
     let recover_model = recovered_model.is_some();
+    let recover_settings = !titles_only
+        && !rates_only
+        && cursor.state.session.is_some()
+        && !cursor.state.session_settings_known;
     let mut header_bytes = 0;
-    let recovered_session = if recover_source {
+    let mut recovered_session = if recover_source {
         let mut header = Vec::new();
         let mut reader = BufReader::new(File::open(path)?.take((MAX_RECORD_BYTES + 1) as u64));
         header_bytes = reader.read_until(b'\n', &mut header)?;
@@ -162,11 +166,33 @@ fn read_inner(
         None
     }
     .or(recovered_model);
+    if recover_settings {
+        // A one-time upgrade reads at most one record-sized tail before the committed offset.
+        let mut file = File::open(path)?;
+        let start = cursor.offset.saturating_sub(MAX_RECORD_BYTES as u64);
+        file.seek(SeekFrom::Start(start))?;
+        let mut tail = Vec::new();
+        file.take(cursor.offset - start).read_to_end(&mut tail)?;
+        header_bytes += tail.len();
+        // Discard a potentially partial first line; only complete committed records are trusted.
+        let tail = if start > 0 {
+            tail.iter()
+                .position(|b| *b == b'\n')
+                .map_or(&[][..], |i| &tail[i + 1..])
+        } else {
+            &tail
+        };
+        let tail = tail
+            .iter()
+            .rposition(|b| *b == b'\n')
+            .map_or(&[][..], |i| &tail[..=i]);
+        recovered_session = cursor.state.recover_session_settings(tail);
+    }
     if !modified_ns.is_empty()
         && cursor.modified_ns == modified_ns
         && cursor.state.observed_file_len == Some(meta.len())
     {
-        if recover_source || recover_model {
+        if recover_source || recover_model || recover_settings {
             store.commit_batch(
                 &cursor,
                 &recovered_session.into_iter().collect::<Vec<_>>(),

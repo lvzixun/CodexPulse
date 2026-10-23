@@ -53,6 +53,75 @@ fn current_model_tracks_latest_context_and_does_not_relabel_previous_speed() {
         Some("z")
     );
 }
+#[test]
+fn display_settings_follow_owned_contexts_and_survive_restart_without_speed_samples() {
+    let mut p = state("settings");
+    for effort in ["high", "xhigh", "max", "ultra"] {
+        let parsed = p.parse(&row(
+            "event_msg",
+            json!({"type":"thread_settings_applied","thread_id":"settings",
+            "thread_settings":{"model":"a","reasoning_effort":effort,"service_tier":"priority"}}),
+            "2026-10-01T00:01:00Z",
+        ));
+        let session = parsed.session.unwrap();
+        assert_eq!(session.reasoning_effort.as_deref(), Some(effort));
+        assert_eq!(session.service_tier.as_deref(), Some("priority"));
+        assert!(session.output_rate.is_none());
+    }
+    let mut p: ParserState = serde_json::from_str(&serde_json::to_string(&p).unwrap()).unwrap();
+    p.parse(&row(
+        "turn_context",
+        json!({"model":"a","effort":"high"}),
+        "2026-10-01T00:02:00Z",
+    ));
+    let session = p.session.as_ref().unwrap();
+    assert_eq!(session.reasoning_effort.as_deref(), Some("high"));
+    assert_eq!(session.service_tier.as_deref(), Some("priority"));
+    let session = session.clone();
+    p.parse(&row(
+        "event_msg",
+        json!({"type":"thread_settings_applied","thread_id":"foreign",
+        "thread_settings":{"model":"b","reasoning_effort":"low","service_tier":"default"}}),
+        "2026-10-01T00:03:00Z",
+    ));
+    assert_eq!(p.session.as_ref().unwrap(), &session);
+}
+#[test]
+fn model_switch_and_explicit_null_clear_unknown_settings_and_fast_off_is_observed() {
+    let mut p = state("settings");
+    for tier in ["priority", "default", "fast", "standard"] {
+        p.parse(&row(
+            "turn_context",
+            json!({"model":"a","effort":"max","service_tier":tier}),
+            "2026-10-01T00:01:00Z",
+        ));
+        assert_eq!(
+            p.session.as_ref().unwrap().service_tier.as_deref(),
+            Some(tier)
+        );
+    }
+    p.parse(&row(
+        "turn_context",
+        json!({"model":"b"}),
+        "2026-10-01T00:02:00Z",
+    ));
+    let session = p.session.as_ref().unwrap();
+    assert!(session.reasoning_effort.is_none());
+    assert!(session.service_tier.is_none());
+    p.parse(&row(
+        "turn_context",
+        json!({"model":"b","effort":"xhigh","service_tier":"priority"}),
+        "2026-10-01T00:03:00Z",
+    ));
+    p.parse(&row(
+        "turn_context",
+        json!({"model":"b","effort":null,"service_tier":null}),
+        "2026-10-01T00:04:00Z",
+    ));
+    let session = p.session.as_ref().unwrap();
+    assert!(session.reasoning_effort.is_none());
+    assert!(session.service_tier.is_none());
+}
 fn usage(p: &mut ParserState, c: Value, last: Value, ts: &str) -> Option<UsageFact> {
     p.parse(&row(
         "event_msg",

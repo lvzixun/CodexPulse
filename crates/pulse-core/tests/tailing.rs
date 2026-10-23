@@ -122,6 +122,53 @@ fn old_checkpoint_projects_current_model_without_reading_or_recounting_logs() {
     assert!(read(&mut store, &path).unchanged);
 }
 #[test]
+fn old_checkpoint_recovers_settings_once_without_recounting_or_reading_uncommitted_records() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("session.jsonl");
+    let data = fixture("settings").replace(
+        "\"model\":\"test-model\"",
+        "\"model\":\"test-model\",\"effort\":\"xhigh\",\"service_tier\":\"priority\"",
+    );
+    fs::write(&path, data).unwrap();
+    let mut store = Store::in_memory().unwrap();
+    read(&mut store, &path);
+    let key = path.to_string_lossy();
+    let mut cursor = store.cursor("windows", &key).unwrap().unwrap();
+    let before = store.session_by_id("settings").unwrap().unwrap();
+    cursor.state.session_settings_known = false;
+    cursor.state.session.as_mut().unwrap().reasoning_effort = None;
+    cursor.state.session.as_mut().unwrap().service_tier = None;
+    store
+        .commit_batch(
+            &cursor,
+            &[cursor.state.session.clone().unwrap()],
+            &[],
+            &[],
+            chrono_tz::UTC,
+        )
+        .unwrap();
+    let uncommitted = json!({"type":"turn_context","payload":{"model":"test-model","effort":"low","service_tier":"default"}});
+    append(&path, uncommitted.to_string().as_bytes());
+    let report = read(&mut store, &path);
+    assert_eq!(report.inserted, 0);
+    assert_eq!(report.records, 0);
+    let after = store.session_by_id("settings").unwrap().unwrap();
+    assert_eq!(after.total, before.total);
+    assert_eq!(after.events, before.events);
+    assert_eq!(after.meta, before.meta);
+    assert!(
+        store
+            .cursor("windows", &key)
+            .unwrap()
+            .unwrap()
+            .state
+            .session_settings_known
+    );
+    let report = read(&mut store, &path);
+    assert!(report.unchanged);
+    assert_eq!(report.bytes_read, 0);
+}
+#[test]
 fn partial_record_is_not_committed_and_survives_restart() {
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("session.jsonl");

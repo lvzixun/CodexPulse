@@ -130,6 +130,10 @@ pub struct SessionMeta {
     #[serde(default)]
     pub current_model: Option<String>,
     #[serde(default)]
+    pub reasoning_effort: Option<String>,
+    #[serde(default)]
+    pub service_tier: Option<String>,
+    #[serde(default)]
     pub output_rate: Option<OutputRate>,
 }
 

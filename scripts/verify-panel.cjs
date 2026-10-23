@@ -277,6 +277,64 @@ await import('/src/main.ts');
         await __panelTest.push(['compact-news']);
       });
       await page.locator('.cp-compact-line').waitFor();
+      await page.setViewportSize({ width: 300, height: 36 });
+      const savedMeta = await page.evaluate(() => structuredClone(__panelTest.data.recent[0].meta));
+      for (const [effort, tier, fast] of [
+        ['high', 'priority', 'Fast'],
+        ['xhigh', 'fast', 'Fast'],
+        ['max', 'default', 'Fast off'],
+        ['ultra', 'standard', 'Fast off'],
+        [null, null, 'Fast ?'],
+      ]) {
+        await page.evaluate(
+          async ({ effort, tier }) => {
+            Object.assign(__panelTest.data.recent[0].meta, {
+              status: 'active',
+              last_activity: new Date().toISOString(),
+              current_model: 'gpt-6-astra',
+              reasoning_effort: effort,
+              service_tier: tier,
+              output_rate: null,
+            });
+            await __panelTest.push(['compact-news']);
+          },
+          { effort, tier },
+        );
+        await page.waitForFunction(
+          ({ effort, fast }) =>
+            document.querySelector('.cp-compact-effort')?.textContent === (effort ?? '—') &&
+            document.querySelector('.cp-compact-fast')?.textContent === fast,
+          { effort, fast },
+        );
+        const boxes = await page.locator('.cp-compact-line').evaluate((line) => ({
+          overflow: line.scrollWidth > line.clientWidth,
+          parts: [...line.querySelectorAll('.cp-compact-drag, .cp-compact-info > span')].map(
+            (el) => {
+              const box = el.getBoundingClientRect();
+              return { x: box.x, right: box.right, width: box.width };
+            },
+          ),
+        }));
+        assert.equal(boxes.overflow, false, `${language}: compact contents fit in 300px`);
+        for (let i = 1; i < boxes.parts.length; i++) {
+          assert.ok(
+            boxes.parts[i].x >= boxes.parts[i - 1].right,
+            `${language}: compact labels do not overlap`,
+          );
+          assert.ok(boxes.parts[i].width > 0);
+        }
+        assert.match(await page.locator('.cp-compact-rate').innerText(), /—/);
+      }
+      await page.evaluate(async () => {
+        __panelTest.data.recent.forEach((s) => (s.meta.status = 'completed'));
+        await __panelTest.push(['compact-news']);
+      });
+      await page.waitForFunction(() => !document.querySelector('.cp-compact-effort'));
+      await page.evaluate(async (meta) => {
+        __panelTest.data.recent[0].meta = meta;
+        await __panelTest.push(['compact-news']);
+      }, savedMeta);
+      await page.setViewportSize({ width: 380, height: 800 });
       const info = await page.locator('.cp-compact-info').boundingBox();
       await page.mouse.move(info.x + 15, info.y + 15);
       await page.mouse.down();
