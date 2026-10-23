@@ -15,3 +15,13 @@ macOS 菜单栏与 Windows 小浮窗在当前模型后显示推理级别和 Fast
 - Rust 回归覆盖线程归属、模型切换、显式空值、检查点序列化、旧检查点恢复、不完整追加、用量不重复，以及只改变级别 / Fast 时的快速状态更新。
 
 Windows 原生浮窗和 macOS 菜单栏的实际交互验收不由 IPC 模拟替代。
+
+## 发布验证
+
+已发布 [v0.1.33 正式版](https://github.com/lvzixun/CodexPulse/releases/tag/v0.1.33)，并设为最新版本。源码提交及标签指向 `16a357800079b6f2dd2f50200a48a15fb920682f`。
+
+- [双平台 CI](https://github.com/lvzixun/CodexPulse/actions/runs/39952977864) 全部成功：Windows 200 项、macOS 201 项 Rust 测试通过，两端各 7 项显式联网 / 实机探针按原设置忽略；Svelte、Node、Clippy、安装包构建及更新签名验证通过。
+- Windows x64 应用和安装包版本检查通过；下载后签名、版本绑定及篡改拒绝再次通过，安装包 SHA-256 与 CI 输出一致。
+- macOS Universal 下载包包含 arm64 / x86_64，两种架构的最低系统均为 12.0；版本 0.1.33、严格 ad-hoc 签名校验通过。只读挂载 DMG 确认安装入口存在，程序与自动更新归档内逐字节一致；更新签名、版本绑定及篡改拒绝通过。
+- 7 个公开资产的名称、大小及 SHA-256 与本地全部一致。匿名读取最新正式版元数据确认 v0.1.33；匿名下载最新 `latest.json` 与本地逐字节相同，覆盖 Windows x64、macOS Intel / Apple Silicon 三个更新入口。
+- 生产前端不包含截图用的虚构会话与项目数据；本次未替换本机已安装应用，也未进行 Windows / macOS 原生交互验收。
