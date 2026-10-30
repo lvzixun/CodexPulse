@@ -282,8 +282,10 @@ await import('/src/main.ts');
       for (const [effort, tier, fast] of [
         ['high', 'priority', 'Fast'],
         ['xhigh', 'fast', 'Fast'],
-        ['max', 'default', 'Fast off'],
-        ['ultra', 'standard', 'Fast off'],
+        ['max', 'default', ''],
+        ['ultra', 'standard', ''],
+        ['max', 'flex', ''],
+        ['ultra', 'batch', ''],
         [null, null, 'Fast ?'],
       ]) {
         await page.evaluate(
@@ -303,7 +305,9 @@ await import('/src/main.ts');
         await page.waitForFunction(
           ({ effort, fast }) =>
             document.querySelector('.cp-compact-effort')?.textContent === (effort ?? '—') &&
-            document.querySelector('.cp-compact-fast')?.textContent === fast,
+            (fast
+              ? document.querySelector('.cp-compact-fast')?.textContent === fast
+              : !document.querySelector('.cp-compact-fast')),
           { effort, fast },
         );
         const boxes = await page.locator('.cp-compact-line').evaluate((line) => ({

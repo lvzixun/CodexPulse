@@ -103,7 +103,7 @@ export function compactSettings(sessions: RecentSession[], model: string | null)
     fast:
       modes.length === 1
         ? modes[0] === 'Off'
-          ? 'Fast off'
+          ? ''
           : modes[0] === '?'
             ? 'Fast ?'
             : 'Fast'

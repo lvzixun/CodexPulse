@@ -680,8 +680,11 @@
                 title={`${$t('推理级别')}: ${compactSettingsInfo.effort}`}
                 >{compactSettingsInfo.effort}</span
               >
-              <span class="cp-compact-fast" title={$t('Fast 模式')}>{compactSettingsInfo.fast}</span
-              >
+              {#if compactSettingsInfo.fast}
+                <span class="cp-compact-fast" title={$t('Fast 模式')}
+                  >{compactSettingsInfo.fast}</span
+                >
+              {/if}
             </small>
           {/if}
         </span>

@@ -86,7 +86,11 @@ pub fn render(snapshot: &Snapshot, now: DateTime<Utc>, language: &str) -> Status
         modes.first().copied().unwrap_or("Fast ?")
     };
     let settings = if working.is_some() {
-        format!(" {effort} {fast}")
+        if fast == "Fast off" {
+            format!(" {effort}")
+        } else {
+            format!(" {effort} {fast}")
+        }
     } else {
         String::new()
     };
@@ -265,7 +269,7 @@ mod tests {
         for tier in ["default", "standard", "flex", "batch"] {
             s.recent[0].meta.service_tier = Some(tier.into());
             let status = render(&s, now, "en");
-            assert!(status.title.contains("ultra Fast off · —t/s"));
+            assert_eq!(status.title, "Busy · 6.1-sol ultra · —t/s");
             assert!(status.tooltip.contains("Reasoning effort: ultra"));
         }
         s.recent[0].meta.reasoning_effort = None;
