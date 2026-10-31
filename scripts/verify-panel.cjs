@@ -485,6 +485,21 @@ await import('/src/main.ts');
         const reminder = page.locator('.cp-reset-plan');
         await reminder.waitFor();
         assert.equal(await reminder.count(), 1);
+        for (const [type, label] of [
+          ['regular', language === 'zh' ? '硬重置' : 'Hard reset'],
+          [null, language === 'zh' ? '类型待确认' : 'Type unconfirmed'],
+          ['other', language === 'zh' ? '类型待确认' : 'Type unconfirmed'],
+          ['banked', language === 'zh' ? '重置卡' : 'Reset cards'],
+        ]) {
+          await page.evaluate(async (type) => {
+            __panelTest.data.news.scheduled_reset.reset_type = type;
+            await __panelTest.push([]);
+          }, type);
+          await page.waitForFunction(
+            (label) => document.querySelector('.cp-plan-badge')?.textContent === label,
+            label,
+          );
+        }
         if (tab === 'overview') {
           assert.equal(await page.locator('.cp-reset-status > small').count(), 0);
           const frame = await page.locator('.cp-reset-status').evaluate((el) => {
@@ -565,6 +580,8 @@ await import('/src/main.ts');
       await page.evaluate(async () => {
         __panelTest.data.news.latest_reset.occurred_at =
           __panelTest.data.news.scheduled_reset.scheduled_for;
+        __panelTest.data.news.latest_reset.reset_type =
+          __panelTest.data.news.scheduled_reset.reset_type;
         await __panelTest.push([]);
       });
       await page

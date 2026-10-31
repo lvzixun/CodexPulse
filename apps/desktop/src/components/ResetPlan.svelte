@@ -1,6 +1,7 @@
 <script lang="ts">
   import { translator as t, locale } from '../lib/i18n';
   import { resetPlan, resetPlanCountdown } from '../lib/reset-plan';
+  import { resetTypeLabel } from '../lib/news';
   import type { Snapshot } from '../lib/types';
   import Icon from './Icon.svelte';
 
@@ -35,7 +36,9 @@
   <section class="cp-reset-plan" aria-label={$t('下一次重置提醒')}>
     <div class="cp-plan-heading">
       <span><Icon name="bell" />{$t('下一次已确认重置')}</span>
-      <span class="cp-plan-badge">{$t('即将重置')}</span>
+      <span class="cp-plan-badge" title={$t('重置类型')}
+        >{resetTypeLabel(plan.item.reset_type, $locale)}</span
+      >
     </div>
     <strong class="cp-plan-countdown">
       {resetPlanCountdown(plan.item.scheduled_for, now, $locale)}
@@ -48,7 +51,10 @@
   </section>
 {:else if plan || showEmpty}
   <div class="cp-reset-plan-status">
-    <span>{$t('下一次已确认重置')}</span>
+    <span>
+      {$t('下一次已确认重置')}{#if plan}
+        · {resetTypeLabel(plan.item.reset_type, $locale)}{/if}
+    </span>
     <strong>
       {plan?.state === 'overdue'
         ? $t('计划时间已过，待确认执行')

@@ -8,6 +8,15 @@ export const isResetNews = (item: NewsItem) =>
   item.author === 'thsottiaux' &&
   item.source_type === 'x_post' &&
   (item.reset_type === 'regular' || item.reset_type === 'banked');
+export function resetTypeLabel(
+  type: string | null | undefined,
+  language: Language = currentLanguage(),
+): string {
+  return translateFor(
+    language,
+    type === 'regular' ? '硬重置' : type === 'banked' ? '重置卡' : '类型待确认',
+  );
+}
 export const challengeKey = (
   news: Snapshot['news'],
   day: number,
@@ -54,7 +63,9 @@ export function newsEntries(
       text: item.text,
       date: item.occurred_at,
       dateOnly: false,
-      label: latestReset ? t('最近重置') : reset ? t('Tibo · 重置公告') : t('社区观察'),
+      label: reset
+        ? `${latestReset ? t('最近重置') : t('Tibo · 重置公告')} · ${resetTypeLabel(item.reset_type, language)}`
+        : t('社区观察'),
       sourceUrl: item.source_url,
       item,
       latestReset,

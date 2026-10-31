@@ -107,9 +107,9 @@ impl Notice {
                 format!(
                     "{}：{}。以实际执行公告为准。",
                     if self.banked {
-                        "备用额度重置"
+                        "重置卡发放"
                     } else {
-                        "常规额度重置"
+                        "硬重置"
                     },
                     time.as_deref().unwrap_or("时间待定"),
                 ),
@@ -120,9 +120,9 @@ impl Notice {
                 format!(
                     "{}: {}. Subject to the actual reset announcement.",
                     if self.banked {
-                        "Banked reset"
+                        "Reset cards issued"
                     } else {
-                        "Regular reset"
+                        "Hard reset"
                     },
                     time.as_deref().unwrap_or("Time to be announced"),
                 ),
@@ -402,7 +402,14 @@ mod tests {
             .discover(&store, &Feed::default(), &current, true, now())
             .unwrap()
             .unwrap();
-        assert!(notice.content("zh", "Asia/Shanghai").1.contains("时间待定"));
+        assert_eq!(
+            notice.content("zh", "Asia/Shanghai").1,
+            "硬重置：时间待定。以实际执行公告为准。"
+        );
+        assert_eq!(
+            notice.content("en", "UTC").1,
+            "Hard reset: Time to be announced. Subject to the actual reset announcement."
+        );
         current.scheduled_reset.as_mut().unwrap().scheduled_for =
             Some("2026-10-13T10:00:00Z".into());
         assert!(
@@ -419,11 +426,11 @@ mod tests {
             .unwrap();
         assert_eq!(
             notice.content("zh", "Asia/Shanghai").1,
-            "备用额度重置：10/13 18:00 (Asia/Shanghai)。以实际执行公告为准。"
+            "重置卡发放：10/13 18:00 (Asia/Shanghai)。以实际执行公告为准。"
         );
         assert_eq!(
             notice.content("en", "America/Los_Angeles").1,
-            "Banked reset: 10/13 03:00 (America/Los_Angeles). Subject to the actual reset announcement."
+            "Reset cards issued: 10/13 03:00 (America/Los_Angeles). Subject to the actual reset announcement."
         );
     }
 }
