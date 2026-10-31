@@ -3,6 +3,7 @@
 
   import type { Snapshot } from '../lib/types';
   import { resetCalendar } from '../lib/reset-calendar';
+  import { resetTypeLabel } from '../lib/news';
   import { resetAge } from '../lib/format';
   import ResetPlan from './ResetPlan.svelte';
   let { news, now, timezone }: { news: Snapshot['news']; now: number; timezone: string } = $props();
@@ -15,10 +16,12 @@
     resetCalendar(news.reset_history, now, timezone, stats?.history_complete ?? false, $locale),
   );
   const selectedCell = $derived(cells.find((cell) => cell.date === selected));
+  const regularLabel = $derived(resetTypeLabel('regular', $locale));
+  const bankedLabel = $derived(resetTypeLabel('banked', $locale));
   const descriptions: Record<string, string> = $derived({
-    regular: $t('常规重置'),
-    banked: $t('备用重置'),
-    both: $t('常规及备用重置'),
+    regular: regularLabel,
+    banked: bankedLabel,
+    both: `${regularLabel} / ${bankedLabel}`,
     none: $t('无公开重置记录'),
     unknown: $t('未载入历史'),
   });
@@ -66,7 +69,8 @@
     <strong>{$t('重置历史')}</strong><span>{$t('近半年 · 本地时间')}</span>
   </div>
   <div class="cp-reset-legend">
-    <span><i class="regular"></i>{$t('常规')}</span><span><i class="banked"></i>{$t('备用')}</span
+    <span><i class="regular"></i>{regularLabel}</span><span
+      ><i class="banked"></i>{bankedLabel}</span
     ><span><i class="none"></i>{stats?.history_complete ? $t('未重置') : $t('无记录')}</span>
   </div>
   <div class="cp-reset-calendar-scroll">

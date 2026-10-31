@@ -36,8 +36,10 @@
   <section class="cp-reset-plan" aria-label={$t('下一次重置提醒')}>
     <div class="cp-plan-heading">
       <span><Icon name="bell" />{$t('下一次已确认重置')}</span>
-      <span class="cp-plan-badge" title={$t('重置类型')}
-        >{resetTypeLabel(plan.item.reset_type, $locale)}</span
+      <span
+        class="cp-plan-badge"
+        data-reset-type={plan.item.reset_type ?? 'unknown'}
+        title={$t('重置类型')}>{resetTypeLabel(plan.item.reset_type, $locale)}</span
       >
     </div>
     <strong class="cp-plan-countdown">

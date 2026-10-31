@@ -499,6 +499,31 @@ await import('/src/main.ts');
             (label) => document.querySelector('.cp-plan-badge')?.textContent === label,
             label,
           );
+          if (tab === 'news' && ['regular', 'banked'].includes(type)) {
+            const legend = page.locator(`.cp-reset-legend i.${type}`);
+            assert.equal(await legend.locator('..').innerText(), label);
+            for (const theme of ['dark', 'light']) {
+              await page.locator('main').evaluate((el, theme) => (el.dataset.theme = theme), theme);
+              const badgeColor = await reminder
+                .locator('.cp-plan-badge')
+                .evaluate((el) => getComputedStyle(el).color);
+              assert.equal(
+                badgeColor,
+                await legend.evaluate((el) => getComputedStyle(el).backgroundColor),
+                `${language}/${theme}/${type}: reminder and history use the same color`,
+              );
+              const day = page.locator(`.cp-reset-day.${type}`).first();
+              assert.equal(
+                badgeColor,
+                await day.evaluate((el) => getComputedStyle(el).backgroundColor),
+              );
+              assert.ok((await day.getAttribute('title')).includes(label));
+              await reminder.scrollIntoViewIfNeeded();
+              await page.screenshot({
+                path: `work/reset-type-${language}-${type}-${theme}.png`,
+              });
+            }
+          }
         }
         if (tab === 'overview') {
           assert.equal(await page.locator('.cp-reset-status > small').count(), 0);

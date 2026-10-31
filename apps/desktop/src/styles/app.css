@@ -1695,11 +1695,18 @@ main.menubar.opaque {
   flex-shrink: 0;
 }
 .cp-plan-badge {
+  color: var(--cp-muted);
   border: 1px solid currentColor;
   border-radius: 5px;
   padding: 1px 5px;
   font-size: 10px;
   white-space: nowrap;
+}
+.cp-plan-badge[data-reset-type='regular'] {
+  color: var(--cp-accent);
+}
+.cp-plan-badge[data-reset-type='banked'] {
+  color: var(--cp-amber);
 }
 .cp-plan-countdown {
   display: block;
