@@ -19,3 +19,16 @@
 Windows 测试使用隔离的 `HKCU\Software\CodexPulse*Tests` 键，覆盖类型往返、缺失键、启动项开关、移动后的可执行路径、未知审批状态及审批记录只读行为。纯解析器可在 WSL 独立运行；Windows 的测试编译链接与实际执行应分别记录，不能用 `--no-run` 结果代替测试通过。
 
 发布复核发现 Windows 时钟读数可能重复，单靠进程号和时间戳不能保证并行测试的注册表键唯一。两个测试 fixture 均增加原子计数器；在临时测试工程固定时钟后，修改前 5 项测试因共享键失败，修改后全部 8 项通过。该复核仅修改临时工程的时钟读数，仓库中的测试仍使用真实时钟。
+
+## 0.1.39 发布验证
+
+[PR #1](https://github.com/lvzixun/CodexPulse/pull/1) 已完成评审并合并。初始 `v0.1.38` 构建的 Windows 审批测试失败，未正式发布；该标签保留，后续测试隔离修复随 0.1.39 发布。
+
+已于 2026-11-01 09:25:48 UTC 发布 [v0.1.39 正式版](https://github.com/lvzixun/CodexPulse/releases/tag/v0.1.39)，并设为最新版本；源码标签指向 `43878844def547798ead52d7d562a203b877c947`。
+
+- [双平台 CI](https://github.com/lvzixun/CodexPulse/actions/runs/41291954520) 全部成功：Windows 207 项、macOS 203 项 Rust 测试通过，各 7 项显式探针按原设置忽略；前端检查、Node 测试、Clippy 全目标检查、安装包与更新签名校验通过。
+- 下载后的两平台更新包均使用配置中的公钥独立通过签名、版本绑定及篡改拒绝校验；Windows 安装器 SHA-256 与 CI 输出一致。
+- macOS 更新归档内版本为 0.1.39、最低系统为 12.0，主程序包含 arm64 / x86_64；CI 的严格应用签名检查通过。另校验 Windows GUI 安装器结构与 DMG 文件尾标识。
+- 7 个公开资产的大小和 SHA-256 与本地逐一一致；匿名查询确认最新正式版为 v0.1.39，匿名下载的更新清单与本地逐字节一致，覆盖 Windows x64、macOS Intel 和 Apple Silicon。
+
+本轮未替换本机已安装应用，未进行 Windows / macOS 原生交互验收。
