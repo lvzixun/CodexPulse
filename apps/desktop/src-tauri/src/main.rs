@@ -15,6 +15,8 @@ mod menubar_status;
 mod news;
 mod platform;
 mod refresh;
+#[cfg(windows)]
+mod registry;
 mod reset_notifications;
 #[cfg(test)]
 mod rpc;
@@ -260,28 +262,37 @@ async fn window_action(action: String, app: tauri::AppHandle) -> Result<(), Stri
     };
     Ok(())
 }
-async fn startup_status_on_main(
+async fn startup_status(
     app: tauri::AppHandle,
     enabled: Option<bool>,
 ) -> Result<startup::Status, String> {
-    let (tx, rx) = tokio::sync::oneshot::channel();
-    let handle = app.clone();
-    app.run_on_main_thread(move || {
-        let _ = tx.send(startup::update(&handle, enabled));
-    })
-    .map_err(|_| "登录项服务不可用")?;
-    rx.await.map_err(|_| "登录项服务已停止")?
+    #[cfg(windows)]
+    {
+        tauri::async_runtime::spawn_blocking(move || startup::update(&app, enabled))
+            .await
+            .map_err(|_| "登录项服务已停止".to_owned())?
+    }
+    #[cfg(not(windows))]
+    {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let handle = app.clone();
+        app.run_on_main_thread(move || {
+            let _ = tx.send(startup::update(&handle, enabled));
+        })
+        .map_err(|_| "登录项服务不可用")?;
+        rx.await.map_err(|_| "登录项服务已停止")?
+    }
 }
 #[tauri::command]
 async fn get_startup_status(app: tauri::AppHandle) -> Result<startup::Status, String> {
-    startup_status_on_main(app, None).await
+    startup_status(app, None).await
 }
 #[tauri::command]
 async fn set_startup_enabled(
     app: tauri::AppHandle,
     enabled: bool,
 ) -> Result<startup::Status, String> {
-    startup_status_on_main(app, Some(enabled)).await
+    startup_status(app, Some(enabled)).await
 }
 #[tauri::command]
 async fn open_startup_settings(app: tauri::AppHandle) -> Result<(), String> {
