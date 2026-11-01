@@ -211,17 +211,22 @@ fn expand(value: &str) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    // Windows clock readings can repeat across parallel tests.
+    static NEXT_FIXTURE: AtomicU64 = AtomicU64::new(0);
 
     struct Fixture(String);
     impl Fixture {
         fn new() -> Self {
             Self(format!(
-                r"HKCU\Software\CodexPulseRegistryTests\{}-{}\目录😀",
+                r"HKCU\Software\CodexPulseRegistryTests\{}-{}-{}\目录😀",
                 std::process::id(),
                 std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap()
-                    .as_nanos()
+                    .as_nanos(),
+                NEXT_FIXTURE.fetch_add(1, Ordering::Relaxed)
             ))
         }
     }
