@@ -1,5 +1,5 @@
 ; Vendored from tauri-cli-v2.12.1 (MIT OR Apache-2.0).
-; Only local change: remove Run entry only when owned by this installation.
+; Local changes: guarded Run entry removal and installation path recovery/preflight.
 ; Source: https://github.com/tauri-apps/tauri/blob/tauri-cli-v2.12.1/crates/tauri-bundler/src/bundle/windows/nsis/installer.nsi
 Unicode true
 ManifestDPIAware true
@@ -79,6 +79,9 @@ Var UpdateMode
 Var NoShortcutMode
 Var WixMode
 Var OldMainBinaryName
+Var InstallDirWritable
+Var PreviousInstallMissing
+Var PreviousUninstallerExists
 
 Name "${PRODUCTNAME}"
 BrandingText "${COPYRIGHT}"
@@ -218,6 +221,10 @@ Function PageReinstall
     Goto compare_version
   wix_loop_done:
 
+  ; An orphaned registration must not force execution of a missing uninstaller.
+  Call IsPreviousInstallMissing
+  ${IfThen} $PreviousInstallMissing = 1 ${|} Abort ${|}
+
   ; Check if there is an existing installation, if not, abort the reinstall page
   ReadRegStr $R0 SHCTX "${UNINSTKEY}" ""
   ReadRegStr $R1 SHCTX "${UNINSTKEY}" "UninstallString"
@@ -349,6 +356,15 @@ Function PageLeaveReinstall
   ${EndIf}
 
   reinst_uninstall:
+    ; Fail before removing a working installation if its replacement cannot be written.
+    Call EnsureInstallDirWritable
+    ${If} $WixMode <> 1
+      Call CheckPreviousUninstaller
+      ${If} $PreviousUninstallerExists = 0
+        DetailPrint "Previous uninstaller is missing; continuing with installation."
+        Goto reinst_done
+      ${EndIf}
+    ${EndIf}
     HideWindow
     ClearErrors
 
@@ -390,6 +406,7 @@ FunctionEnd
 
 ; 5. Choose install directory page
 !define MUI_PAGE_CUSTOMFUNCTION_PRE SkipIfPassive
+!define MUI_PAGE_CUSTOMFUNCTION_LEAVE EnsureInstallDirWritable
 !insertmacro MUI_PAGE_DIRECTORY
 
 ; 6. Start menu shortcut page
@@ -529,6 +546,10 @@ FunctionEnd
 
 
 Section EarlyChecks
+  ; Silent/passive updates skip the directory page. Check them before WebView2
+  ; installation or any application files/registration are changed as well.
+  Call EnsureInstallDirWritable
+
   ; Abort silent installer if downgrades is disabled
   !if "${ALLOWDOWNGRADES}" == "false"
   ${If} ${Silent}
@@ -640,6 +661,8 @@ Section WebView2
 SectionEnd
 
 Section Install
+  ; Recheck after the wizard and any old uninstaller have run.
+  Call EnsureInstallDirWritable
   SetOutPath $INSTDIR
 
   !ifmacrodef NSIS_HOOK_PREINSTALL
@@ -900,11 +923,135 @@ Section Uninstall
   ${EndIf}
 SectionEnd
 
-Function RestorePreviousInstallLocation
-  ReadRegStr $4 SHCTX "${MANUPRODUCTKEY}" ""
-  StrCmp $4 "" +2 0
-    StrCpy $INSTDIR $4
+; BEGIN CODEXPULSE INSTALL PATH HELPERS (also compiled/executed by the Windows tests)
+Function IsPreviousInstallMissing
+  Push $0
+  Push $1
+  Push $2
+  StrCpy $PreviousInstallMissing 0
+  ReadRegStr $0 SHCTX "${MANUPRODUCTKEY}" ""
+  ${If} $0 != ""
+    ; Only file/path-not-found proves absence. Access denied must not be treated
+    ; as an abandoned installation and silently redirected elsewhere.
+    System::Call 'kernel32::GetFileAttributesW(w "$0\${MAINBINARYNAME}.exe") i.r1 ?e'
+    Pop $2
+    ${If} $1 = -1
+      ${If} $2 = 2
+      ${OrIf} $2 = 3
+        System::Call 'kernel32::GetFileAttributesW(w "$0\uninstall.exe") i.r1 ?e'
+        Pop $2
+        ${If} $1 = -1
+          ${If} $2 = 2
+          ${OrIf} $2 = 3
+            StrCpy $PreviousInstallMissing 1
+          ${EndIf}
+        ${EndIf}
+      ${EndIf}
+    ${EndIf}
+  ${EndIf}
+  Pop $2
+  Pop $1
+  Pop $0
 FunctionEnd
+
+Function CheckPreviousUninstaller
+  Push $0
+  StrCpy $PreviousUninstallerExists 0
+  ReadRegStr $0 SHCTX "${MANUPRODUCTKEY}" ""
+  ${If} $0 != ""
+  ${AndIf} ${FileExists} "$0\uninstall.exe"
+    StrCpy $PreviousUninstallerExists 1
+  ${EndIf}
+  Pop $0
+FunctionEnd
+
+Function RestorePreviousInstallLocation
+  Push $0
+  Push $4
+  ReadRegStr $4 SHCTX "${MANUPRODUCTKEY}" ""
+  ${If} $4 != ""
+    StrCpy $0 $INSTDIR
+    StrCpy $INSTDIR $4
+    !if "${INSTALLMODE}" == "currentUser"
+      Call IsPreviousInstallMissing
+      ${If} $PreviousInstallMissing = 1
+        Call CheckInstallDirWritable
+        ${If} $InstallDirWritable = 0
+          ; Keep the normal per-user default. Do not change registration until
+          ; installation succeeds, or redirect an existing installation/update.
+          StrCpy $INSTDIR $0
+        ${EndIf}
+      ${EndIf}
+    !endif
+  ${EndIf}
+  Pop $4
+  Pop $0
+FunctionEnd
+
+Function CheckInstallDirWritable
+  Push $0
+  Push $1
+  Push $2
+  StrCpy $InstallDirWritable 0
+  StrCpy $2 0
+  System::Call 'kernel32::GetFileAttributesW(w "$INSTDIR") i.r0 ?e'
+  Pop $1
+  ${If} $0 = -1
+    ${If} $1 = 2
+    ${OrIf} $1 = 3
+      StrCpy $2 1
+    ${Else}
+      Goto check_write_done
+    ${EndIf}
+  ${Else}
+    IntOp $1 $0 & 0x10 ; FILE_ATTRIBUTE_DIRECTORY
+    ${IfThen} $1 = 0 ${|} Goto check_write_done ${|}
+  ${EndIf}
+  ClearErrors
+  CreateDirectory "$INSTDIR"
+  ${IfNot} ${Errors}
+    ; A real uniquely named file tests effective permissions, including policy
+    ; restrictions. Never truncate an existing application file for this probe.
+    GetTempFileName $0 "$INSTDIR"
+    ${IfNot} ${Errors}
+      FileOpen $1 "$0" w
+      ${IfNot} ${Errors}
+        FileWrite $1 "CodexPulse installer write check"
+        ${IfNot} ${Errors}
+          StrCpy $InstallDirWritable 1
+        ${EndIf}
+        FileClose $1
+      ${EndIf}
+      ClearErrors
+      Delete "$0"
+      ${If} ${Errors}
+        StrCpy $InstallDirWritable 0
+      ${EndIf}
+    ${EndIf}
+  ${EndIf}
+  ${If} $2 = 1
+    ; Remove only the empty leaf created by the probe, never existing contents.
+    RMDir "$INSTDIR"
+  ${EndIf}
+  check_write_done:
+  ClearErrors
+  Pop $2
+  Pop $1
+  Pop $0
+FunctionEnd
+
+Function EnsureInstallDirWritable
+  Call CheckInstallDirWritable
+  ${If} $InstallDirWritable = 0
+    DetailPrint "Cannot write to installation folder: $INSTDIR"
+    MessageBox MB_OK|MB_ICONSTOP "Cannot write to the installation folder:$\r$\n$INSTDIR$\r$\n$\r$\nChoose a folder you can write to, such as:$\r$\n$LOCALAPPDATA\${PRODUCTNAME}$\r$\n$\r$\nIf updating an existing installation, repair its folder permissions or reinstall manually." /SD IDOK
+    SetErrorLevel 2
+    Abort
+  ${EndIf}
+  ; A user may have corrected a path rejected on the directory page.
+  SetErrorLevel 0
+FunctionEnd
+; END CODEXPULSE INSTALL PATH HELPERS
 
 Function Skip
   Abort
