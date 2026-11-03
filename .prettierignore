@@ -5,3 +5,5 @@ work
 apps/desktop/src-tauri/gen
 Cargo.lock
 pnpm-lock.yaml
+resources/pricing/openai-2026-11-03.md
+resources/pricing/deepseek-2026-11-03.html

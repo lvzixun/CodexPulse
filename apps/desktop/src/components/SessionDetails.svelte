@@ -2,7 +2,7 @@
   import { translator as t, locale, localizeError } from '../lib/i18n';
   import { untrack } from 'svelte';
 
-  import { formatUsd } from '../lib/format';
+  import { referenceMoney, referenceExplanation } from '../lib/pricing';
   import { sessionDetail } from '../lib/ipc';
   import type { SessionDetail, TokenMeasure } from '../lib/types';
   let {
@@ -91,11 +91,8 @@
       <div><span>Session tokens</span><strong>{measure(usage.total, usage.events)}</strong></div>
       <div>
         <span>{$t('API 等价估算')}</span><strong
-          >{detail.session.reference.pending
-            ? $t('计算中…')
-            : detail.session.reference.unpriced_events === usage.events && usage.events > 0
-              ? $t('待计价')
-              : `${formatUsd(detail.session.reference.cost_nanousd)}${detail.session.reference.unpriced_events ? '*' : ''}`}</strong
+          title={referenceExplanation(detail.session.reference, $locale)}
+          >{referenceMoney(detail.session.reference, $locale)}</strong
         >
       </div>
       <div>
@@ -113,6 +110,9 @@
         >
       </div>
     </div>
+    {#if referenceExplanation(detail.session.reference, $locale)}<p class="cp-note">
+        {referenceExplanation(detail.session.reference, $locale)}
+      </p>{/if}
     {#if usage.events > 0}
       <p class="cp-session-breakdown">
         <span>{$t('输入')} {measure(usage.input, usage.events)}</span>

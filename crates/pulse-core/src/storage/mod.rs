@@ -73,6 +73,7 @@ pub struct Store {
     timezone_rebuild: Option<timezone::TimezoneRebuild>,
     reference_version: String,
     reference_date: String,
+    reference_failed: bool,
 }
 impl Store {
     pub fn open(path: impl AsRef<Path>) -> Result<Self, StoreError> {
@@ -89,7 +90,7 @@ impl Store {
             [],
             |row| row.get(0),
         )?;
-        if version > 8 {
+        if version > 9 {
             return Err(StoreError::NewerSchema);
         }
         if version < 3 {
@@ -161,12 +162,18 @@ impl Store {
             tx.execute_batch(include_str!("../../migrations/008-run-speeds.sql"))?;
             tx.commit()?;
         }
+        if version < 9 {
+            let tx = connection.transaction()?;
+            tx.execute_batch(include_str!("../../migrations/009-reference-estimates.sql"))?;
+            tx.commit()?;
+        }
         let book = crate::pricing::PriceBook::bundled()?;
         Ok(Self {
             connection,
             timezone_rebuild: None,
             reference_version: book.fingerprint(),
             reference_date: book.checked_at().unwrap_or_default().into(),
+            reference_failed: false,
         })
     }
     pub fn in_memory() -> Result<Self, StoreError> {

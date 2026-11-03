@@ -25,6 +25,8 @@ pub struct Report {
     timezone_rebuilding: bool,
     timezone_error: bool,
     reference_rebuilding: bool,
+    reference_error: bool,
+    price_sync_error: bool,
     source_count: usize,
     sources: Vec<Source>,
     quota_source_count: usize,
@@ -150,6 +152,8 @@ impl Report {
             timezone_rebuilding: snapshot.timezone_rebuild.is_some(),
             timezone_error: snapshot.timezone_error.is_some(),
             reference_rebuilding: snapshot.usage.reference.pending,
+            reference_error: snapshot.usage.reference.error,
+            price_sync_error: snapshot.pricing.error,
             source_count: snapshot.sources.len(),
             sources: snapshot
                 .sources

@@ -3,7 +3,6 @@ use chrono_tz::Tz;
 use notify::{RecursiveMode, Watcher};
 use pulse_core::{
     collectors::jsonl::read_batch,
-    pricing::PriceBook,
     storage::{RecentSession, Store, UsageSummary},
 };
 use serde::{Deserialize, Serialize};
@@ -123,6 +122,7 @@ pub struct SourceHealth {
 }
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct Snapshot {
+    pub pricing: crate::pricing_sync::Status,
     pub settings: Settings,
     pub usage: UsageSummary,
     pub recent: Vec<RecentSession>,
@@ -173,6 +173,12 @@ pub struct QuotaSource {
     pub proxy_source: String,
 }
 pub enum Message {
+    Prices(Box<crate::pricing_sync::Cache>),
+    PriceAlias(
+        String,
+        String,
+        tokio::sync::oneshot::Sender<Result<(), String>>,
+    ),
     FilesChanged,
     Settings(Settings, tokio::sync::oneshot::Sender<Result<(), String>>),
     UiPreferences(
@@ -218,6 +224,7 @@ pub enum Message {
     ),
 }
 enum NetworkRequest {
+    Prices(Box<crate::pricing_sync::Cache>),
     Quotas(u64, Vec<crate::http_quota::Scope>),
     Probes(u64, Vec<crate::http_quota::Scope>),
     News(u64, Box<crate::news::Feed>, u64, bool),
@@ -267,6 +274,11 @@ impl Backend {
     pub fn start(app: tauri::AppHandle, db: PathBuf) -> Result<Self, Box<dyn std::error::Error>> {
         let store = Store::open(&db)?;
         let settings = initial_settings(&store)?;
+        let pricing = store
+            .setting::<crate::pricing_sync::Cache>("pricing_cache")
+            .ok()
+            .flatten()
+            .unwrap_or_default();
         let quota = store.setting::<QuotaState>("quota")?.unwrap_or_default();
         let mut news = store
             .setting::<crate::news::Feed>("news")?
@@ -281,6 +293,7 @@ impl Backend {
             .unwrap_or_default();
         let reset_notifications = crate::reset_notifications::Notifications::load(&store)?;
         let snapshot = Arc::new(RwLock::new(Snapshot {
+            pricing: pricing.status(false),
             settings: settings.clone(),
             quota: QuotaState::default(),
             news: inbox.view(news.view()),
@@ -319,6 +332,16 @@ impl Backend {
                 let mut translator = crate::news::Translator::default();
                 while !worker_stop.load(Ordering::Relaxed) {
                     match rpc_receiver.recv_timeout(Duration::from_millis(300)) {
+                        Ok(NetworkRequest::Prices(mut prices)) => {
+                            let scopes = worker_public_scopes
+                                .read()
+                                .map(|s| s.clone())
+                                .unwrap_or_default();
+                            prices.refresh(&scopes, Utc::now().timestamp());
+                            if !worker_stop.load(Ordering::Relaxed) {
+                                let _ = replies.send(Message::Prices(prices));
+                            }
+                        }
                         Ok(NetworkRequest::Translation(keys, reply)) => {
                             let scopes = worker_public_scopes.read().map(|s| s.clone());
                             let result = match scopes {
@@ -466,7 +489,8 @@ impl Backend {
                 let mut probe_in_flight = false;
                 let mut last_probe = Instant::now() - Duration::from_secs(60);
                 news_schedule.next = news.next_attempt.min(news.challenge_next_attempt);
-                let prices = PriceBook::bundled().unwrap_or_default();
+                let mut pricing = pricing;
+                let mut pricing_in_flight = false;
                 let mut timezone_error = None;
                 let mut last_timezone_check = Instant::now() - Duration::from_secs(60);
                 let mut summary_day = Utc::now()
@@ -540,6 +564,39 @@ impl Backend {
                         Duration::from_millis(300)
                     };
                     match receiver.recv_timeout(wait) {
+                        Ok(Message::Prices(mut next)) => {
+                            pricing_in_flight = false;
+                            // A mapping may have changed while the network worker fetched prices.
+                            next.book.aliases = pricing.book.aliases.clone();
+                            if store.set_setting("pricing_cache", &next).is_ok() {
+                                pricing = *next;
+                            } else {
+                                for provider in ["openai", "deepseek"] {
+                                    let source =
+                                        pricing.sources.entry(provider.into()).or_default();
+                                    source.error = true;
+                                    source.next = Utc::now().timestamp().saturating_add(3600);
+                                }
+                            }
+                            dirty = true;
+                        }
+                        Ok(Message::PriceAlias(alias, model, reply)) => {
+                            let mut next = pricing.clone();
+                            let result = next
+                                .book
+                                .set_alias(&alias, &model)
+                                .map_err(str::to_owned)
+                                .and_then(|_| {
+                                    store
+                                        .set_setting("pricing_cache", &next)
+                                        .map_err(|_| "无法保存模型关联".to_string())
+                                });
+                            if result.is_ok() {
+                                pricing = next;
+                                dirty = true;
+                            }
+                            let _ = reply.send(result);
+                        }
                         Ok(Message::FilesChanged) => {}
                         Ok(Message::ReadNews(keys, reply)) => {
                             let mut next = inbox.clone();
@@ -1218,6 +1275,16 @@ impl Backend {
                     } else {
                         None
                     };
+                    if !pricing_in_flight
+                        && pricing.due(now)
+                        && collector_routing_ready.0.lock().is_ok_and(|ready| *ready)
+                        && rpc_sender
+                            .try_send(NetworkRequest::Prices(Box::new(pricing.clone())))
+                            .is_ok()
+                    {
+                        pricing_in_flight = true;
+                        dirty = true;
+                    }
                     let batch_start = Instant::now();
                     while batch_start.elapsed() < Duration::from_millis(250) {
                         let Some((id, path)) = queue.pop_front() else {
@@ -1241,7 +1308,7 @@ impl Backend {
                                 &id,
                                 &path,
                                 settings.timezone.parse().unwrap_or(chrono_tz::UTC),
-                                &prices,
+                                &pricing.book,
                             )
                         };
                         match result {
@@ -1290,11 +1357,9 @@ impl Backend {
                     }
                     // Small transactions on the existing single writer keep local ingestion,
                     // settings and queries responsive throughout historical rebuilding.
-                    match store.step_reference_prices(&prices, 1024) {
-                        Ok(n) if n > 0 => dirty = true,
-                        Err(_) => dirty = true,
-                        _ => {}
-                    }
+                    let projected = store.step_reference_prices(&pricing.book, 1024);
+                    dirty |= store.reference_failed(projected.is_err());
+                    dirty |= matches!(projected, Ok(n) if n > 0);
                     let rebuild_start = Instant::now();
                     while store.timezone_rebuild_status().is_some()
                         && !collector_stop.load(Ordering::Relaxed)
@@ -1336,6 +1401,7 @@ impl Backend {
                         let recent = store.recent_sessions(None, 10);
                         if let Ok(mut state) = shared.write() {
                             state.settings = settings.clone();
+                            state.pricing = pricing.status(pricing_in_flight);
                             state.timezone_rebuild = store.timezone_rebuild_status();
                             state.timezone_error = timezone_error.clone();
                             state.news = inbox.view(news.view());

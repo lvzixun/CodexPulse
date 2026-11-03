@@ -5,8 +5,9 @@
   import { modelColor } from '../lib/model-color';
   import Disclosure from './Disclosure.svelte';
   import { modelPage } from '../lib/ipc';
-  import { formatUsd } from '../lib/format';
-  import type { ModelPage, ModelPageRequest } from '../lib/types';
+  import { referenceMoney, referenceExplanation } from '../lib/pricing';
+  import PriceAlias from './PriceAlias.svelte';
+  import type { ModelPage, ModelPageRequest, Snapshot } from '../lib/types';
   import Icon from './Icon.svelte';
   import ModelSpeedChart from './ModelSpeedChart.svelte';
   import { rateValue, tierKey } from '../lib/speed';
@@ -19,6 +20,7 @@
     cancelRestore,
     now,
     timezone,
+    pricing,
   }: {
     query: ModelPageRequest;
     selected: string | null;
@@ -28,6 +30,7 @@
     cancelRestore: () => void;
     now: number;
     timezone: string;
+    pricing?: Snapshot['pricing'];
   } = $props();
   let list = $state<ModelPage | null>(null);
   let loading = $state(false),
@@ -40,8 +43,6 @@
     new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 }).format(n);
   const measure = (value: number, unknown: number, events: number) =>
     unknown === events ? '—' : `${number(value)}${unknown ? '*' : ''}`;
-  const money = (cost: number, unpriced: number, events: number) =>
-    unpriced === events ? $t('待计价') : `${formatUsd(cost)}${unpriced ? '*' : ''}`;
   $effect(() => {
     const request = { ...query, cursor: query.cursor ? { ...query.cursor } : null };
     if (!request.cursor) void revision;
@@ -149,10 +150,8 @@
         <span
           ><span
             ><b>{measure(m.total, m.unknown_totals, m.events)}</b><small
-              title={$t('按当前 API 价格估算')}
-              >{m.reference.pending
-                ? $t('计算中…')
-                : money(m.reference.cost_nanousd, m.reference.unpriced_events, m.events)}</small
+              title={referenceExplanation(m.reference, $locale) || $t('按当前 API 价格估算')}
+              >{referenceMoney(m.reference, $locale)}</small
             ></span
           ><span class="cp-model-chevron" class:cp-model-expanded={selected === m.model}
             ><Icon name="right" /></span
@@ -201,6 +200,16 @@
               if (selected === m.model) loadedSpeed = m.model;
             }}
           />
+          {#if referenceExplanation(m.reference, $locale)}<p class="cp-note">
+              {referenceExplanation(m.reference, $locale)}
+            </p>{/if}
+          {#if m.model.startsWith('mode-') || m.reference.reasons?.includes('model_price_missing') || pricing?.aliases[m.model]}
+            <PriceAlias
+              model={m.model}
+              current={pricing?.aliases[m.model]}
+              models={pricing?.models}
+            />
+          {/if}
           {#if m.reference.unpriced_events || m.incomplete_events}
             <p class="cp-note">
               {m.reference.unpriced_events

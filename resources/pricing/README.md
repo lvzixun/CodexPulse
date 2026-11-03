@@ -1,9 +1,29 @@
-# 内置价格版本
+# 官方参考价与覆盖
 
-`openai-2026-10-06.json` 是 2026-10-06 核查的全球文本 API 参考价，使用整数 micro-USD / 百万 tokens。费用保存为 nano-USD，最终展示时四舍五入。
+显示金额是全球文本 API 等价参考费用，不能代替 Codex 订阅或第三方网关账单。区域 / FedRAMP 加价、工具、图片、音频、税费不在该估算范围内。
 
-来源：[OpenAI Pricing](https://developers.openai.com/api/docs/pricing)、[Prompt caching](https://developers.openai.com/api/docs/guides/prompt-caching)，以及 [GPT-6.1 Sol](https://developers.openai.com/api/docs/models/gpt-6.1-sol)、[GPT-6 Astra](https://developers.openai.com/api/docs/models/gpt-6-astra)、[GPT-6 Luna](https://developers.openai.com/api/docs/models/gpt-6-luna) 的长上下文规则。价格包含普通输入、缓存读取、缓存写入及输出；缓存读取和写入都是输入的子集。长上下文以单次请求输入超过 272,000 tokens 判断，对整个请求适用。
+## 价格来源与更新
 
-包含 Standard、Fast、Batch、Flex 及 Astra 的 Ultrafast。已知 `default` 映射为 Standard，`priority` 映射为 Fast；没有档位、`auto`、未知模型、未知缓存写入或无法确定单次请求大小时不计价。区域处理、FedRAMP、工具调用和税费尚不纳入；这是 API 等价参考费用，不是 Codex 订阅账单。
+- [OpenAI 官方价格](https://developers.openai.com/api/docs/pricing)的 Markdown 版本：`https://developers.openai.com/api/docs/pricing.md`。按标准、Fast、Batch、Flex、Ultrafast，区分普通输入、缓存读取、30 分钟 / 12 小时缓存写入及输出。长上下文表使用官网公布的单次请求 272K 输入边界。
+- [DeepSeek 官方价格](https://api-docs.deepseek.com/quick_start/pricing/)：区分缓存命中、未命中、输出及峰谷价格。[Responses API](https://api-docs.deepseek.com/guides/responses_api/)不支持 `service_tier`，因此不会因缺少该字段拒绝估算。
+- 安装包带有 2026-11-03 核查的两家价格表，离线可用；原 `openai-2026-10-06.json` 保留用于历史价格元数据。
+- 后台网络工作线程每 24 小时检查一次官网，不阻塞本地采集。复用现有公开请求代理配置，不读取账户令牌；固定 HTTPS 来源、禁止重定向、每页上限 2 MiB、10 秒超时。
+- 数字、币种、单位、表头、上下文边界及峰谷行结构必须通过校验。官网结构变化或请求失败时，单家保留原有效价格，至少一小时后重试，并遵守更长的 Retry-After；其他供应商仍可独立更新。
+- 有效价格及检查断点保存在本地账本设置中，重启后复用。界面显示各供应商的价格核查日期；更新失败明确提示继续使用缓存。
 
-这里的生效起点采用核查日期，表示本地开始采用此版本的时间；未声称这是官方历史调价日期。历史 facts 的价格与金额保留不变。总览、模型和会话金额另外采用按核查日期的 API 等价估算：独立参考价格投影按最多 1024 条的小批次补齐历史用量，断点与结果事务提交，价格内容变化时重新计算。计算未完成显示“计算中”，缺少服务层级、模型价格或完整计数仍标记未覆盖；历史价格分类继续保留记录时依据。
+## 匹配、区间与缺失信息
+
+按真实模型名称匹配官方表，支持 OpenAI 日期版本名称及 DeepSeek 已公布的 Flash 别名。第三方网关的供应商标识不会阻止估算已识别模型的官方参考费用；界面会说明这不是网关实际账单。
+
+`mode-…` 等不透明标识不猜测模型。在模型详情中可手动关联已支持的官方参考模型，也可取消关联；只改变参考估算，保留原模型名称和用量记录。
+
+- OpenAI 服务档位缺失 / `auto`：明确注明按 Standard 档估算；已知 `default` / `priority` 分别映射 Standard / Fast。
+- 单次请求大小、缓存命中、缓存写入数量或时长不明确：在可用官方价格与合法 token 分配中计算费用上下界，并展示区间与假设。缓存和写入都属于输入，不重复收费。
+- DeepSeek：使用官网峰谷价格区间，不套用 OpenAI 档位，也不要求不存在的独立缓存写入字段。未尝试推断中国节假日或网关折扣。
+- 缺少输入 / 输出明细、用量异常、没有适用模型 / 档位价格：标明具体原因，保持未覆盖，不按零费用计算。
+
+## 存储与历史
+
+单价使用整数 micro-USD / 百万 tokens，费用使用 nano-USD，显示时四舍五入。原始 facts、已记录价格及金额不改写；日期表示本地核查时间，不声称是官方历史调价日期。
+
+总览、模型、会话金额来自独立参考投影，每批最多处理 1024 条，断点和结果事务提交。价格、模型关联或计算规则变动后重算；每日检查若价格未变，仅更新核查日期。坏记录保留并显示原因，不阻塞后续批次。实际计算失败与“计算中”分开提示。

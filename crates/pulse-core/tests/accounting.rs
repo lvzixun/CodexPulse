@@ -414,11 +414,14 @@ fn pricing_uses_fixed_point_cached_subset_and_tier() {
             min_input: None,
             input_microusd: 2_000_000,
             cached_microusd: 200_000,
+            cached_supported: true,
             cache_write_microusd: Some(2_500_000),
+            cache_write_12h_microusd: None,
             output_microusd: 10_000_000,
             source_url: "https://example.invalid/test-only".into(),
             checked_at: "2026-10-06".into(),
         }],
+        ..Default::default()
     };
     let mut p = state("priced");
     let mut fact = usage(
@@ -436,6 +439,17 @@ fn pricing_uses_fixed_point_cached_subset_and_tier() {
     fact.service_tier = None;
     fact.tokens.cached = None;
     assert!(book.price(&fact).is_none());
+}
+#[test]
+fn nested_cache_counters_are_read_and_invalid_counts_are_not_silently_defaulted() {
+    let mut parser = state("nested-cache");
+    let tokens = json!({"input_tokens":100,"input_tokens_details":{"cached_tokens":60,"cache_write_tokens":20},"output_tokens":10,"total_tokens":110});
+    let fact = usage(&mut parser, tokens.clone(), tokens, "2026-10-01T00:01:00Z").unwrap();
+    assert_eq!(fact.tokens.cached, Some(60));
+    assert_eq!(fact.tokens.cache_write, Some(20));
+    let parsed = parser.parse(&row("event_msg", json!({"type":"token_count","info":{"last_token_usage":{"input_tokens":100,"input_tokens_details":{"cached_tokens":-1},"output_tokens":10}}}), "2026-10-01T00:02:00Z"));
+    assert!(parsed.fact.is_none());
+    assert!(parsed.issue.is_some());
 }
 #[test]
 fn calendar_buckets_use_event_time_not_session_creation() {

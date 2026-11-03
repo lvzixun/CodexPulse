@@ -14,6 +14,7 @@ mod material;
 mod menubar_status;
 mod news;
 mod platform;
+mod pricing_sync;
 mod refresh;
 #[cfg(windows)]
 mod registry;
@@ -165,6 +166,22 @@ async fn get_model_page(
     state
         .sender
         .try_send(backend::Message::ModelPage(request, tx))
+        .map_err(|_| "采集器繁忙，请稍后重试".to_string())?;
+    tokio::time::timeout(std::time::Duration::from_secs(15), rx)
+        .await
+        .map_err(|_| "查询超时，请稍后重试".to_string())?
+        .map_err(|_| "采集器已停止".to_string())?
+}
+#[tauri::command]
+async fn set_price_alias(
+    alias: String,
+    model: String,
+    state: State<'_, Backend>,
+) -> Result<(), String> {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    state
+        .sender
+        .try_send(backend::Message::PriceAlias(alias, model, tx))
         .map_err(|_| "采集器繁忙，请稍后重试".to_string())?;
     tokio::time::timeout(std::time::Duration::from_secs(15), rx)
         .await
@@ -344,6 +361,7 @@ fn main() {
             }
         }))
         .invoke_handler(tauri::generate_handler![
+            set_price_alias,
             get_ui_language,
             set_ui_preferences,
             get_snapshot,

@@ -1,6 +1,15 @@
 use crate::domain::UsageFact;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
+
+fn cached_supported() -> bool {
+    true
+}
+
+pub mod catalog;
+mod estimate;
+pub use estimate::Quote;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Price {
@@ -16,8 +25,12 @@ pub struct Price {
     /// Integer micro-USD per million tokens. Fact costs are stored in nano-USD.
     pub input_microusd: u64,
     pub cached_microusd: u64,
+    #[serde(default = "cached_supported")]
+    pub cached_supported: bool,
     #[serde(default)]
     pub cache_write_microusd: Option<u64>,
+    #[serde(default)]
+    pub cache_write_12h_microusd: Option<u64>,
     pub output_microusd: u64,
     pub source_url: String,
     pub checked_at: String,
@@ -26,13 +39,30 @@ pub struct Price {
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct PriceBook {
     pub prices: Vec<Price>,
+    #[serde(default)]
+    pub aliases: BTreeMap<String, String>,
 }
 
 impl PriceBook {
     pub fn bundled() -> Result<Self, serde_json::Error> {
-        serde_json::from_str(include_str!(
+        let mut book: Self = serde_json::from_str(include_str!(
             "../../../../resources/pricing/openai-2026-10-06.json"
-        ))
+        ))?;
+        book.prices.extend(
+            catalog::openai(
+                include_str!("../../../../resources/pricing/openai-2026-11-03.md"),
+                "2026-11-03",
+            )
+            .expect("validated bundled OpenAI prices"),
+        );
+        book.prices.extend(
+            catalog::deepseek(
+                include_str!("../../../../resources/pricing/deepseek-2026-11-03.html"),
+                "2026-11-03",
+            )
+            .expect("validated bundled DeepSeek prices"),
+        );
+        Ok(book)
     }
     pub fn price(&self, fact: &UsageFact) -> Option<(&Price, i64)> {
         self.price_at(fact, &fact.timestamp)
@@ -48,10 +78,56 @@ impl PriceBook {
     }
     pub fn fingerprint(&self) -> String {
         use sha2::{Digest, Sha256};
+        // Daily checks with unchanged rates must not restart the historical projection.
+        let mut prices = self
+            .prices
+            .iter()
+            .map(|p| {
+                serde_json::json!([
+                    p.provider,
+                    p.model,
+                    p.service_tier,
+                    p.min_input,
+                    p.max_input,
+                    p.input_microusd,
+                    p.cached_microusd,
+                    p.cached_supported,
+                    p.cache_write_microusd,
+                    p.cache_write_12h_microusd,
+                    p.output_microusd
+                ])
+            })
+            .collect::<Vec<_>>();
+        prices.sort_by_cached_key(|p| p.to_string());
         format!(
             "{:x}",
-            Sha256::digest(serde_json::to_vec(self).expect("price book"))
+            Sha256::digest(serde_json::to_vec(&(2, prices, &self.aliases)).expect("price book"))
         )
+    }
+    pub fn replace_provider(&mut self, provider: &str, prices: Vec<Price>) {
+        // Keep the original recorded-price metadata for historical detail views.
+        self.prices
+            .retain(|p| p.provider != provider || p.version.starts_with("openai-2026-10-06-"));
+        self.prices.extend(prices);
+    }
+    pub fn set_alias(&mut self, alias: &str, model: &str) -> Result<(), &'static str> {
+        let alias = alias.trim().to_ascii_lowercase();
+        let model = model.trim().to_ascii_lowercase();
+        if alias.is_empty()
+            || alias.len() > 160
+            || alias.chars().any(char::is_control)
+            || self.aliases.len() >= 128 && !self.aliases.contains_key(&alias)
+        {
+            return Err("模型关联无效");
+        }
+        if model.is_empty() {
+            self.aliases.remove(&alias);
+        } else if alias != model && self.prices.iter().any(|p| p.model == model) {
+            self.aliases.insert(alias, model);
+        } else {
+            return Err("参考模型暂不支持");
+        }
+        Ok(())
     }
     fn price_at(&self, fact: &UsageFact, timestamp: &str) -> Option<(&Price, i64)> {
         fact.tokens.validate().ok()?;
@@ -89,6 +165,18 @@ impl PriceBook {
             .collect::<Vec<_>>();
         eligible.sort_by(|a, b| b.effective_from.cmp(&a.effective_from));
         let price = eligible.first()?;
+        if cached > 0 && !price.cached_supported {
+            return None;
+        }
+        if writes > 0
+            && price
+                .cache_write_12h_microusd
+                .is_some_and(|rate| Some(rate) != price.cache_write_microusd)
+        {
+            // The ledger has no write-lifetime dimension; only the reference
+            // estimator can represent this uncertainty as a range.
+            return None;
+        }
         let write_rate = if writes == 0 {
             0
         } else {

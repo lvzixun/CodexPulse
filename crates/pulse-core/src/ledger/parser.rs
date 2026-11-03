@@ -69,11 +69,23 @@ fn counters(value: &Value) -> Option<TokenCounts> {
     }
     let count = TokenCounts {
         input: value.get("input_tokens").and_then(Value::as_u64),
-        cached: value.get("cached_input_tokens").and_then(Value::as_u64),
+        cached: value
+            .get("cached_input_tokens")
+            .or_else(|| {
+                value
+                    .get("input_tokens_details")
+                    .and_then(|v| v.get("cached_tokens"))
+            })
+            .and_then(Value::as_u64),
         output: value.get("output_tokens").and_then(Value::as_u64),
         reasoning: value.get("reasoning_output_tokens").and_then(Value::as_u64),
         cache_write: value
             .get("cache_write_input_tokens")
+            .or_else(|| {
+                value
+                    .get("input_tokens_details")
+                    .and_then(|v| v.get("cache_write_tokens"))
+            })
             .and_then(Value::as_u64),
         total: value.get("total_tokens").and_then(Value::as_u64),
     };
@@ -459,6 +471,14 @@ impl ParserState {
             return Self::issue("invalid_usage_time", timestamp);
         };
         for name in ["total_token_usage", "last_token_usage"] {
+            for field in ["cached_tokens", "cache_write_tokens"] {
+                if info[name]["input_tokens_details"]
+                    .get(field)
+                    .is_some_and(|v| !v.is_null() && v.as_u64().is_none())
+                {
+                    return Self::issue("invalid_token_counters", timestamp);
+                }
+            }
             for field in [
                 "input_tokens",
                 "cached_input_tokens",

@@ -18,6 +18,8 @@ import type {
   AppUpdateInfo,
 } from './types';
 export const native = isTauri();
+export const setPriceAlias = (alias: string, model: string) =>
+  invoke<void>('set_price_alias', { alias, model });
 export const getAppUpdateInfo = () => invoke<AppUpdateInfo>('get_app_update_info');
 export const checkAppUpdates = () =>
   native

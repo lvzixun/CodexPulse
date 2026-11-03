@@ -542,6 +542,8 @@ main[data-theme='light'] .accent-swatch {
   gap: 10px;
 }
 .cp-total > strong {
+  white-space: nowrap;
+  flex-shrink: 0;
   font-size: 33px;
   letter-spacing: -1px;
 }
@@ -553,6 +555,8 @@ main[data-theme='light'] .accent-swatch {
   font-weight: 400;
 }
 .cp-total > div {
+  min-width: 0;
+  max-width: 65%;
   display: flex;
   flex-direction: column;
   text-align: right;
@@ -562,6 +566,7 @@ main[data-theme='light'] .accent-swatch {
   color: var(--cp-muted);
 }
 .cp-total b {
+  overflow-wrap: anywhere;
   font-size: 19px;
 }
 .cp-chart {
@@ -671,6 +676,10 @@ main[data-theme='light'] .accent-swatch {
   flex-direction: row;
   align-items: center;
   gap: 8px;
+}
+.cp-modelrow > span:last-child > span {
+  max-width: 78px;
+  overflow-wrap: anywhere;
 }
 .cp-modelrow b {
   font-size: 14px;

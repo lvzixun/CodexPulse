@@ -38,6 +38,8 @@
   import ResetStatus from './components/ResetStatus.svelte';
   import AccountSummary from './components/AccountSummary.svelte';
   import ModelsPane from './components/ModelsPane.svelte';
+  import PricingNote from './components/PricingNote.svelte';
+  import { referenceMoney, referenceExplanation } from './lib/pricing';
   import SessionsPane from './components/SessionsPane.svelte';
   import SourceSettings from './components/SourceSettings.svelte';
   import RefreshSettings from './components/RefreshSettings.svelte';
@@ -51,7 +53,6 @@
     sessionActivity,
     sessionLabel,
     sourceNames,
-    formatUsd,
     compactSettings,
   } from './lib/format';
   import { openSource } from './lib/ipc';
@@ -140,8 +141,6 @@
   const dateRange = $derived(
     `${shortDate(data.usage.from_day)} — ${shortDate(data.usage.through_day)}`,
   );
-  const money = (cost: number, unpriced: number) =>
-    unpriced > 0 ? (cost > 0 ? `${formatUsd(cost)}*` : $t('待计价')) : formatUsd(cost);
   const time = (ts: string | null) =>
     ts
       ? new Intl.DateTimeFormat($locale === 'zh' ? 'zh-CN' : 'en-US', {
@@ -153,8 +152,6 @@
         }).format(new Date(ts))
       : $t('尚未同步');
   const activityInfo = $derived(sessionActivity(data, now));
-  const referenceMoney = (value: Snapshot['usage']['reference']) =>
-    value.pending ? $t('计算中…') : money(value.cost_nanousd, value.unpriced_events);
   const working = $derived(
     activityInfo.sessions.find((s) => s.meta.id === selectedSession) ?? activityInfo.working,
   );
@@ -841,7 +838,7 @@
             </div>
             <div>
               <span>{$t('API 等价估算')}</span><strong
-                >{current?.events ? referenceMoney(current.reference) : '—'}</strong
+                >{current?.events ? referenceMoney(current.reference, $locale) : '—'}</strong
               >
             </div>
             <div>
@@ -863,13 +860,12 @@
               ></strong
             >
             <div>
-              <span>{$t('当前 API 等价估算')}</span><b>{referenceMoney(data.usage.reference)}</b>
+              <span>{$t('当前 API 等价估算')}</span><b
+                >{referenceMoney(data.usage.reference, $locale)}</b
+              >
             </div>
           </div>
-          <p class="cp-note cp-pricing-coverage">
-            {data.usage.reference.price_date}
-            {$t('价格 · 区分缓存 / Fast / 长上下文')}
-          </p>
+          <PricingNote reference={data.usage.reference} status={data.pricing} />
           {#if data.usage.reference.unpriced_tokens > 0 && !data.usage.reference.pending}
             <p class="cp-note cp-pricing-coverage">
               {$t('覆盖')}
@@ -915,7 +911,10 @@
             ></strong
           >
           <div>
-            <span>{$t('当前 API 等价估算')}</span><b>{referenceMoney(data.usage.reference)}</b>
+            <span>{$t('当前 API 等价估算')}</span><b
+              title={referenceExplanation(data.usage.reference, $locale)}
+              >{referenceMoney(data.usage.reference, $locale)}</b
+            >
           </div>
         </div>
         <div class="cp-metrics cp-breakdown">
@@ -923,10 +922,12 @@
           <div><span>{$t('其中缓存')}</span><strong>{number(data.usage.cached)}</strong></div>
           <div><span>{$t('输出')}</span><strong>{number(data.usage.output)}</strong></div>
         </div>
+        <PricingNote reference={data.usage.reference} status={data.pricing} />
         <div class="cp-sectionhead cp-modelheading">
           <span>{$t('按模型分类')}</span><small>{$t('Tokens 占比 / 估算 USD')}</small>
         </div>
         <ModelsPane
+          pricing={data.pricing}
           bind:query={modelQuery}
           bind:selected={selectedModel}
           revision={`${data.usage.fact_revision}:${data.usage.sessions}:${data.usage.reference.cost_nanousd}:${data.usage.reference.pending}:${data.updated_at}`}

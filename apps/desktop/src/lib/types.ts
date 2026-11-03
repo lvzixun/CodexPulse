@@ -154,6 +154,10 @@ export interface ReferenceEstimate {
   unpriced_tokens: number;
   unpriced_events: number;
   pending: boolean;
+  max_cost_nanousd?: number;
+  estimate_flags?: number;
+  reasons?: string[];
+  error?: boolean;
 }
 export interface RecentSession {
   reference: ReferenceEstimate;
@@ -262,6 +266,14 @@ export interface AccountProfile {
   stats_unavailable: boolean;
 }
 export interface Snapshot {
+  pricing?: {
+    syncing: boolean;
+    error: boolean;
+    checked_at: string | null;
+    aliases: Record<string, string>;
+    models: string[];
+    dates?: Record<string, string>;
+  };
   timezone_rebuild: { target_timezone: string; processed: number; ready: boolean } | null;
   timezone_error: string | null;
   news: {

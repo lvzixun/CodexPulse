@@ -53,12 +53,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 max_input: None,
                 input_microusd: 2_000_000,
                 cached_microusd: 200_000,
+                cached_supported: true,
                 cache_write_microusd: Some(2_500_000),
+                cache_write_12h_microusd: None,
                 output_microusd: 10_000_000,
                 source_url: "https://example.invalid/synthetic-benchmark".into(),
                 checked_at: today.to_string(),
             })
             .collect(),
+        ..Default::default()
     };
     let load_start = Instant::now();
     let mut loaded = 0usize;
