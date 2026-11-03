@@ -15,3 +15,15 @@
 `scripts/test-windows-installer.ps1` 从生产模板中提取实际辅助函数，以发布构建使用的 NSIS 编译器编译并执行；只操作随机临时目录及 `HKCU\Software\CodexPulseInstallerTests\<随机标识>`。覆盖无旧安装、可写失效路径、受保护父目录、显式受保护路径、现存受保护安装、静默失败、卸载程序丢失、仅卸载程序残留、读取拒绝、中文及空格路径，并确认注册表 / 应用内容保留和临时文件清理。该检查已加入 Windows 发布 CI。
 
 发布必须等待 Windows / macOS CI、两平台更新签名及最终资产校验通过。用户机器的实际安装交互和企业安全软件策略仍需独立验证，不能以 CI 替代。
+
+## 发布验证
+
+已于 2026-11-03 02:46:55 UTC 发布 [v0.1.40 正式版](https://github.com/lvzixun/CodexPulse/releases/tag/v0.1.40)，并设为最新版本；标签指向修复提交 `528705ed2fb16914a794d2af0a9e8df532240cac`。
+
+- [双平台 CI](https://github.com/lvzixun/CodexPulse/actions/runs/41566585507) 全部通过：11 个 Windows 安装器实际执行场景、Windows 207 项 / macOS 203 项 Rust 测试，各 7 项显式探针按原设置忽略，以及前端检查、23 项 Node 测试、Clippy、双平台打包及更新签名校验。该构建使用完整修复提交号；标签推送后触发的同一提交重复构建已取消。
+- 下载后的两平台更新包独立通过签名、版本绑定及篡改拒绝校验；macOS 归档版本为 0.1.40，包含 Intel / Apple Silicon，严格应用签名及 DMG 完整性校验通过。
+- Windows 安装器为 5,278,068 字节，SHA-256 为 `c297276d18d7abab1e6fb3b4d5a5bf34d2477545e5a0fea93dd5e7d873582f04`，与 CI 一致；x64 主程序及安装器版本已由 CI 检查。
+- 7 个服务端资产的大小及 SHA-256 逐一一致；匿名查询确认最新正式版为 0.1.40，匿名下载的更新清单与本地逐字节一致，覆盖 Windows x64、macOS Intel / Apple Silicon，并与已验证签名一致。
+- 按用户要求，发布校验后执行 `cargo clean`，清除 46,592 个文件、9.8 GiB 构建产物（Cargo 报告口径）；确认项目 `target` 目录已不存在。另删除本次下载、解包及验证用安装包副本，目录占用从约 103.5 MiB 降至约 0.6 MiB，只保留文本验证记录。
+
+本轮未替换本机已安装应用，未在反馈用户原机执行图形安装验收。源码、既有发布文件及用户未提交的 `apps/native-demo/` 保留。
