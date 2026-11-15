@@ -470,6 +470,8 @@ impl Backend {
                 let mut speed_queued = HashSet::<(String, PathBuf)>::new();
                 let mut queue = VecDeque::<(String, PathBuf)>::new();
                 let mut queued = HashSet::<(String, PathBuf)>::new();
+                #[cfg(target_os = "macos")]
+                let mut live_files = crate::live_files::LiveFiles::default();
                 let mut last_repair = Instant::now() - Duration::from_secs(60);
                 let mut last_wsl = Instant::now() - Duration::from_secs(60);
                 let mut wsl_home_cache = BTreeMap::<String, PathBuf>::new();
@@ -1286,6 +1288,17 @@ impl Backend {
                         dirty = true;
                     }
                     let batch_start = Instant::now();
+                    #[cfg(target_os = "macos")]
+                    for item in live_files.changed(Instant::now(), |id, path| {
+                        sources.iter().any(|source| {
+                            source.health.id == id
+                                && source.wsl.is_none()
+                                && source.available()
+                                && source.owns_path(path)
+                        })
+                    }) {
+                        enqueue(&mut queue, &mut queued, item);
+                    }
                     while batch_start.elapsed() < Duration::from_millis(250) {
                         let Some((id, path)) = queue.pop_front() else {
                             break;
@@ -1300,6 +1313,10 @@ impl Backend {
                         let titles_only = path
                             .file_name()
                             .is_some_and(|name| name == "session_index.jsonl");
+                        #[cfg(target_os = "macos")]
+                        if !titles_only && source.wsl.is_none() {
+                            live_files.track(&id, &path);
+                        }
                         let result = if titles_only {
                             pulse_core::collectors::jsonl::read_titles(&mut store, &id, &path)
                         } else {

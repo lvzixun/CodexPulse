@@ -8,6 +8,8 @@ mod http_quota;
 mod inbox;
 mod language;
 #[cfg(target_os = "macos")]
+mod live_files;
+#[cfg(target_os = "macos")]
 mod macos;
 mod material;
 #[cfg(any(target_os = "macos", test))]
