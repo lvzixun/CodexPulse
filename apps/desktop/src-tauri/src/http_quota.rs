@@ -408,14 +408,14 @@ pub fn fetch_cancellable(
     if credentials.stamp.status != "ready" {
         return Err(credentials.stamp.status.as_str().into());
     }
-    let agent: ureq::Agent = ureq::Agent::config_builder()
+    let config = ureq::Agent::config_builder()
         .tls_config(tls_config())
         .proxy(credentials.proxy.clone())
         .timeout_global(Some(Duration::from_secs(15)))
         .max_redirects(0)
         .http_status_as_error(false)
-        .build()
-        .into();
+        .build();
+    let agent = crate::proxy_transport::agent(config);
     let mut result = fetch_with(&agent, USAGE_URL, scope, credentials)?;
     if probe(scope) != credentials.stamp {
         return Err("credentials_changed".into());
@@ -476,14 +476,14 @@ pub fn fetch_profile(c: &Credentials) -> Result<crate::account_profile::AccountP
     if c.stamp.status != "ready" {
         return Err(c.stamp.status.as_str().into());
     }
-    let agent: ureq::Agent = ureq::Agent::config_builder()
+    let config = ureq::Agent::config_builder()
         .tls_config(tls_config())
         .proxy(c.proxy.clone())
         .timeout_global(Some(Duration::from_secs(15)))
         .max_redirects(0)
         .http_status_as_error(false)
-        .build()
-        .into();
+        .build();
+    let agent = crate::proxy_transport::agent(config);
     crate::account_profile::normalize(&fetch_json(&agent, PROFILE_URL, c)?)
 }
 fn fetch_json(agent: &ureq::Agent, url: &str, c: &Credentials) -> Result<Value, Failure> {
@@ -663,7 +663,7 @@ mod tests {
         assert!(quota.allowance.balance.is_some() || quota.allowance.unlimited);
         assert!(quota.allowance.reset_cards.is_some());
         assert_eq!(quota.allowance.expiration_status, "connected");
-        println!("{}", serde_json::to_string(&quota.allowance).unwrap());
+        println!("Verified account quota and reset cards");
         let (_, profile) = checked_fetch(&scope, |_| {}, fetch_profile);
         let profile = profile.unwrap();
         assert!(profile.username.is_some() || profile.display_name.is_some());
@@ -672,6 +672,7 @@ mod tests {
         assert!(profile.peak_daily_tokens.is_some());
         assert!(profile.longest_running_turn_sec.is_some());
         assert!(profile.longest_streak_days.is_some() && profile.current_streak_days.is_some());
+        println!("Verified account profile");
     }
     fn agent() -> ureq::Agent {
         ureq::Agent::config_builder()

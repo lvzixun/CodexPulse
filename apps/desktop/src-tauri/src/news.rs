@@ -376,14 +376,14 @@ impl Feed {
 fn public_agent(scopes: &[crate::http_quota::Scope]) -> Result<ureq::Agent, FetchError> {
     let proxy = crate::http_quota::public_proxy(scopes, "codex-resets.com")
         .map_err(|error| (error.code, 300))?;
-    Ok(ureq::Agent::config_builder()
+    let config = ureq::Agent::config_builder()
         .tls_config(crate::http_quota::tls_config())
         .proxy(proxy)
         .timeout_global(Some(Duration::from_secs(10)))
         .http_status_as_error(false)
         .max_redirects(0)
-        .build()
-        .into())
+        .build();
+    Ok(crate::proxy_transport::agent(config))
 }
 pub fn fetch(
     old: Feed,

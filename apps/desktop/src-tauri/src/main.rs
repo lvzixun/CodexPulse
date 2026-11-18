@@ -17,6 +17,7 @@ mod menubar_status;
 mod news;
 mod platform;
 mod pricing_sync;
+mod proxy_transport;
 mod refresh;
 #[cfg(windows)]
 mod registry;

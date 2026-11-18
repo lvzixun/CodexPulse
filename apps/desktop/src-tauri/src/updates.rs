@@ -334,7 +334,7 @@ fn fetch(
     } else {
         config
     };
-    let agent: ureq::Agent = config.build().into();
+    let agent = crate::proxy_transport::agent(config.build());
     let mut response = agent
         .get(url)
         .header(

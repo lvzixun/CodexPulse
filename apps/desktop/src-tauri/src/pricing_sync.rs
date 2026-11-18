@@ -152,14 +152,14 @@ fn fetch(url: &str, scopes: &[Scope], now: i64) -> Result<String, i64> {
         "api-docs.deepseek.com"
     };
     let proxy = public_proxy(scopes, host).map_err(|_| 3600)?;
-    let agent: ureq::Agent = ureq::Agent::config_builder()
+    let config = ureq::Agent::config_builder()
         .tls_config(tls_config())
         .proxy(proxy)
         .http_status_as_error(false)
         .timeout_global(Some(Duration::from_secs(10)))
         .max_redirects(0)
-        .build()
-        .into();
+        .build();
+    let agent = crate::proxy_transport::agent(config);
     let mut response = agent
         .get(url)
         .header(
