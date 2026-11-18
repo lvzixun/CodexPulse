@@ -1,5 +1,5 @@
 import { translateFor, currentLanguage, type Language } from './i18n.ts';
-import type { QuotaWindow } from './types';
+import type { AccountAllowance, QuotaWindow } from './types';
 const usd = new Intl.NumberFormat('en-US', {
   style: 'currency',
   currency: 'USD',
@@ -34,16 +34,54 @@ export function untilReset(
   const t = (key: string, values?: Record<string, string | number>) =>
     translateFor(language, key, values);
   if (window.resets_at === null) return t('恢复时间未知');
-  const seconds = window.resets_at * 1000 - now;
-  if (seconds <= 0) return t('等待刷新确认');
-  const minutes = Math.ceil(seconds / 60000),
-    days = Math.floor(minutes / 1440),
-    hours = Math.floor((minutes % 1440) / 60);
+  const remaining = window.resets_at * 1000 - now;
+  if (remaining <= 0) return t('等待刷新确认');
+  const { days, hours, minutes } = countdownParts(remaining);
   return days > 0
     ? t('{_0} 天 {_1} 小时后刷新', { _0: days, _1: hours })
     : hours > 0
-      ? t('{_0} 小时 {_1} 分钟后刷新', { _0: hours, _1: minutes % 60 })
+      ? t('{_0} 小时 {_1} 分钟后刷新', { _0: hours, _1: minutes })
       : t('{_0} 分钟后刷新', { _0: minutes });
+}
+
+function countdownParts(remainingMs: number) {
+  const total = Math.ceil(remainingMs / 60_000);
+  return {
+    days: Math.floor(total / 1440),
+    hours: Math.floor((total % 1440) / 60),
+    minutes: total % 60,
+  };
+}
+
+export function resetCardReminder(
+  allowance: AccountAllowance | null | undefined,
+  now: number,
+  language: Language,
+): string | null {
+  const count = allowance?.next_expiring_count ?? 0;
+  const remaining = Date.parse(allowance?.next_expiration ?? '') - now;
+  if (
+    count <= 0 ||
+    allowance?.reset_cards === 0 ||
+    !Number.isFinite(remaining) ||
+    remaining <= 0 ||
+    remaining > 72 * 60 * 60 * 1000
+  )
+    return null;
+
+  const { days, hours, minutes } = countdownParts(remaining);
+  const t = (key: string, values: Record<string, number>) => translateFor(language, key, values);
+  const duration =
+    days > 0
+      ? hours > 0
+        ? t('{_0} 天 {_1} 小时', { _0: days, _1: hours })
+        : t('{_0} 天', { _0: days })
+      : hours > 0
+        ? minutes > 0
+          ? t('{_0} 小时 {_1} 分', { _0: hours, _1: minutes })
+          : t('{_0} 小时', { _0: hours })
+        : t('{_0} 分钟', { _0: minutes });
+  return translateFor(language, '{count} 张重置卡将在 {duration}后到期', { count, duration });
 }
 import type { RecentSession, Snapshot, SourceHealth } from './types';
 export function sourceNames(ids: string[], sources: SourceHealth[]): string {

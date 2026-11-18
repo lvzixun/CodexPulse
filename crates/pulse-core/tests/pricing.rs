@@ -197,23 +197,44 @@ fn reference_projection_revalues_history_and_resumes_without_changing_ledger() {
 #[test]
 fn official_tables_cover_additional_models_and_reject_changed_schema() {
     use pulse_core::pricing::catalog;
-    let openai = include_str!("../../../resources/pricing/openai-2026-11-03.md");
+    let openai = include_str!("../../../resources/pricing/openai-2026-11-18.md");
     let deepseek = include_str!("../../../resources/pricing/deepseek-2026-11-03.html");
-    let rows = catalog::openai(openai, "2026-11-03").unwrap();
+    let rows = catalog::openai(openai, "2026-11-18").unwrap();
     assert!(
         rows.iter()
             .any(|p| p.model == "gpt-6.1-terra" && p.service_tier == "standard")
     );
     assert!(rows.iter().any(|p| p.model == "gpt-4o"));
+    assert!(
+        rows.iter()
+            .any(|p| p.model == "gpt-6.1-sol" && p.service_tier == "flex")
+    );
     assert!(rows.iter().any(|p| p.cache_write_12h_microusd.is_some()));
     assert!(
         catalog::openai(
             &openai.replace("Short context input", "Unknown input"),
-            "2026-11-03"
+            "2026-11-18"
         )
         .is_err()
     );
-    assert!(catalog::openai(&openai.replace("$2.00", "$NaN"), "2026-11-03").is_err());
+    assert!(catalog::openai(&openai.replace("$2.00", "$NaN"), "2026-11-18").is_err());
+    assert!(
+        catalog::openai(
+            &openai.replace("March 1, 2027", "April 1, 2027"),
+            "2026-11-18"
+        )
+        .is_err()
+    );
+    assert!(
+        catalog::openai(
+            openai
+                .split_once("### Ultrafast list pricing data")
+                .unwrap()
+                .0,
+            "2026-11-18"
+        )
+        .is_err()
+    );
     assert_eq!(catalog::deepseek(deepseek, "2026-11-03").unwrap().len(), 4);
     assert!(
         catalog::deepseek(
@@ -223,6 +244,33 @@ fn official_tables_cover_additional_models_and_reject_changed_schema() {
         .is_err()
     );
     assert!(catalog::deepseek(&deepseek.replace("$0.003", "$300000"), "2026-11-03").is_err());
+}
+
+#[test]
+fn gpt_6_2_uses_official_rates_for_each_available_tier() {
+    let book = PriceBook::bundled().unwrap();
+    let mut request = fact(100);
+    for (model, standard) in [("gpt-6.2-astra", 4_800_000), ("gpt-6.2-sol", 1_200_000)] {
+        request.model = model.into();
+        request.timestamp = "2026-11-18T12:00:00Z".into();
+        for (tier, expected) in [
+            ("default", standard),
+            ("priority", standard * 2),
+            ("batch", standard / 2),
+            ("ultrafast", standard * 3),
+        ] {
+            request.service_tier = Some(tier.into());
+            assert_eq!(book.quote(&request).cost, Some(expected), "{model} {tier}");
+            assert_eq!(book.price(&request).unwrap().1, expected, "{model} {tier}");
+        }
+        request.timestamp = "2027-03-01T07:59:59Z".into();
+        assert_eq!(book.quote(&request).cost, Some(standard * 3));
+        request.timestamp = "2027-03-01T08:00:00Z".into();
+        assert_eq!(book.quote(&request).cost, Some(standard * 6));
+        assert_eq!(book.price(&request).unwrap().1, standard * 6);
+        request.service_tier = Some("flex".into());
+        assert_eq!(book.quote(&request).reason, "pricing_tier_missing");
+    }
 }
 
 #[test]
@@ -297,8 +345,8 @@ fn unchanged_daily_price_checks_do_not_restart_historical_estimates() {
     let mut book = PriceBook::bundled().unwrap();
     let before = book.fingerprint();
     let mut next = pulse_core::pricing::catalog::openai(
-        include_str!("../../../resources/pricing/openai-2026-11-03.md"),
-        "2026-11-04",
+        include_str!("../../../resources/pricing/openai-2026-11-18.md"),
+        "2026-11-19",
     )
     .unwrap();
     book.replace_provider("openai", next.clone());

@@ -6,6 +6,17 @@ use std::collections::BTreeMap;
 pub const OPENAI_URL: &str = "https://developers.openai.com/api/docs/pricing.md";
 pub const DEEPSEEK_URL: &str = "https://api-docs.deepseek.com/quick_start/pricing/";
 
+const ULTRAFAST_PROMOTION_NOTICE: &str = "For GPT-6.2 Astra and GPT-6.2 Sol, Ultrafast costs 3 times the Standard rate through February 28, 2027, and 6 times the Standard rate starting March 1, 2027 (Pacific time).";
+const ULTRAFAST_PROMOTION_START: &str = "2026-11-17T00:00:00Z";
+// Midnight Pacific Standard Time on March 1.
+const ULTRAFAST_PROMOTION_END: &str = "2027-03-01T08:00:00Z";
+
+enum PricePeriod {
+    Regular,
+    Promotion,
+    AfterPromotion,
+}
+
 fn money(value: &str) -> Result<Option<u64>, &'static str> {
     let value = value.trim();
     if value == "-" {
@@ -68,6 +79,8 @@ fn row(
 pub fn openai(body: &str, date: &str) -> Result<Vec<Price>, &'static str> {
     chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d").map_err(|_| "invalid date")?;
     let mut tier = "";
+    let mut period = PricePeriod::Regular;
+    let mut has_promotion = false;
     let mut million_tokens = false;
     let mut width = 0;
     let mut prices = BTreeMap::new();
@@ -78,12 +91,28 @@ pub fn openai(body: &str, date: &str) -> Result<Vec<Price>, &'static str> {
         }
         if line.starts_with('#') {
             width = 0;
+            period = match line {
+                "### Ultrafast promotion pricing data" => PricePeriod::Promotion,
+                "### Ultrafast list pricing data" => PricePeriod::AfterPromotion,
+                _ => PricePeriod::Regular,
+            };
+            if !matches!(period, PricePeriod::Regular) {
+                if !body
+                    .lines()
+                    .any(|line| line.trim() == ULTRAFAST_PROMOTION_NOTICE)
+                {
+                    return Err("unknown Ultrafast promotion period");
+                }
+                has_promotion = true;
+            }
             tier = match line {
                 "### Standard pricing data" => "standard",
                 "### Batch pricing data" | "#### Batch" => "batch",
-                "#### Flex" => "flex",
+                "### Flex pricing data" | "#### Flex" => "flex",
                 "### Fast pricing data" => "fast",
-                "### Ultrafast pricing data" => "ultrafast",
+                "### Ultrafast pricing data"
+                | "### Ultrafast promotion pricing data"
+                | "### Ultrafast list pricing data" => "ultrafast",
                 _ => "",
             };
             continue;
@@ -147,23 +176,58 @@ pub fn openai(body: &str, date: &str) -> Result<Vec<Price>, &'static str> {
             vec![(1, None)]
         } {
             let count = if width == 11 { 5 } else { 3 };
-            if let Some(p) = row(model, tier, date, &cells[offset..offset + count], long)? {
+            if let Some(mut p) = row(model, tier, date, &cells[offset..offset + count], long)? {
+                match period {
+                    PricePeriod::Regular => {}
+                    PricePeriod::Promotion => {
+                        p.version.push_str("-promotion");
+                        p.effective_from = ULTRAFAST_PROMOTION_START.into();
+                        p.effective_to = Some(ULTRAFAST_PROMOTION_END.into());
+                    }
+                    PricePeriod::AfterPromotion => {
+                        p.version.push_str("-list");
+                        p.effective_from = ULTRAFAST_PROMOTION_END.into();
+                    }
+                }
                 let key = (
                     p.model.clone(),
                     p.service_tier.clone(),
                     p.min_input,
                     p.max_input,
+                    p.effective_to.is_some(),
                 );
                 if let Some(old) = prices.insert(key, p.clone())
-                    && (old.input_microusd != p.input_microusd
+                    && (old.effective_from != p.effective_from
+                        || old.input_microusd != p.input_microusd
                         || old.output_microusd != p.output_microusd
                         || old.cached_microusd != p.cached_microusd
+                        || old.cached_supported != p.cached_supported
                         || old.cache_write_microusd != p.cache_write_microusd
                         || old.cache_write_12h_microusd != p.cache_write_12h_microusd)
                 {
                     return Err("conflicting prices");
                 }
             }
+        }
+    }
+    if has_promotion {
+        let mut promoted = 0;
+        let mut after_promotion = 0;
+        for ((model, tier, min, max, promotion), price) in &prices {
+            if *promotion {
+                promoted += 1;
+                if prices
+                    .get(&(model.clone(), tier.clone(), *min, *max, false))
+                    .is_none_or(|list| list.effective_from != ULTRAFAST_PROMOTION_END)
+                {
+                    return Err("missing Ultrafast list rate");
+                }
+            } else if price.version.ends_with("-list") {
+                after_promotion += 1;
+            }
+        }
+        if promoted == 0 || promoted != after_promotion {
+            return Err("incomplete Ultrafast promotion");
         }
     }
     if !prices.values().any(|p| {

@@ -278,6 +278,7 @@ impl Backend {
             .setting::<crate::pricing_sync::Cache>("pricing_cache")
             .ok()
             .flatten()
+            .map(crate::pricing_sync::Cache::for_startup)
             .unwrap_or_default();
         let quota = store.setting::<QuotaState>("quota")?.unwrap_or_default();
         let mut news = store

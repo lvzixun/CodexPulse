@@ -2,7 +2,7 @@
   import { translator as t, locale } from '../lib/i18n';
 
   import type { QuotaBucket, AccountAllowance } from '../lib/types';
-  import { untilReset, windowLabel } from '../lib/format';
+  import { resetCardReminder, untilReset, windowLabel } from '../lib/format';
   let {
     bucket,
     now,
@@ -22,9 +22,9 @@
   const stale = $derived(
     now - new Date(bucket.captured_at).getTime() > maxAgeSeconds * 1000 || status !== 'connected',
   );
-  const expiration = $derived(
-    allowance?.next_expiration ? new Date(allowance.next_expiration) : null,
-  );
+  const expiresAt = $derived(Date.parse(allowance?.next_expiration ?? ''));
+  const expiration = $derived(Number.isFinite(expiresAt) ? new Date(expiresAt) : null);
+  const reminder = $derived(resetCardReminder(allowance, now, $locale));
   const expirationText = $derived(
     expiration
       ? new Intl.DateTimeFormat($locale === 'zh' ? 'zh-CN' : 'en-US', {
@@ -91,8 +91,11 @@
       >
     </div>
   </div>
-  <p class="cp-note allowance-expiration">
-    {#if expirationText && expiration}
+  <p class="cp-note allowance-expiration" class:allowance-expiring={reminder}>
+    {#if reminder && expirationText && expiration}
+      <strong>{reminder}</strong>
+      <time datetime={expiration.toISOString()}>{expirationText}</time>
+    {:else if expirationText && expiration}
       {expiration.getTime() > now ? $t('最近到期') : $t('已到期')}{$locale === 'zh'
         ? '：'
         : ': '}{expirationText}{#if allowance?.next_expiring_count}
@@ -141,5 +144,20 @@
   }
   .allowance-expiration {
     margin: 9px 0 0;
+  }
+  .allowance-expiring {
+    padding: 7px 9px;
+    border-inline-start: 3px solid var(--cp-amber);
+    border-radius: 6px;
+    background: color-mix(in srgb, var(--cp-amber) 14%, transparent);
+  }
+  .allowance-expiring strong {
+    display: block;
+    color: var(--cp-text);
+    font-weight: 600;
+  }
+  .allowance-expiring time {
+    display: block;
+    margin-top: 2px;
   }
 </style>

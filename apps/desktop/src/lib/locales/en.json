@@ -260,6 +260,11 @@
   "当前余额": "Current balance",
   "不限": "Unlimited",
   "最近到期": "Next expiration",
+  "{count} 张重置卡将在 {duration}后到期": {
+    "one": "{count} reset card expires in {duration}",
+    "other": "{count} reset cards expire in {duration}"
+  },
+  "{_0} 天 {_1} 小时": "{_0}d {_1}h",
   "已到期": "Expired",
   "，等待刷新": "; waiting for refresh",
   "暂无可用重置卡": "No reset cards available",

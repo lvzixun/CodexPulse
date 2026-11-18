@@ -48,13 +48,19 @@ impl PriceBook {
         let mut book: Self = serde_json::from_str(include_str!(
             "../../../../resources/pricing/openai-2026-10-06.json"
         ))?;
-        book.prices.extend(
-            catalog::openai(
-                include_str!("../../../../resources/pricing/openai-2026-11-03.md"),
+        for (date, snapshot) in [
+            (
                 "2026-11-03",
-            )
-            .expect("validated bundled OpenAI prices"),
-        );
+                include_str!("../../../../resources/pricing/openai-2026-11-03.md"),
+            ),
+            (
+                "2026-11-18",
+                include_str!("../../../../resources/pricing/openai-2026-11-18.md"),
+            ),
+        ] {
+            book.prices
+                .extend(catalog::openai(snapshot, date).expect("validated bundled OpenAI prices"));
+        }
         book.prices.extend(
             catalog::deepseek(
                 include_str!("../../../../resources/pricing/deepseek-2026-11-03.html"),
@@ -79,9 +85,15 @@ impl PriceBook {
     pub fn fingerprint(&self) -> String {
         use sha2::{Digest, Sha256};
         // Daily checks with unchanged rates must not restart the historical projection.
+        let mut dates = BTreeMap::new();
+        for p in &self.prices {
+            let date = dates.entry(p.provider.as_str()).or_insert("");
+            *date = (*date).max(p.checked_at.as_str());
+        }
         let mut prices = self
             .prices
             .iter()
+            .filter(|p| p.checked_at == dates[p.provider.as_str()])
             .map(|p| {
                 serde_json::json!([
                     p.provider,
@@ -89,6 +101,7 @@ impl PriceBook {
                     p.service_tier,
                     p.min_input,
                     p.max_input,
+                    p.effective_to,
                     p.input_microusd,
                     p.cached_microusd,
                     p.cached_supported,

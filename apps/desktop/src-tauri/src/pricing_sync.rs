@@ -33,6 +33,33 @@ pub struct Status {
     pub dates: BTreeMap<String, String>,
 }
 impl Cache {
+    pub(crate) fn for_startup(mut self) -> Self {
+        let bundled = Self::default();
+        for (provider, date) in bundled.status(false).dates {
+            let cached = || self.book.prices.iter().filter(|p| p.provider == provider);
+            let cached_date = cached().map(|p| p.checked_at.as_str()).max();
+            let prices = || {
+                bundled
+                    .book
+                    .prices
+                    .iter()
+                    .filter(|p| p.provider == provider && p.checked_at == date)
+            };
+            let missing_schedule = cached_date == Some(date.as_str())
+                && prices().any(|p| p.effective_to.is_some())
+                && !cached().any(|p| p.checked_at == date && p.effective_to.is_some());
+            if cached_date.is_none_or(|cached| cached < date.as_str()) || missing_schedule {
+                self.book
+                    .replace_provider(&provider, prices().cloned().collect());
+            }
+        }
+        // A new process checks each provider again, keeping any failure backoff in force.
+        for source in self.sources.values_mut().filter(|source| !source.error) {
+            source.next = 0;
+        }
+        self
+    }
+
     pub fn due(&self, now: i64) -> bool {
         ["openai", "deepseek"]
             .iter()
@@ -189,6 +216,31 @@ mod tests {
         assert_eq!(cache.book.fingerprint(), cached.book.fingerprint());
     }
     #[test]
+    fn reopening_an_old_cache_uses_newer_bundled_prices_and_preserves_other_settings() {
+        let mut cache = Cache::default();
+        let old_openai = include_str!("../../../../resources/pricing/openai-2026-11-03.md");
+        let deepseek = include_str!("../../../../resources/pricing/deepseek-2026-11-03.html");
+        cache
+            .book
+            .replace_provider("openai", catalog::openai(old_openai, "2026-11-17").unwrap());
+        cache.book.replace_provider(
+            "deepseek",
+            catalog::deepseek(deepseek, "2026-11-19").unwrap(),
+        );
+        cache.book.set_alias("mode-custom", "gpt-6.1-sol").unwrap();
+        cache.apply("openai", Err(172800), 100);
+
+        let restarted = cache.for_startup();
+        let status = restarted.status(false);
+        assert!(status.models.contains(&"gpt-6.2-astra".into()));
+        assert_eq!(status.dates["openai"], "2026-11-18");
+        assert_eq!(status.dates["deepseek"], "2026-11-19");
+        assert_eq!(status.aliases["mode-custom"], "gpt-6.1-sol");
+        assert_eq!(restarted.sources["openai"].next, 172900);
+        assert!(status.error);
+    }
+
+    #[test]
     fn failed_provider_keeps_good_prices_and_respects_retry_after() {
         let mut cache = Cache::default();
         let hash = cache.book.fingerprint();
@@ -208,15 +260,52 @@ mod tests {
         assert_eq!(cache.book.fingerprint(), hash);
     }
     #[test]
+    fn startup_rechecks_recent_success_without_shortening_retry_after() {
+        let mut cache = Cache::default();
+        cache.apply("openai", Err(172800), 100);
+        let deepseek = cache
+            .book
+            .prices
+            .iter()
+            .filter(|price| price.provider == "deepseek")
+            .cloned()
+            .collect();
+        cache.apply("deepseek", Ok(deepseek), 100);
+        assert!(!cache.due(101));
+
+        let stored: Cache = serde_json::from_str(&serde_json::to_string(&cache).unwrap()).unwrap();
+        let restarted = stored.for_startup();
+        assert!(restarted.due(101));
+        assert_eq!(restarted.sources["openai"].next, 172900);
+        assert_eq!(restarted.sources["deepseek"].next, 0);
+        assert_eq!(restarted.sources["deepseek"].checked, 100);
+        assert_eq!(cache.book.fingerprint(), restarted.book.fingerprint());
+    }
+
+    #[test]
     #[ignore = "explicit public official pricing-page network probe; no account credentials"]
     fn live_official_prices() {
+        let now = chrono::Utc::now().timestamp();
         let mut cache = Cache::default();
-        cache.refresh(&[], chrono::Utc::now().timestamp());
+        for provider in ["openai", "deepseek"] {
+            cache.sources.insert(
+                provider.into(),
+                SourceStatus {
+                    checked: now - 60,
+                    next: now + 86340,
+                    error: false,
+                },
+            );
+        }
+        let mut cache = cache.for_startup();
+        cache.refresh(&[], now);
         for provider in ["openai", "deepseek"] {
             assert!(
                 !cache.sources[provider].error,
                 "official {provider} refresh failed"
             );
+            assert_eq!(cache.sources[provider].checked, now);
+            assert_eq!(cache.sources[provider].next, now + 86400);
             println!(
                 "Verified live official {provider} catalog: {} rows",
                 cache

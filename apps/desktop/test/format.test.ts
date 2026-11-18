@@ -5,9 +5,32 @@ import {
   sessionTokens,
   sessionRunState,
   compactSettings,
+  resetCardReminder,
 } from '../src/lib/format.ts';
-import type { RecentSession, SourceHealth } from '../src/lib/types.ts';
+import type { AccountAllowance, RecentSession, SourceHealth } from '../src/lib/types.ts';
 const now = Date.parse('2026-10-06T09:00:00Z');
+test('reset card reminder only appears within 72 hours for unused cards', () => {
+  const allowance: AccountAllowance = {
+    balance: null,
+    unlimited: false,
+    reset_cards: 2,
+    applicable_reset_cards: 0,
+    next_expiration: '2026-10-09T09:00:00Z',
+    next_expiring_count: 2,
+    expiration_status: 'connected',
+  };
+  const expiresAt = Date.parse(allowance.next_expiration!);
+  assert.equal(resetCardReminder(allowance, now - 1, 'en'), null);
+  assert.equal(resetCardReminder(allowance, now, 'zh'), '2 张重置卡将在 3 天后到期');
+  assert.equal(
+    resetCardReminder({ ...allowance, next_expiring_count: 1 }, expiresAt - 60_000, 'en'),
+    '1 reset card expires in 1 minute',
+  );
+  assert.equal(resetCardReminder(allowance, expiresAt, 'en'), null);
+  assert.equal(resetCardReminder({ ...allowance, reset_cards: 0 }, now, 'en'), null);
+  assert.equal(resetCardReminder({ ...allowance, next_expiring_count: null }, now, 'en'), null);
+  assert.equal(resetCardReminder({ ...allowance, next_expiration: 'invalid' }, now, 'en'), null);
+});
 const source: SourceHealth = {
   id: 'windows',
   label: 'Windows',

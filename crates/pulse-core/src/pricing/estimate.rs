@@ -93,14 +93,28 @@ impl PriceBook {
             .map(|p| p.checked_at.as_str())
             .max()
             .unwrap_or_default();
-        let eligible = self
-            .prices
-            .iter()
-            .filter(|p| {
+        let catalog_rows = || {
+            self.prices.iter().filter(|p| {
                 p.provider == provider
                     && matches(&p.model)
                     && p.checked_at == date
                     && (provider == "deepseek" || p.service_tier == tier)
+            })
+        };
+        // The official Ultrafast catalog can contain both promotional and list rates.
+        let promotion = if tier == "ultrafast" {
+            catalog_rows().find_map(|p| p.effective_to.as_deref())
+        } else {
+            None
+        };
+        let applies = promotion.and_then(|end| {
+            let end = chrono::DateTime::parse_from_rfc3339(end).ok()?;
+            let at = chrono::DateTime::parse_from_rfc3339(&fact.timestamp).ok()?;
+            Some(at < end)
+        });
+        let eligible = catalog_rows()
+            .filter(|p| {
+                (promotion.is_none() || applies == Some(p.effective_to.is_some()))
                     && fact.request_input.is_none_or(|n| {
                         p.min_input.is_none_or(|min| n >= min)
                             && p.max_input.is_none_or(|max| n <= max)
